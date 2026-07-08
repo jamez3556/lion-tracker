@@ -1,0 +1,1616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LION Clearance Tracker</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#ffffff; --ink:#0f172a; --muted:#64748b;
+    --line:#e2e8f0; --brand:#2563eb; --brand-dark:#1d4ed8;
+    --ok:#16a34a; --okbg:#dcfce7; --warn:#d97706; --warnbg:#fef3c7;
+    --danger:#dc2626; --dangerbg:#fee2e2; --info:#0891b2; --infobg:#cffafe;
+    --shadow:0 1px 3px rgba(15,23,42,.08),0 8px 24px rgba(15,23,42,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+    background:#f1f5f9;color:var(--ink);-webkit-font-smoothing:antialiased}
+  header.app{background:linear-gradient(135deg,#1e293b,#0f172a);color:#fff;padding:14px 24px 0;
+    box-shadow:var(--shadow);position:sticky;top:0;z-index:20}
+  .headrow{display:flex;align-items:center;gap:16px;padding-bottom:12px}
+  header.app .logo{width:42px;height:42px;border-radius:10px;background:linear-gradient(135deg,#f59e0b,#d97706);
+    display:grid;place-items:center;font-size:22px;flex:0 0 auto}
+  header.app h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.2px}
+  header.app p{margin:2px 0 0;font-size:12.5px;color:#94a3b8}
+  nav.tabs{display:flex;gap:4px;overflow-x:auto}
+  nav.tabs button{background:transparent;color:#94a3b8;border:none;border-radius:10px 10px 0 0;
+    padding:11px 18px;font-size:14px;font-weight:600;white-space:nowrap}
+  nav.tabs button:hover{color:#e2e8f0;background:rgba(255,255,255,.06)}
+  nav.tabs button.active{background:#f1f5f9;color:var(--ink)}
+  nav.tabs button .cnt{font-size:11px;background:rgba(148,163,184,.25);padding:1px 8px;border-radius:999px;margin-left:6px}
+  nav.tabs button.active .cnt{background:#e2e8f0;color:var(--muted)}
+  .wrap{max-width:1600px;margin:0 auto;padding:22px}
+  section.view{display:none}
+  section.view.active{display:block}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px 18px;box-shadow:var(--shadow)}
+  .card .n{font-size:26px;font-weight:800;line-height:1}
+  .card .l{font-size:12px;color:var(--muted);margin-top:6px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  .c-blue .n{color:var(--brand)}.c-warn .n{color:var(--warn)}.c-info .n{color:var(--info)}
+  .c-ok .n{color:var(--ok)}.c-danger .n{color:var(--danger)}.c-purple .n{color:#7c3aed}
+
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px}
+  .search{flex:1;min-width:220px;position:relative}
+  .search input{width:100%;padding:11px 14px 11px 40px;border:1px solid var(--line);border-radius:10px;
+    font-size:14px;background:#fff;outline:none}
+  .search input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .search svg{position:absolute;left:13px;top:11px;color:var(--muted)}
+  select.filter{padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13.5px;outline:none;max-width:170px}
+  button{font-family:inherit;cursor:pointer;border:none;border-radius:10px;font-size:14px;font-weight:600;
+    padding:11px 16px;display:inline-flex;align-items:center;gap:7px;transition:.15s}
+  button.primary{background:var(--brand);color:#fff}
+  button.primary:hover{background:var(--brand-dark)}
+  button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+  button.ghost:hover{background:#f8fafc;border-color:#cbd5e1}
+
+  .tablewrap{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)}
+  .scroll{overflow:auto;max-height:70vh}
+  .scroll thead th{position:sticky;top:0;z-index:3}
+  .scroll::-webkit-scrollbar,#floatbar::-webkit-scrollbar{height:13px;width:13px}
+  .scroll::-webkit-scrollbar-track,#floatbar::-webkit-scrollbar-track{background:#f1f5f9}
+  .scroll::-webkit-scrollbar-thumb,#floatbar::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:8px;border:2px solid #f1f5f9}
+  .scroll::-webkit-scrollbar-thumb:hover,#floatbar::-webkit-scrollbar-thumb:hover{background:#64748b}
+  .scroll.grabbing{cursor:grabbing}
+  .scroll.grabbing *{user-select:none!important}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  thead th{background:#f8fafc;text-align:left;padding:12px 12px;font-size:11.5px;text-transform:uppercase;
+    letter-spacing:.5px;color:var(--muted);font-weight:700;border-bottom:2px solid var(--line);white-space:nowrap;cursor:pointer;user-select:none}
+  thead th.nosort{cursor:default}
+  thead th .arrow{opacity:.4;font-size:9px}
+  thead th.sorted .arrow{opacity:1;color:var(--brand)}
+  tbody td{padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody tr:hover{background:#f8fafc}
+  .cno{font-weight:700}
+  .name{font-weight:600;max-width:230px;overflow:hidden;text-overflow:ellipsis}
+  .sub{font-size:11px;color:var(--muted)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  th.num{text-align:right}
+  .typechip{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:#ede9fe;color:#6d28d9}
+  .daysbadge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;display:inline-block}
+  .d-ok{background:var(--okbg);color:var(--ok)}
+  .d-warn{background:var(--warnbg);color:var(--warn)}
+  .d-danger{background:var(--dangerbg);color:var(--danger)}
+  .d-none{color:#cbd5e1}
+  tr.row-warn{background:#fffbeb}
+  tr.row-danger{background:#fef2f2}
+  tr.flashnew{animation:flashbg 2.6s ease}
+  @keyframes flashbg{0%,60%{background:#dbeafe}100%{background:transparent}}
+  /* Form Log rows tinted by shipment type */
+  tbody tr.t-MP{background:#dcfce7}
+  tbody tr.t-MP:hover{background:#cdf6db}
+  tbody tr.t-SG{background:#e0f2fe}
+  tbody tr.t-SG:hover{background:#d3ebfc}
+  tbody tr.t-HA{background:#fef9c3}
+  tbody tr.t-HA:hover{background:#fdf3ab}
+  .status-pill{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;border:none;cursor:pointer;white-space:nowrap}
+  .st-Pending{background:var(--warnbg);color:var(--warn)}
+  .st-Cleared{background:var(--okbg);color:var(--ok)}
+  .st-Delivered{background:var(--infobg);color:var(--info)}
+  .st-PendingDO{background:var(--warnbg);color:var(--warn)}
+  .st-DONotApproved{background:var(--dangerbg);color:var(--danger)}
+  .st-DOApproved{background:var(--infobg);color:var(--info)}
+  .rowact{display:flex;gap:6px}
+  .iconbtn{background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12.5px;color:var(--muted)}
+  .iconbtn:hover{background:#f1f5f9;color:var(--ink)}
+  .iconbtn.del:hover{color:var(--danger);border-color:var(--danger)}
+  .empty{padding:60px 20px;text-align:center;color:var(--muted)}
+  .empty .big{font-size:44px;margin-bottom:8px}
+  .pager{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:12px 16px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .pager .info{font-size:13px;color:var(--muted)}
+  .pager .btns{display:flex;gap:6px}
+  .pager button{padding:7px 13px;font-size:13px}
+
+  .pw{font-family:Consolas,monospace;font-size:12.5px;cursor:pointer;user-select:none}
+  .pw .mask{letter-spacing:2px;color:var(--muted)}
+  .copybtn{background:none;border:none;padding:2px 5px;font-size:12px;opacity:.55;cursor:pointer}
+  .copybtn:hover{opacity:1}
+  .secnote{font-size:12px;color:var(--muted);background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 14px;margin-bottom:14px}
+  .alertbar{display:none;background:linear-gradient(90deg,#dc2626,#b91c1c);color:#fff;padding:11px 24px;font-size:13.5px;font-weight:600;cursor:pointer;align-items:center;gap:10px;flex-wrap:wrap}
+  .alertbar.show{display:flex}
+  .alertbar:hover{background:linear-gradient(90deg,#b91c1c,#991b1b)}
+  .alertbar .bellbtn{background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.4);padding:5px 12px;font-size:12px;border-radius:8px}
+  .alertbar .bellbtn:hover{background:rgba(255,255,255,.3)}
+
+  .overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:flex-start;
+    justify-content:center;padding:40px 16px;z-index:50;overflow:auto}
+  .overlay.show{display:flex}
+  .modal{background:#fff;border-radius:16px;width:100%;max-width:560px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal h2{margin:0;padding:20px 24px;font-size:17px;border-bottom:1px solid var(--line)}
+  .modal form{padding:20px 24px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:6px}
+  .field input,.field select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:14px;outline:none;font-family:inherit}
+  .field input:focus,.field select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .field .hint{font-size:11px;color:var(--ok);margin-top:4px;font-weight:600;min-height:14px}
+  .modal .actions{display:flex;justify-content:flex-end;gap:10px;padding:16px 24px;border-top:1px solid var(--line)}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);
+    background:#0f172a;color:#fff;padding:13px 20px;border-radius:10px;font-size:14px;font-weight:600;
+    box-shadow:0 8px 24px rgba(0,0,0,.3);transition:.3s;z-index:99;opacity:0}
+  .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+
+  @media(max-width:720px){
+    .wrap{padding:12px}
+    .grid2,.grid3{grid-template-columns:1fr}
+    header.app{padding:10px 14px 0}
+    header.app p{display:none}
+    header.app h1{font-size:16px}
+    header.app .logo{width:34px;height:34px;font-size:17px}
+    #syncchip{padding:6px 10px!important;font-size:11.5px!important}
+    nav.tabs button{padding:10px 12px;font-size:13px}
+    .stats{grid-template-columns:1fr 1fr;gap:9px}
+    .card{padding:11px 13px}
+    .card .n{font-size:20px}
+    .card .l{font-size:10.5px}
+    .toolbar{gap:8px}
+    .search{min-width:100%}
+    select.filter{flex:1;max-width:none;min-width:calc(50% - 8px)}
+    .toolbar button{flex:1;justify-content:center;padding:12px 6px;font-size:13px;white-space:nowrap}
+    .search input,.field input,.field select{font-size:16px} /* 16px stops phones auto-zooming into inputs */
+    .overlay{padding:12px 8px}
+    .modal h2{padding:16px 18px}
+    .modal form{padding:16px 18px}
+    .pager{justify-content:center}
+    .pager .btns{flex-wrap:wrap;justify-content:center}
+    .secnote{font-size:11.5px}
+    /* tables become stacked cards on phones */
+    .m-cards .scroll{overflow-x:visible;max-height:none}
+    .m-cards table{min-width:0!important;width:100%}
+    .m-cards thead{display:none}
+    .m-cards table,.m-cards tbody,.m-cards tr,.m-cards td{display:block}
+    .m-cards tbody{padding:10px}
+    .m-cards tr{border:1px solid var(--line);border-radius:12px;margin:0 0 10px;box-shadow:var(--shadow);background:#fff;overflow:hidden}
+    .m-cards tr:hover{background:#fff}
+    .m-cards tr.row-danger{border-color:#fca5a5;background:#fff}
+    .m-cards tr.row-warn{border-color:#fcd34d;background:#fff}
+    .m-cards td{display:flex;justify-content:space-between;align-items:center;gap:12px;border:none;padding:6px 14px;white-space:normal;text-align:right}
+    .m-cards td:first-child{padding-top:12px}
+    .m-cards td[data-l]::before{content:attr(data-l);font-size:10.5px;font-weight:700;letter-spacing:.4px;color:var(--muted);text-transform:uppercase;flex:0 0 auto;text-align:left}
+    .m-cards td .sub{display:inline;margin-left:6px}
+    .m-cards .name{max-width:none;white-space:normal}
+    .m-cards td.actcol{justify-content:flex-end;background:#f8fafc;border-top:1px solid var(--line);padding:9px 14px;margin-top:6px}
+    .m-cards .iconbtn{padding:9px 16px;font-size:15px}
+    .m-cards .rowact{gap:10px}
+  }
+  @media print{
+    header.app,.toolbar,.stats,.rowact,.iconbtn,thead th.actcol,td.actcol,.pager,.secnote{display:none!important}
+    body{background:#fff}.tablewrap{box-shadow:none;border:none}
+    table{min-width:0!important;font-size:10px}.status-pill{border:1px solid #999}
+    .printtitle{display:block!important}
+  }
+  .printtitle{display:none;text-align:center;margin-bottom:10px}
+  .printtitle h2{margin:0}.printtitle p{margin:4px 0 0;font-size:12px;color:#555}
+</style>
+</head>
+<body>
+<header class="app">
+  <div class="headrow">
+    <div class="logo">🦁</div>
+    <div style="flex:1">
+      <h1>LION Clearance Tracker</h1>
+      <p>Shipment &amp; Customs Clearance System</p>
+    </div>
+    <button class="ghost" id="syncchip" style="padding:8px 14px;font-size:12.5px" onclick="showModal('overlay-cloud')">☁ …</button>
+  </div>
+  <nav class="tabs" id="nav">
+    <button data-view="entries" class="active">📋 Form Log <span class="cnt" id="cnt-entries"></span></button>
+    <button data-view="containers">🚢 Container Status <span class="cnt" id="cnt-containers"></span></button>
+    <button data-view="customers">👥 Customers <span class="cnt" id="cnt-customers"></span></button>
+    <button data-view="creds">🔐 MPL &amp; Custom Logins <span class="cnt" id="cnt-creds"></span></button>
+  </nav>
+</header>
+<div class="alertbar" id="alertbar" onclick="goToDOList()"></div>
+
+<div class="wrap">
+<div class="printtitle"><h2 id="printhead">LION Clearance Tracker</h2><p id="printdate"></p></div>
+
+<!-- ==================== FORM LOG VIEW ==================== -->
+<section class="view active" id="view-entries">
+  <div class="stats" id="e_stats"></div>
+  <div class="toolbar">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="e_search" type="text" placeholder="Search customer, C-No, AWB/BL, Bill No, R-No…">
+    </div>
+    <select class="filter" id="e_statusFilter">
+      <option value="">All statuses</option><option>Pending</option><option>Cleared</option><option>Delivered</option>
+    </select>
+    <select class="filter" id="e_typeFilter"><option value="">All types</option></select>
+    <select class="filter" id="e_monthFilter"><option value="">All months</option></select>
+    <button class="primary" onclick="openEntryForm()">＋ Add Entry</button>
+    <button class="ghost" onclick="window.open('https://portal.customs.gov.mv/','_blank')">🏛 customs.gov.mv</button>
+    <button class="ghost" onclick="exportEntries()">⬇ Excel</button>
+    <button class="ghost" onclick="window.print()">🖨 Print</button>
+  </div>
+  <div class="tablewrap m-cards">
+    <div class="scroll">
+      <table style="min-width:1250px">
+        <thead><tr id="e_head">
+          <th data-k="no" class="num">NO <span class="arrow">▲▼</span></th>
+          <th data-k="cno">C NO <span class="arrow">▲▼</span></th>
+          <th data-k="date">DATE <span class="arrow">▲▼</span></th>
+          <th data-k="customer">CUSTOMER NAME <span class="arrow">▲▼</span></th>
+          <th data-k="type">TYPE <span class="arrow">▲▼</span></th>
+          <th data-k="file">FILE <span class="arrow">▲▼</span></th>
+          <th data-k="rNo">R NO <span class="arrow">▲▼</span></th>
+          <th data-k="billNo">BILL NO <span class="arrow">▲▼</span></th>
+          <th data-k="grsWt" class="num">GRS WT <span class="arrow">▲▼</span></th>
+          <th data-k="pkgs" class="num">PKGS <span class="arrow">▲▼</span></th>
+          <th data-k="awbBl">AWB / BL NO <span class="arrow">▲▼</span></th>
+          <th data-k="status">STATUS <span class="arrow">▲▼</span></th>
+          <th class="nosort actcol"></th>
+        </tr></thead>
+        <tbody id="e_tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="e_empty" style="display:none"><div class="big">📭</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No entries found</div></div>
+    <div class="pager" id="e_pager"></div>
+  </div>
+</section>
+
+<!-- ==================== CONTAINERS VIEW ==================== -->
+<section class="view" id="view-containers">
+  <div class="stats" id="c_stats"></div>
+  <div class="toolbar">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="c_search" type="text" placeholder="Search container, C-No, name, BL…">
+    </div>
+    <select class="filter" id="c_statusFilter">
+      <option value="">All statuses</option><option>Pending DO</option><option>DO Not Approved</option><option>DO Approved</option><option>Cleared</option>
+    </select>
+    <select class="filter" id="c_dueFilter">
+      <option value="">All deadlines</option><option value="doextend">⚠ Needs DO extension</option><option value="notedtoday">📌 Noted for today</option><option value="notedtomorrow">📌 Noted for tomorrow</option><option value="overdue">Overdue</option><option value="soon">Due ≤ 3 days</option><option value="week">Due ≤ 7 days</option>
+    </select>
+    <button class="primary" onclick="openContForm()">＋ Add Container</button>
+    <button class="ghost" onclick="window.open('https://my.port.mv/login','_blank')">🌐 my.port.mv</button>
+    <button class="ghost" onclick="exportConts()">⬇ Excel</button>
+    <button class="ghost" onclick="window.print()">🖨 Print</button>
+  </div>
+  <div class="tablewrap m-cards">
+    <div class="scroll">
+      <table style="min-width:1250px">
+        <thead><tr id="c_head">
+          <th data-k="no" class="num">NO <span class="arrow">▲▼</span></th>
+          <th data-k="cno">C NO <span class="arrow">▲▼</span></th>
+          <th data-k="name">NAME <span class="arrow">▲▼</span></th>
+          <th data-k="rNo">R NO <span class="arrow">▲▼</span></th>
+          <th data-k="blNo">BL NO <span class="arrow">▲▼</span></th>
+          <th data-k="containerNo">CONTAINER NO <span class="arrow">▲▼</span></th>
+          <th data-k="ctnsLeft" class="num">CTNS LEFT <span class="arrow">▲▼</span></th>
+          <th data-k="doDate">DO APPROVAL <span class="arrow">▲▼</span></th>
+          <th data-k="discharge">DISCHARGE <span class="arrow">▲▼</span></th>
+          <th data-k="lastDate">LAST DATE <span class="arrow">▲▼</span></th>
+          <th data-k="clearance">CLEARANCE <span class="arrow">▲▼</span></th>
+          <th data-k="status">STATUS <span class="arrow">▲▼</span></th>
+          <th data-k="remark">REMARK <span class="arrow">▲▼</span></th>
+          <th class="nosort actcol"></th>
+        </tr></thead>
+        <tbody id="c_tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="c_empty" style="display:none"><div class="big">🚢</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No containers being tracked</div><div style="margin-top:4px">Click <strong>＋ Add Container</strong> when a shipment arrives.</div></div>
+    <div class="pager" id="c_pager"></div>
+  </div>
+</section>
+
+<!-- ==================== CUSTOMERS VIEW ==================== -->
+<section class="view" id="view-customers">
+  <div class="stats" id="u_stats"></div>
+  <div class="toolbar">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="u_search" type="text" placeholder="Search C number or name…">
+    </div>
+    <button class="primary" onclick="openCustForm()">＋ Add Customer</button>
+    <button class="ghost" onclick="exportCusts()">⬇ Excel</button>
+    <button class="ghost" onclick="window.print()">🖨 Print</button>
+  </div>
+  <div class="tablewrap m-cards">
+    <div class="scroll">
+      <table style="min-width:560px">
+        <thead><tr id="u_head">
+          <th data-k="cno">C NUMBER <span class="arrow">▲▼</span></th>
+          <th data-k="name">CUSTOMER NAME <span class="arrow">▲▼</span></th>
+          <th class="nosort">JOBS IN LOG</th>
+          <th class="nosort actcol"></th>
+        </tr></thead>
+        <tbody id="u_tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="u_empty" style="display:none"><div class="big">👥</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No customers found</div></div>
+    <div class="pager" id="u_pager"></div>
+  </div>
+</section>
+
+<!-- ==================== CREDENTIALS VIEW ==================== -->
+<section class="view" id="view-creds">
+  <div class="stats" id="p_stats"></div>
+  <div class="secnote">🔒 These logins are saved <strong>only on this device</strong> (browser storage) — nothing is uploaded anywhere. Click a masked password to reveal it; 📋 copies it.</div>
+  <div class="toolbar">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="p_search" type="text" placeholder="Search C-No, name, username, email…">
+    </div>
+    <button class="primary" onclick="openCredForm()">＋ Add Login</button>
+    <button class="ghost" onclick="exportCreds()">⬇ Excel</button>
+  </div>
+  <div class="tablewrap m-cards">
+    <div class="scroll">
+      <table style="min-width:1100px">
+        <thead><tr id="p_head">
+          <th data-k="cno">C NUMBER <span class="arrow">▲▼</span></th>
+          <th data-k="name">NAME <span class="arrow">▲▼</span></th>
+          <th data-k="mplUser">MPL USERNAME <span class="arrow">▲▼</span></th>
+          <th class="nosort">MPL PASSWORD</th>
+          <th class="nosort">CUSTOM PORTAL</th>
+          <th class="nosort">ASYCUDA</th>
+          <th data-k="email">REGISTERED EMAIL <span class="arrow">▲▼</span></th>
+          <th class="nosort actcol"></th>
+        </tr></thead>
+        <tbody id="p_tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="p_empty" style="display:none"><div class="big">🔐</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No logins found</div></div>
+    <div class="pager" id="p_pager"></div>
+  </div>
+</section>
+</div>
+
+<!-- ==================== MODALS ==================== -->
+<div class="overlay" id="overlay-entry">
+  <div class="modal">
+    <h2 id="e_modalTitle">Add Entry</h2>
+    <form onsubmit="return saveEntry(event)">
+      <input type="hidden" id="e_id">
+      <div class="grid3">
+        <div class="field"><label>NO (serial)</label><input id="e_no" type="number"></div>
+        <div class="field"><label>C NO</label><input id="e_cno" required autocomplete="off"></div>
+        <div class="field"><label>DATE</label><input id="e_date" type="date"></div>
+      </div>
+      <div class="field"><label>CUSTOMER NAME</label><input id="e_customer" required>
+        <div class="hint" id="e_custHint"></div></div>
+      <div class="grid3">
+        <div class="field"><label>TYPE</label>
+          <select id="e_type"><option>AP</option><option>MP</option><option>HA</option><option>SG</option><option>PO</option><option value="">—</option></select></div>
+        <div class="field"><label>FILE (staff code)</label>
+          <div style="display:flex;gap:6px">
+            <select id="e_file" style="flex:1"></select>
+            <button type="button" class="ghost" style="padding:8px 13px" onclick="addStaffCode()" title="Add a new staff code">＋</button>
+          </div>
+        </div>
+        <div class="field"><label>R NO</label><input id="e_rNo"></div>
+      </div>
+      <div class="hint" id="e_fileHint" style="margin:-8px 0 12px;color:var(--brand)"></div>
+      <div class="grid3">
+        <div class="field"><label>BILL NO</label><input id="e_billNo" placeholder="L26/…"></div>
+        <div class="field"><label>GRS WT (kg)</label><input id="e_grsWt" type="number" step="any" min="0"></div>
+        <div class="field"><label>PKGS</label><input id="e_pkgs" type="number" min="0"></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>AWB / BL NO</label><input id="e_awbBl"></div>
+        <div class="field"><label>TIME</label><input id="e_time" type="time" step="1"></div>
+        <div class="field"><label>STATUS</label>
+          <select id="e_status"><option>Pending</option><option>Cleared</option><option>Delivered</option></select></div>
+      </div>
+      <div class="field" id="e_contWrap" style="display:none">
+        <label>CONTAINER NUMBER(S) (MP shipment)</label><input id="e_containerNo" placeholder="e.g. TLLU5033169, SEKU5503423">
+        <div class="hint">More than one container? Separate with commas. Goes straight to Container Status — not shown in the Form Log table</div>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-entry')">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="overlay" id="overlay-cont">
+  <div class="modal">
+    <h2 id="c_modalTitle">Add Container</h2>
+    <form onsubmit="return saveCont(event)">
+      <input type="hidden" id="c_id">
+      <div class="grid3">
+        <div class="field"><label>NO</label><input id="c_no" type="number"></div>
+        <div class="field"><label>C NUMBER</label><input id="c_cno" autocomplete="off"></div>
+        <div class="field"><label>R NUMBER</label><input id="c_rNo"></div>
+      </div>
+      <div class="field"><label>NAME</label><input id="c_name">
+        <div class="hint" id="c_custHint"></div></div>
+      <div class="grid3">
+        <div class="field"><label>BL NO</label><input id="c_blNo"></div>
+        <div class="field"><label>CONTAINER NO(S) — commas for multiple</label><input id="c_containerNo" placeholder="TLLU5033169, SEKU5503423"></div>
+        <div class="field"><label>CONTAINERS LEFT</label><input id="c_ctnsLeft" type="number" min="0"></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>DISCHARGE DATE</label><input id="c_discharge" type="date"></div>
+        <div class="field"><label>LAST DATE (auto +10d)</label><input id="c_lastDate" type="date"></div>
+        <div class="field"><label>DO APPROVAL DATE</label><input id="c_doDate" type="date"></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>CLEARANCE DATE</label><input id="c_clearance" type="date"></div>
+        <div class="field"><label>STATUS</label>
+          <select id="c_status"><option>Pending DO</option><option>DO Not Approved</option><option>DO Approved</option><option>Cleared</option></select></div>
+        <div class="field"><label>REMARK</label><input id="c_remark"></div>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-cont')">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="overlay" id="overlay-cloud">
+  <div class="modal">
+    <h2>☁ Team Cloud Sync</h2>
+    <div id="cloud-setup" style="display:none;padding:20px 24px">
+      <p style="margin:0 0 12px;font-size:13.5px;color:var(--muted)">One-time setup (about 10 minutes, free). Do this once, then every teammate just signs in.</p>
+      <ol style="font-size:13px;color:var(--ink);line-height:1.9;padding-left:20px;margin:0 0 14px">
+        <li>Go to <strong>console.firebase.google.com</strong> → <strong>Create project</strong> (any name, e.g. LION)</li>
+        <li><strong>Build → Firestore Database → Create database</strong> → production mode → region <em>asia-south1</em></li>
+        <li>In Firestore <strong>Rules</strong> tab, replace with:<br>
+          <code style="font-size:11px;background:#f1f5f9;display:block;padding:8px;border-radius:8px;margin:6px 0;white-space:pre">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}</code> and click <strong>Publish</strong></li>
+        <li><strong>Build → Authentication → Get started → Email/Password → Enable</strong>, then <strong>Users → Add user</strong> for each of your 5 staff</li>
+        <li><strong>Project settings ⚙ → Your apps → Web (&lt;/&gt;)</strong> → register → copy the <code>firebaseConfig</code> block and paste it below</li>
+      </ol>
+      <div class="field"><label>PASTE firebaseConfig HERE</label>
+        <textarea id="cf_config" rows="6" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:12px;font-family:Consolas,monospace;outline:none" placeholder='const firebaseConfig = { apiKey: "...", authDomain: "...", projectId: "...", ... };'></textarea></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="ghost" onclick="cloudOffline()">Stay offline on this device</button>
+        <button class="primary" onclick="cloudSaveConfig()">Save &amp; Connect</button>
+      </div>
+    </div>
+    <div id="cloud-login" style="display:none;padding:20px 24px">
+      <p style="margin:0 0 14px;font-size:13.5px;color:var(--muted)">Sign in with the account your admin created for you.</p>
+      <div class="field"><label>EMAIL</label><input id="cf_email" type="email" autocomplete="username"></div>
+      <div class="field"><label>PASSWORD</label><input id="cf_pass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')cloudSignIn()"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="ghost" onclick="cloudOffline()">Use offline</button>
+        <button class="ghost" onclick="cloudReset()" title="Clear saved cloud settings on this device">Change project</button>
+        <button class="primary" onclick="cloudSignIn()">Sign in</button>
+      </div>
+    </div>
+    <div id="cloud-account" style="display:none;padding:20px 24px">
+      <p style="font-size:14px;margin:0 0 6px">Signed in as <strong id="cf_user"></strong></p>
+      <p style="font-size:12.5px;color:var(--muted);margin:0 0 16px">All changes sync live to your team. Works offline too — it catches up when internet returns.</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="ghost" onclick="cloudSignOut()">Sign out</button>
+        <button class="primary" onclick="closeModal('overlay-cloud')">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay-cust">
+  <div class="modal">
+    <h2 id="u_modalTitle">Add Customer</h2>
+    <form onsubmit="return saveCust(event)">
+      <input type="hidden" id="u_id">
+      <div class="field"><label>C NUMBER</label><input id="u_cno" required></div>
+      <div class="field"><label>CUSTOMER NAME</label><input id="u_name" required></div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-cust')">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="overlay" id="overlay-cred">
+  <div class="modal">
+    <h2 id="p_modalTitle">Add Login</h2>
+    <form onsubmit="return saveCred(event)">
+      <input type="hidden" id="p_id">
+      <div class="grid2">
+        <div class="field"><label>C NUMBER</label><input id="p_cno" autocomplete="off"></div>
+        <div class="field"><label>NAME</label><input id="p_name"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>MPL USERNAME</label><input id="p_mplUser" autocomplete="off"></div>
+        <div class="field"><label>MPL PASSWORD</label><input id="p_mplPass" autocomplete="off"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>CUSTOM PORTAL PASSWORD</label><input id="p_customPass" autocomplete="off"></div>
+        <div class="field"><label>ASYCUDA PASSWORD</label><input id="p_asycudaPass" autocomplete="off"></div>
+      </div>
+      <div class="field"><label>REGISTERED EMAIL</label><input id="p_email" type="text"></div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-cred')">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- floating horizontal scrollbar: always at the bottom of the window, drives the active table -->
+<div id="floatbar" style="position:fixed;left:0;right:0;bottom:0;height:16px;overflow-x:auto;overflow-y:hidden;display:none;z-index:45;background:#e2e8f0;border-top:1px solid #cbd5e1">
+  <div id="floatbar-inner" style="height:1px"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script id="seed">
+const SEED_DATA=[];
+const SEED_CUSTOMERS=[];
+const SEED_CREDS=[];
+const SEED_CONTAINERS=[];
+</script>
+<script>
+/* ============ shared helpers ============ */
+const PAGE_SIZE=100;
+function uid(){return 'id'+Math.random().toString(36).slice(2,10)+Date.now().toString(36)}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function daysLeft(d){
+  if(!d)return null;
+  const t=new Date();t.setHours(0,0,0,0);
+  return Math.round((new Date(d+'T00:00:00')-t)/86400000);
+}
+function fmtDate(s){
+  if(!s)return '—';
+  return new Date(s+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
+}
+function fmtNum(n){return (n===null||n===undefined||n==='')?'—':Number(n).toLocaleString('en-US')}
+function isoLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+// A container needs its DO extended when the liner's DO approval date doesn't reach the last free date
+function addDays(iso,n){const d=new Date(iso+'T00:00:00');d.setDate(d.getDate()+n);return isoLocal(d);}
+function ctnInfo(r,cn){const pi=r.portInfo||{};return pi[cn.toUpperCase()]||pi[cn]||{};}
+// Per-container deadlines: every discharged, still-in-port container has its own last date (discharge + 10).
+// next = the soonest deadline still pending (drives the countdown); latest = the furthest (the DO must cover it).
+function effLast(r){
+  const dates=contNoList(r).map(cn=>ctnInfo(r,cn)).filter(i=>i.discharge&&!i.out).map(i=>addDays(i.discharge,10));
+  const next=dates.length?dates.slice().sort()[0]:(r.lastDate||'');
+  const all=dates.concat(r.lastDate?[r.lastDate]:[]);
+  const latest=all.length?all.sort()[all.length-1]:'';
+  return {next,latest};
+}
+function needsDOExtend(r){
+  if(r.status==='Cleared')return false;
+  const latest=effLast(r).latest;
+  return !!latest&&(!r.doDate||r.doDate<latest);
+}
+let toastTimer;
+function toast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2200);
+}
+function closeModal(id){document.getElementById(id).classList.remove('show')}
+function showModal(id){document.getElementById(id).classList.add('show')}
+document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('show')}));
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.show').forEach(o=>o.classList.remove('show'))});
+function store(key,seed){
+  let v=null;try{v=JSON.parse(localStorage.getItem(key))}catch(e){}
+  if(!v){v=seed.slice();localStorage.setItem(key,JSON.stringify(v));}
+  return v;
+}
+function xlsExport(filename,head,rowArrays){
+  let html='<table><tr>'+head.map(h=>`<th>${h}</th>`).join('')+'</tr>';
+  rowArrays.forEach(r=>{html+='<tr>'+r.map(c=>`<td>${esc(c)}</td>`).join('')+'</tr>'});
+  html+='</table>';
+  const blob=new Blob(['﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>'+html+'</body></html>'],{type:'application/vnd.ms-excel'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download=filename+'-'+new Date().toISOString().slice(0,10)+'.xls';
+  a.click();URL.revokeObjectURL(a.href);
+  toast('Exported '+rowArrays.length+' rows');
+}
+async function copyText(s){
+  try{await navigator.clipboard.writeText(s);toast('Copied');}
+  catch(e){const ta=document.createElement('textarea');ta.value=s;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();toast('Copied');}
+}
+function makeSortable(headId,state,renderFn){
+  document.querySelectorAll('#'+headId+' th[data-k]').forEach(th=>{
+    th.addEventListener('click',()=>{
+      const k=th.dataset.k;
+      if(state.key===k)state.dir*=-1;else{state.key=k;state.dir=1;}
+      document.querySelectorAll('#'+headId+' th').forEach(t=>t.classList.remove('sorted'));
+      th.classList.add('sorted');state.page=1;renderFn();
+    });
+  });
+}
+function sortRows(rows,state,numericKeys){
+  rows.sort((a,b)=>{
+    let x=a[state.key],y=b[state.key];
+    if((numericKeys||[]).includes(state.key)){x=x===null||x===''||x===undefined?-Infinity:Number(x);y=y===null||y===''||y===undefined?-Infinity:Number(y);}
+    else{x=(x??'').toString().toLowerCase();y=(y??'').toString().toLowerCase();}
+    return x<y?-state.dir:x>y?state.dir:0;
+  });
+  return rows;
+}
+function pagerHTML(el,state,total,renderName){
+  const pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
+  if(state.page>pages)state.page=pages;
+  const from=total===0?0:(state.page-1)*PAGE_SIZE+1;
+  const to=Math.min(total,state.page*PAGE_SIZE);
+  el.innerHTML=`<div class="info">Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}</div>
+    <div class="btns">
+      <button class="ghost" ${state.page<=1?'disabled':''} onclick="${renderName}Page(1)">« First</button>
+      <button class="ghost" ${state.page<=1?'disabled':''} onclick="${renderName}Page(${state.page-1})">‹ Prev</button>
+      <button class="ghost" disabled>Page ${state.page} / ${pages}</button>
+      <button class="ghost" ${state.page>=pages?'disabled':''} onclick="${renderName}Page(${state.page+1})">Next ›</button>
+      <button class="ghost" ${state.page>=pages?'disabled':''} onclick="${renderName}Page(${pages})">Last »</button>
+    </div>`;
+}
+
+/* ============ data ============ */
+let entries=store('lion_clearance_v2',SEED_DATA);
+let customers=store('lion_customers_v1',SEED_CUSTOMERS);
+let creds=store('lion_creds_v1',SEED_CREDS);
+let containers=store('lion_containers_v1',SEED_CONTAINERS);
+let team=store('lion_team_v1',[]);
+const saveEntries=()=>{localStorage.setItem('lion_clearance_v2',JSON.stringify(entries));window.__cloudPush&&window.__cloudPush('entries');};
+const saveCustomers=()=>{localStorage.setItem('lion_customers_v1',JSON.stringify(customers));window.__cloudPush&&window.__cloudPush('customers');};
+const saveCreds=()=>{localStorage.setItem('lion_creds_v1',JSON.stringify(creds));window.__cloudPush&&window.__cloudPush('creds');};
+const saveContainers=()=>{localStorage.setItem('lion_containers_v1',JSON.stringify(containers));window.__cloudPush&&window.__cloudPush('containers');};
+const saveTeam=()=>{localStorage.setItem('lion_team_v1',JSON.stringify(team));window.__cloudPush&&window.__cloudPush('team');};
+
+function lookupCustomer(cno){
+  cno=(cno||'').trim().toUpperCase();
+  if(!cno)return null;
+  return customers.find(c=>c.cno.toUpperCase()===cno)||null;
+}
+function ensureCustomer(cno,name){
+  cno=(cno||'').trim();name=(name||'').trim();
+  if(!cno||!name)return;
+  if(!lookupCustomer(cno)){
+    customers.push({id:uid(),cno,name});
+    saveCustomers();renderCusts();updateCounts();
+    toast('New customer '+cno+' added to list');
+  }
+}
+function wireAutofill(cnoInput,nameInput,hintEl){
+  const el=document.getElementById(cnoInput),nm=document.getElementById(nameInput),h=document.getElementById(hintEl);
+  el.addEventListener('input',()=>{
+    const c=lookupCustomer(el.value);
+    if(c){nm.value=c.name;h.textContent='✓ Found in customer list';}
+    else{h.textContent=el.value.trim()?'New C number — name will be saved to the list':'';}
+  });
+}
+
+/* ============ nav ============ */
+const VIEWTITLES={entries:'Form Log',containers:'Container Status',customers:'Customer List',creds:'MPL & Custom Logins'};
+document.querySelectorAll('#nav button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('#nav button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.querySelectorAll('section.view').forEach(s=>s.classList.remove('active'));
+    document.getElementById('view-'+b.dataset.view).classList.add('active');
+    document.getElementById('printhead').textContent='LION Clearance Tracker — '+VIEWTITLES[b.dataset.view];
+    if(typeof fitTables==='function')fitTables();
+  });
+});
+function updateCounts(){
+  document.getElementById('cnt-entries').textContent=entries.length.toLocaleString();
+  document.getElementById('cnt-containers').textContent=containers.length.toLocaleString();
+  document.getElementById('cnt-customers').textContent=customers.length.toLocaleString();
+  document.getElementById('cnt-creds').textContent=creds.length.toLocaleString();
+}
+
+/* ============ FORM LOG ============ */
+const eState={key:'no',dir:-1,page:1};
+function entriesPage(p){eState.page=p;renderEntries();}
+function buildEntryFilters(){
+  const types=[...new Set(entries.map(r=>r.type).filter(Boolean))].sort();
+  document.getElementById('e_typeFilter').innerHTML='<option value="">All types</option>'+types.map(t=>`<option>${esc(t)}</option>`).join('');
+  const months=[...new Set(entries.map(r=>(r.date||'').slice(0,7)).filter(Boolean))].sort().reverse();
+  document.getElementById('e_monthFilter').innerHTML='<option value="">All months</option>'+months.map(m=>{
+    return `<option value="${m}">${new Date(m+'-01T00:00:00').toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</option>`;}).join('');
+}
+function filteredEntries(){
+  const q=document.getElementById('e_search').value.trim().toLowerCase();
+  const sf=document.getElementById('e_statusFilter').value;
+  const tf=document.getElementById('e_typeFilter').value;
+  const mf=document.getElementById('e_monthFilter').value;
+  let rows=entries.filter(r=>{
+    if(q&&![r.cno,r.customer,r.awbBl,r.billNo,r.rNo,r.file].join(' ').toLowerCase().includes(q))return false;
+    if(sf&&r.status!==sf)return false;
+    if(tf&&r.type!==tf)return false;
+    if(mf&&(r.date||'').slice(0,7)!==mf)return false;
+    return true;
+  });
+  return sortRows(rows,eState,['no','grsWt','pkgs']);
+}
+function renderEntries(){
+  const total=entries.length;
+  const pending=entries.filter(r=>r.status==='Pending').length;
+  const cleared=entries.filter(r=>r.status==='Cleared').length;
+  const delivered=entries.filter(r=>r.status==='Delivered').length;
+  const wt=entries.reduce((s,r)=>s+(Number(r.grsWt)||0),0);
+  document.getElementById('e_stats').innerHTML=`
+    <div class="card c-blue"><div class="n">${total.toLocaleString()}</div><div class="l">Total Entries</div></div>
+    <div class="card c-warn"><div class="n">${pending.toLocaleString()}</div><div class="l">Pending</div></div>
+    <div class="card c-info"><div class="n">${cleared.toLocaleString()}</div><div class="l">Cleared</div></div>
+    <div class="card c-ok"><div class="n">${delivered.toLocaleString()}</div><div class="l">Delivered</div></div>
+    <div class="card c-purple"><div class="n" style="font-size:21px;padding-top:4px">${Math.round(wt).toLocaleString()} kg</div><div class="l">Total Grs Wt</div></div>`;
+  const rows=filteredEntries();
+  const slice=rows.slice((eState.page-1)*PAGE_SIZE,eState.page*PAGE_SIZE);
+  document.getElementById('e_empty').style.display=rows.length===0?'block':'none';
+  document.getElementById('e_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}">
+    <td class="num" data-l="No">${r.no??'—'}</td>
+    <td class="cno" data-l="C No">${esc(r.cno)}</td>
+    <td data-l="Date">${fmtDate(r.date)}${r.time?`<div class="sub">${esc(r.time)}</div>`:''}</td>
+    <td class="name" data-l="Customer" title="${esc(r.customer)}">${esc(r.customer)}</td>
+    <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
+    <td data-l="File">${esc(r.file)||'—'}</td>
+    <td data-l="R No">${esc(r.rNo)||'—'}</td>
+    <td data-l="Bill No">${esc(r.billNo)||'—'}</td>
+    <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
+    <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
+    <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
+    <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
+    <td class="actcol"><div class="rowact">
+      <button class="iconbtn" onclick="openEntryForm('${r.id}')" title="Edit">✏️</button>
+      <button class="iconbtn del" onclick="delEntry('${r.id}')" title="Delete">🗑️</button>
+    </div></td></tr>`).join('');
+  pagerHTML(document.getElementById('e_pager'),eState,rows.length,'entries');
+}
+function cycleEntryStatus(id){
+  const r=entries.find(x=>x.id===id);if(!r)return;
+  if(r.status==='Pending'&&!r.billNo){
+    toast('⚠ No BILL NO (invoice) — cannot mark as Cleared. Edit the entry and add it first.');
+    return;
+  }
+  const o=['Pending','Cleared','Delivered'];
+  r.status=o[(o.indexOf(r.status)+1)%3];saveEntries();renderEntries();
+}
+function toggleContBox(){
+  document.getElementById('e_contWrap').style.display=e_type.value==='MP'?'':'none';
+}
+/* ---- staff codes (FILE column): each staff member logs forms under their own code ---- */
+function staffCodes(){
+  const s=new Set(team.map(t=>t.name)); // stored codes (cloud-synced)
+  entries.forEach(e=>{if(e.file)s.add(e.file)}); // plus every code already used in the log
+  return [...s].sort();
+}
+function buildFileSelect(current){
+  const sel=document.getElementById('e_file');
+  sel.innerHTML='<option value="">—</option>'+staffCodes().map(c=>`<option${current===c?' selected':''}>${esc(c)}</option>`).join('');
+  if(current)sel.value=current;
+}
+function addStaffCode(){
+  const code=(prompt('New staff code (e.g. LION-XY):')||'').trim().toUpperCase();
+  if(!code)return;
+  if(staffCodes().some(c=>c.toUpperCase()===code)){toast(code+' already exists');buildFileSelect(code);updateFileHint();return;}
+  team.push({id:uid(),name:code});saveTeam();
+  buildFileSelect(code);updateFileHint();
+  toast('Staff code '+code+' added — synced to the team');
+}
+function updateFileHint(){
+  const code=document.getElementById('e_file').value;
+  const h=document.getElementById('e_fileHint');
+  if(!code){h.textContent='';return;}
+  const today=isoLocal(new Date());
+  const ym=today.slice(0,7), y=today.slice(0,4);
+  const mine=entries.filter(e=>e.file===code&&e.id!==e_id.value);
+  const mCount=mine.filter(e=>(e.date||'').slice(0,7)===ym).length;
+  const yCount=mine.filter(e=>(e.date||'').slice(0,4)===y).length;
+  const nextNo=mine.reduce((m,e)=>Math.max(m,Number(e.no)||0),0)+1;
+  if(!e_id.value)e_no.value=nextNo; // suggest this staff's next serial when adding
+  h.textContent=`${code} — ${mCount} form${mCount===1?'':'s'} this month · ${yCount} this year · next serial: ${nextNo}`;
+}
+document.getElementById('e_file').addEventListener('change',updateFileHint);
+function openEntryForm(id){
+  const t=document.getElementById('e_modalTitle');
+  const f=document.querySelector('#overlay-entry form');
+  document.getElementById('e_custHint').textContent='';
+  if(id){
+    const r=entries.find(x=>x.id===id);t.textContent='Edit Entry';
+    e_id.value=r.id;e_no.value=r.no??'';e_cno.value=r.cno;e_date.value=r.date||'';
+    e_customer.value=r.customer;e_type.value=r.type||'';buildFileSelect(r.file||'');
+    e_rNo.value=r.rNo||'';e_billNo.value=r.billNo||'';e_grsWt.value=r.grsWt??'';
+    e_pkgs.value=r.pkgs??'';e_awbBl.value=r.awbBl||'';e_time.value=r.time||'';e_status.value=r.status;
+    e_containerNo.value=r.containerNo||'';
+    toggleContBox();
+  }else{
+    t.textContent='Add Entry';f.reset();e_id.value='';
+    e_no.value=entries.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
+    e_date.value=isoLocal(new Date());
+    e_time.value=new Date().toTimeString().slice(0,8);
+    e_type.value='AP';buildFileSelect(localStorage.getItem('lion_last_file')||'LION-AB');e_status.value='Pending';
+    e_containerNo.value='';
+    toggleContBox();
+  }
+  updateFileHint();
+  showModal('overlay-entry');setTimeout(()=>e_cno.focus(),50);
+}
+document.getElementById('e_type').addEventListener('change',toggleContBox);
+function saveEntry(e){
+  e.preventDefault();
+  const rec={id:e_id.value||uid(),no:e_no.value===''?null:Number(e_no.value),
+    cno:e_cno.value.trim(),date:e_date.value,customer:e_customer.value.trim(),
+    type:e_type.value,file:e_file.value.trim(),rNo:e_rNo.value.trim(),
+    billNo:e_billNo.value.trim(),grsWt:e_grsWt.value===''?null:Number(e_grsWt.value),
+    pkgs:e_pkgs.value===''?null:Number(e_pkgs.value),awbBl:e_awbBl.value.trim(),
+    time:e_time.value,status:e_status.value,
+    containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
+  let note='';
+  if(!rec.billNo&&rec.status!=='Pending'){rec.status='Pending';note=' — no BILL NO (invoice), status kept Pending';}
+  if(rec.file)localStorage.setItem('lion_last_file',rec.file); // remember this device's staff code
+  if(e_id.value){entries[entries.findIndex(x=>x.id===e_id.value)]=rec;toast('Entry updated'+note);}
+  else{entries.push(rec);toast('Entry added'+note);}
+  saveEntries();ensureCustomer(rec.cno,rec.customer);
+  // MP (sea) shipments automatically go to Container Status for the 10-day clearance tracking
+  let newContId=null;
+  const linked=containers.find(c=>c.entryId===rec.id);
+  if(rec.type==='MP'&&!linked){
+    newContId=uid();
+    const nCtns=(rec.containerNo||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean).length;
+    containers.push({id:newContId,entryId:rec.id,
+      no:containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1,
+      cno:rec.cno,rNo:rec.rNo,name:rec.customer,blNo:rec.awbBl,containerNo:rec.containerNo||'',
+      ctnsLeft:nCtns||null,
+      discharge:'',lastDate:'',doDate:'',clearance:'',status:'Pending DO',remark:''});
+    saveContainers();
+  }else if(linked&&rec.containerNo&&linked.containerNo!==rec.containerNo){
+    // container number edited on the entry — carry it to the linked container
+    linked.containerNo=rec.containerNo;
+    saveContainers();renderConts();
+    toast('Container number updated in Container Status');
+  }
+  buildEntryFilters();renderEntries();updateCounts();closeModal('overlay-entry');
+  if(newContId){
+    // show the user the container that was just created
+    document.getElementById('c_search').value='';
+    document.getElementById('c_statusFilter').value='';
+    document.getElementById('c_dueFilter').value='';
+    cState.page=1;renderConts();
+    switchView('containers');
+    toast('MP shipment — added to Container Status 🚢');
+    const el=document.getElementById('crow-'+newContId);
+    if(el){
+      el.classList.add('flashnew');
+      el.scrollIntoView({block:'center',behavior:'smooth'});
+      setTimeout(()=>el.classList.remove('flashnew'),2700);
+    }
+  }
+  return false;
+}
+function delEntry(id){
+  const r=entries.find(x=>x.id===id);
+  if(!confirm(`Delete entry NO ${r.no??''} — "${r.cno} / ${r.customer}"?`))return;
+  entries=entries.filter(x=>x.id!==id);saveEntries();renderEntries();updateCounts();toast('Entry deleted');
+}
+function exportEntries(){
+  xlsExport('lion-form-log',
+    ['NO','C NO','DATE','CUSTOMER NAME','TYPE','FILE','R NO','BILL NO','GRS WT','PKGS','AWB / BL NO','TIME','STATUS'],
+    filteredEntries().map(r=>[r.no,r.cno,r.date,r.customer,r.type,r.file,r.rNo,r.billNo,r.grsWt,r.pkgs,r.awbBl,r.time,r.status]));
+}
+
+/* ============ CONTAINERS ============ */
+const cState={key:'lastDate',dir:1,page:1};
+function contsPage(p){cState.page=p;renderConts();}
+function filteredConts(){
+  const q=document.getElementById('c_search').value.trim().toLowerCase();
+  const sf=document.getElementById('c_statusFilter').value;
+  const df=document.getElementById('c_dueFilter').value;
+  let rows=containers.filter(r=>{
+    if(q&&![r.cno,r.name,r.blNo,r.containerNo,r.rNo].join(' ').toLowerCase().includes(q))return false;
+    if(!sf&&r.status==='Cleared')return false; // cleared containers leave the active list
+    if(sf&&r.status!==sf)return false;
+    if(df){
+      if(df==='doextend')return needsDOExtend(r);
+      if(df==='notedtoday')return r.status!=='Cleared'&&r.clearance===isoLocal(new Date());
+      if(df==='notedtomorrow')return r.status!=='Cleared'&&r.clearance===addDays(isoLocal(new Date()),1);
+      const d=daysLeft(effLast(r).next);
+      if(d===null||r.status==='Cleared')return false;
+      if(df==='overdue'&&!(d<0))return false;
+      if(df==='soon'&&!(d>=0&&d<=3))return false;
+      if(df==='week'&&!(d>=0&&d<=7))return false;
+    }
+    return true;
+  });
+  return sortRows(rows,cState,['no','ctnsLeft']);
+}
+function renderConts(){
+  const active=containers.filter(r=>r.status!=='Cleared');
+  const overdue=active.filter(r=>{const d=daysLeft(effLast(r).next);return d!==null&&d<0}).length;
+  const soon=active.filter(r=>{const d=daysLeft(effLast(r).next);return d!==null&&d>=0&&d<=3}).length;
+  const doExt=containers.filter(needsDOExtend).length;
+  const ctnsLeft=active.reduce((s,r)=>s+(Number(r.ctnsLeft)||0),0);
+  const todayIso=isoLocal(new Date());
+  const tomorrowIso=addDays(todayIso,1);
+  const notedToday=active.filter(r=>r.clearance===todayIso).length;
+  const notedTomorrow=active.filter(r=>r.clearance===tomorrowIso).length;
+  document.getElementById('c_stats').innerHTML=`
+    <div class="card c-blue"><div class="n">${containers.length}</div><div class="l">Total Containers</div></div>
+    <div class="card c-warn"><div class="n">${active.length}</div><div class="l">In Port / Active</div></div>
+    <div class="card c-info"><div class="n">${notedToday}</div><div class="l">Noted for Today</div></div>
+    <div class="card c-purple"><div class="n">${notedTomorrow}</div><div class="l">Noted for Tomorrow</div></div>
+    <div class="card c-purple"><div class="n">${ctnsLeft}</div><div class="l">Ctns Left in Port</div></div>
+    <div class="card c-danger"><div class="n">${doExt}</div><div class="l">⚠ DO to Extend</div></div>
+    <div class="card c-danger"><div class="n">${overdue}</div><div class="l">Past Last Date</div></div>
+    <div class="card c-danger"><div class="n">${soon}</div><div class="l">Due ≤ 3 Days</div></div>
+    <div class="card c-ok"><div class="n">${containers.filter(r=>r.status==='Cleared').length}</div><div class="l">Cleared</div></div>`;
+  const rows=filteredConts();
+  const slice=rows.slice((cState.page-1)*PAGE_SIZE,cState.page*PAGE_SIZE);
+  document.getElementById('c_empty').style.display=rows.length===0?'block':'none';
+  document.getElementById('c_tbody').innerHTML=slice.map(r=>{
+    const effNext=effLast(r).next;
+    const d=daysLeft(effNext);
+    let badge=effNext?`<span class="daysbadge d-ok">${fmtDate(effNext)}</span>`:'<span class="d-none">—</span>',rowcls='';
+    if(d!==null&&r.status!=='Cleared'){
+      if(d<0){badge=`<span class="daysbadge d-danger">${fmtDate(effNext)} · ${Math.abs(d)}d over</span>`;rowcls='row-danger';}
+      else if(d<=3){badge=`<span class="daysbadge d-danger">${fmtDate(effNext)} · ${d}d left</span>`;rowcls='row-danger';}
+      else if(d<=7){badge=`<span class="daysbadge d-warn">${fmtDate(effNext)} · ${d}d left</span>`;rowcls='row-warn';}
+      else{badge=`<span class="daysbadge d-ok">${fmtDate(effNext)} · ${d}d left</span>`;}
+    }
+    const stCls='st-'+r.status.replace(/\s/g,'');
+    return `<tr class="${rowcls}" id="crow-${r.id}">
+      <td class="num" data-l="No">${r.no??'—'}</td>
+      <td class="cno" data-l="C No">${esc(r.cno)||'—'}</td>
+      <td class="name" data-l="Name" title="${esc(r.name)}">${esc(r.name)||'—'}</td>
+      <td data-l="R No">${esc(r.rNo)||'—'}</td>
+      <td data-l="BL No">${esc(r.blNo)||'—'}</td>
+      <td data-l="Container">${containerNoCell(r)}</td>
+      <td class="num" data-l="Ctns Left">${ctnsLeftCell(r)}</td>
+      <td data-l="DO Approval">${fmtDate(r.doDate)}${needsDOExtend(r)?' <span class="daysbadge d-danger">⚠ Extend DO</span>':''}</td>
+      <td data-l="Discharge">${fmtDate(r.discharge)}</td>
+      <td data-l="Last Date">${badge}</td>
+      <td data-l="Clearance">${fmtDate(r.clearance)}</td>
+      <td data-l="Status"><button class="status-pill ${stCls}" onclick="cycleContStatus('${r.id}')">${r.status}</button></td>
+      <td data-l="Remark">${esc(r.remark)||'—'}</td>
+      <td class="actcol"><div class="rowact">
+        <button class="iconbtn" onclick="showCreds('${esc(r.cno)}')" title="Port login for this customer">🔑</button>
+        <button class="iconbtn" onclick="openContForm('${r.id}')" title="Edit">✏️</button>
+        <button class="iconbtn del" onclick="delCont('${r.id}')" title="Delete">🗑️</button>
+      </div></td></tr>`;
+  }).join('');
+  pagerHTML(document.getElementById('c_pager'),cState,rows.length,'conts');
+  renderAlerts();
+}
+// containerNo may hold several numbers separated by commas; portInfo (filled by the port-check
+// agent) holds per-container {arrival, discharge}
+function contNoList(r){
+  return (r.containerNo||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean);
+}
+function containerNoCell(r){
+  const list=contNoList(r);
+  if(!list.length)return '—';
+  return list.map(cn=>{
+    const info=ctnInfo(r,cn);
+    let badge='';
+    if(info.out){
+      badge=` <span class="daysbadge d-ok" style="opacity:.55;cursor:pointer" onclick="markCtnOut('${r.id}','${esc(cn)}')" title="Taken out of port — click to undo">OUT ✓</span>`;
+    }else if(info.discharge){
+      const ld=addDays(info.discharge,10);
+      const dl=daysLeft(ld);
+      const cls=dl<=3?'d-danger':dl<=7?'d-warn':'d-ok';
+      const txt=dl<0?Math.abs(dl)+'d over':dl+'d left';
+      badge=` <span class="daysbadge ${cls}" title="Discharged ${fmtDate(info.discharge)} — its last date is ${fmtDate(ld)}">${fmtDate(ld)} · ${txt}</span>`;
+      if(r.status!=='Cleared')badge+=`<button class="copybtn" onclick="markCtnOut('${r.id}','${esc(cn)}')" title="Mark this container taken out of port">📤</button>`;
+    }else if(info.arrival){
+      badge=` <span class="daysbadge d-warn" title="Arrived ${fmtDate(info.arrival)} — not discharged">arrived</span>`;
+    }
+    return `<div style="font-weight:600">${esc(cn)}${badge}</div>`;
+  }).join('');
+}
+function markCtnOut(id,cn){
+  const r=containers.find(x=>x.id===id);if(!r)return;
+  r.portInfo=r.portInfo||{};
+  const key=Object.keys(r.portInfo).find(k=>k.toUpperCase()===cn.toUpperCase())||cn;
+  const nowOut=!(r.portInfo[key]&&r.portInfo[key].out);
+  r.portInfo[key]={...(r.portInfo[key]||{}),out:nowOut};
+  const remaining=contNoList(r).filter(c=>!ctnInfo(r,c).out).length;
+  r.ctnsLeft=remaining;
+  saveContainers();renderConts();
+  if(nowOut)toast(remaining===0?'All containers out ✓ — you can mark the BL Cleared now':cn+' taken out — '+remaining+' still in port');
+  else toast(cn+' back in port — '+remaining+' in port');
+}
+function ctnsLeftCell(r){
+  if(r.ctnsLeft===null||r.ctnsLeft===undefined||r.ctnsLeft==='')return '<span class="d-none">—</span>';
+  const n=Number(r.ctnsLeft);
+  const cls=n===0?'d-ok':'d-warn';
+  const btns=r.status==='Cleared'?'':`<button class="copybtn" onclick="bumpCtnsLeft('${r.id}',-1)" title="One container taken out">−</button>`;
+  return `<span class="daysbadge ${cls}">${n} left</span>${btns}`;
+}
+function bumpCtnsLeft(id,delta){
+  const r=containers.find(x=>x.id===id);if(!r)return;
+  const n=Math.max(0,(Number(r.ctnsLeft)||0)+delta);
+  r.ctnsLeft=n;
+  saveContainers();renderConts();
+  if(n===0)toast('All containers taken out ✓ — you can mark it Cleared now');
+}
+function cycleContStatus(id){
+  const r=containers.find(x=>x.id===id);if(!r)return;
+  const o=['Pending DO','DO Not Approved','DO Approved','Cleared'];
+  const next=o[(o.indexOf(r.status)+1)%o.length];
+  if(next==='Cleared'&&r.entryId){
+    const e=entries.find(x=>x.id===r.entryId);
+    if(e&&!e.billNo){
+      toast('⚠ No BILL NO (invoice) in the Form Log entry — cannot mark container Cleared.');
+      return;
+    }
+  }
+  r.status=next;
+  if(r.status==='Cleared'){
+    if(!r.clearance)r.clearance=isoLocal(new Date());
+    toast('Cleared ✓ — removed from active list (see status filter “Cleared” for history)');
+  }
+  saveContainers();renderConts();
+}
+function openContForm(id){
+  const t=document.getElementById('c_modalTitle');
+  const f=document.querySelector('#overlay-cont form');
+  document.getElementById('c_custHint').textContent='';
+  if(id){
+    const r=containers.find(x=>x.id===id);t.textContent='Edit Container';
+    c_id.value=r.id;c_no.value=r.no??'';c_cno.value=r.cno||'';c_rNo.value=r.rNo||'';
+    c_name.value=r.name||'';c_blNo.value=r.blNo||'';c_containerNo.value=r.containerNo||'';
+    c_discharge.value=r.discharge||'';c_lastDate.value=r.lastDate||'';c_doDate.value=r.doDate||'';
+    c_clearance.value=r.clearance||'';c_status.value=r.status;c_remark.value=r.remark||'';
+    c_ctnsLeft.value=r.ctnsLeft??'';
+  }else{
+    t.textContent='Add Container';f.reset();c_id.value='';
+    c_no.value=containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
+    c_status.value='Pending DO';
+  }
+  showModal('overlay-cont');setTimeout(()=>c_cno.focus(),50);
+}
+document.getElementById('c_discharge').addEventListener('change',()=>{
+  const v=document.getElementById('c_discharge').value;
+  const ld=document.getElementById('c_lastDate');
+  if(v&&!ld.value){
+    const d=new Date(v+'T00:00:00');d.setDate(d.getDate()+10);
+    ld.value=isoLocal(d);
+  }
+});
+function saveCont(e){
+  e.preventDefault();
+  const prev=c_id.value?containers.find(x=>x.id===c_id.value):null;
+  const rec={id:c_id.value||uid(),entryId:prev?prev.entryId:undefined,portInfo:prev?prev.portInfo:undefined,no:c_no.value===''?null:Number(c_no.value),
+    cno:c_cno.value.trim(),rNo:c_rNo.value.trim(),name:c_name.value.trim(),
+    blNo:c_blNo.value.trim(),containerNo:c_containerNo.value.trim(),
+    ctnsLeft:c_ctnsLeft.value===''?null:Math.max(0,Number(c_ctnsLeft.value)),
+    discharge:c_discharge.value,lastDate:c_lastDate.value,doDate:c_doDate.value,
+    clearance:c_clearance.value,status:c_status.value,remark:c_remark.value.trim()};
+  if(c_id.value){containers[containers.findIndex(x=>x.id===c_id.value)]=rec;toast('Container updated');}
+  else{containers.push(rec);toast('Container added');}
+  saveContainers();ensureCustomer(rec.cno,rec.name);
+  renderConts();updateCounts();closeModal('overlay-cont');
+  return false;
+}
+function delCont(id){
+  const r=containers.find(x=>x.id===id);
+  if(!confirm(`Delete container "${r.containerNo||r.blNo}" (${r.name})?`))return;
+  containers=containers.filter(x=>x.id!==id);saveContainers();renderConts();updateCounts();toast('Container deleted');
+}
+function exportConts(){
+  xlsExport('lion-containers',
+    ['NO','C NUMBER','NAME','R NUMBER','BL NO','CONTAINER NO','CTNS LEFT','DO APPROVAL DATE','DISCHARGE DATE','LAST DATE','CLEARANCE DATE','STATUS','REMARK'],
+    filteredConts().map(r=>[r.no,r.cno,r.name,r.rNo,r.blNo,r.containerNo,r.ctnsLeft,r.doDate,r.discharge,r.lastDate,r.clearance,r.status,r.remark]));
+}
+
+/* ============ CUSTOMERS ============ */
+const uState={key:'cno',dir:1,page:1};
+function custsPage(p){uState.page=p;renderCusts();}
+function filteredCusts(){
+  const q=document.getElementById('u_search').value.trim().toLowerCase();
+  let rows=customers.filter(r=>!q||[r.cno,r.name].join(' ').toLowerCase().includes(q));
+  return sortRows(rows,uState,[]);
+}
+const jobCountCache={};
+function jobCount(cno){
+  cno=cno.toUpperCase();
+  if(jobCountCache[cno]===undefined){
+    jobCountCache[cno]=entries.filter(r=>(r.cno||'').toUpperCase()===cno).length;
+  }
+  return jobCountCache[cno];
+}
+function renderCusts(){
+  for(const k in jobCountCache)delete jobCountCache[k];
+  document.getElementById('u_stats').innerHTML=`
+    <div class="card c-blue"><div class="n">${customers.length.toLocaleString()}</div><div class="l">Customers</div></div>
+    <div class="card c-purple"><div class="n">${customers.filter(c=>c.cno.toUpperCase().startsWith('C')).length.toLocaleString()}</div><div class="l">C Numbers</div></div>
+    <div class="card c-info"><div class="n">${customers.filter(c=>/^A\d/i.test(c.cno)).length.toLocaleString()}</div><div class="l">ID Numbers (A…)</div></div>`;
+  const rows=filteredCusts();
+  const slice=rows.slice((uState.page-1)*PAGE_SIZE,uState.page*PAGE_SIZE);
+  document.getElementById('u_empty').style.display=rows.length===0?'block':'none';
+  document.getElementById('u_tbody').innerHTML=slice.map(r=>{
+    const jc=jobCount(r.cno);
+    return `<tr>
+      <td class="cno" data-l="C Number">${esc(r.cno)}</td>
+      <td class="name" style="max-width:none" data-l="Name" title="${esc(r.name)}">${esc(r.name)}</td>
+      <td data-l="Jobs">${jc?`<span class="daysbadge d-ok">${jc} job${jc>1?'s':''}</span>`:'<span class="d-none">—</span>'}</td>
+      <td class="actcol"><div class="rowact">
+        <button class="iconbtn" onclick="openCustForm('${r.id}')" title="Edit">✏️</button>
+        <button class="iconbtn del" onclick="delCust('${r.id}')" title="Delete">🗑️</button>
+      </div></td></tr>`;
+  }).join('');
+  pagerHTML(document.getElementById('u_pager'),uState,rows.length,'custs');
+}
+function openCustForm(id){
+  const t=document.getElementById('u_modalTitle');
+  if(id){
+    const r=customers.find(x=>x.id===id);t.textContent='Edit Customer';
+    u_id.value=r.id;u_cno.value=r.cno;u_name.value=r.name;
+  }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';}
+  showModal('overlay-cust');setTimeout(()=>u_cno.focus(),50);
+}
+function saveCust(e){
+  e.preventDefault();
+  const cno=u_cno.value.trim(),name=u_name.value.trim();
+  if(!u_id.value){
+    const ex=lookupCustomer(cno);
+    if(ex){toast('C number already in list: '+ex.name);return false;}
+    customers.push({id:uid(),cno,name});toast('Customer added');
+  }else{
+    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;toast('Customer updated');
+  }
+  saveCustomers();renderCusts();updateCounts();closeModal('overlay-cust');
+  return false;
+}
+function delCust(id){
+  const r=customers.find(x=>x.id===id);
+  if(!confirm(`Delete customer "${r.cno} — ${r.name}" from the list?`))return;
+  customers=customers.filter(x=>x.id!==id);saveCustomers();renderCusts();updateCounts();toast('Customer deleted');
+}
+function exportCusts(){
+  xlsExport('lion-customers',['C NUMBER','CUSTOMER NAME'],filteredCusts().map(r=>[r.cno,r.name]));
+}
+
+/* ============ CREDENTIALS ============ */
+const pState={key:'cno',dir:1,page:1};
+function credsPage(p){pState.page=p;renderCreds();}
+const revealed=new Set();
+function filteredCreds(){
+  const q=document.getElementById('p_search').value.trim().toLowerCase();
+  let rows=creds.filter(r=>!q||[r.cno,r.name,r.mplUser,r.email].join(' ').toLowerCase().includes(q));
+  return sortRows(rows,pState,[]);
+}
+function pwCell(id,field,val){
+  if(!val)return '<span class="d-none">—</span>';
+  const key=id+':'+field;
+  const shown=revealed.has(key);
+  return `<span class="pw" onclick="togglePw('${key}')" title="${shown?'Click to hide':'Click to reveal'}">${shown?esc(val):'<span class="mask">••••••••</span>'}</span><button class="copybtn" onclick="copyCred('${id}','${field}')" title="Copy">📋</button>`;
+}
+function togglePw(key){
+  if(revealed.has(key))revealed.delete(key);else revealed.add(key);
+  renderCreds();
+}
+function copyCred(id,field){
+  const r=creds.find(x=>x.id===id);
+  if(r&&r[field])copyText(r[field]);
+}
+function renderCreds(){
+  document.getElementById('p_stats').innerHTML=`
+    <div class="card c-blue"><div class="n">${creds.length.toLocaleString()}</div><div class="l">Saved Logins</div></div>
+    <div class="card c-info"><div class="n">${creds.filter(c=>c.mplUser).length.toLocaleString()}</div><div class="l">MPL Accounts</div></div>
+    <div class="card c-purple"><div class="n">${creds.filter(c=>c.asycudaPass).length.toLocaleString()}</div><div class="l">Asycuda</div></div>
+    <div class="card c-ok"><div class="n">${creds.filter(c=>c.email).length.toLocaleString()}</div><div class="l">With Email</div></div>`;
+  const rows=filteredCreds();
+  const slice=rows.slice((pState.page-1)*PAGE_SIZE,pState.page*PAGE_SIZE);
+  document.getElementById('p_empty').style.display=rows.length===0?'block':'none';
+  document.getElementById('p_tbody').innerHTML=slice.map(r=>`<tr>
+    <td class="cno" data-l="C Number">${esc(r.cno)||'—'}</td>
+    <td class="name" data-l="Name" title="${esc(r.name)}">${esc(r.name)||'—'}</td>
+    <td data-l="MPL User">${r.mplUser?esc(r.mplUser)+`<button class="copybtn" onclick="copyCred('${r.id}','mplUser')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}</td>
+    <td data-l="MPL Pass">${pwCell(r.id,'mplPass',r.mplPass)}</td>
+    <td data-l="Custom Portal">${pwCell(r.id,'customPass',r.customPass)}</td>
+    <td data-l="Asycuda">${pwCell(r.id,'asycudaPass',r.asycudaPass)}</td>
+    <td data-l="Email">${r.email?esc(r.email)+`<button class="copybtn" onclick="copyCred('${r.id}','email')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}</td>
+    <td class="actcol"><div class="rowact">
+      <button class="iconbtn" onclick="openCredForm('${r.id}')" title="Edit">✏️</button>
+      <button class="iconbtn del" onclick="delCred('${r.id}')" title="Delete">🗑️</button>
+    </div></td></tr>`).join('');
+  pagerHTML(document.getElementById('p_pager'),pState,rows.length,'creds');
+}
+function openCredForm(id){
+  const t=document.getElementById('p_modalTitle');
+  if(id){
+    const r=creds.find(x=>x.id===id);t.textContent='Edit Login';
+    p_id.value=r.id;p_cno.value=r.cno||'';p_name.value=r.name||'';
+    p_mplUser.value=r.mplUser||'';p_mplPass.value=r.mplPass||'';
+    p_customPass.value=r.customPass||'';p_asycudaPass.value=r.asycudaPass||'';p_email.value=r.email||'';
+  }else{
+    t.textContent='Add Login';
+    ['p_id','p_cno','p_name','p_mplUser','p_mplPass','p_customPass','p_asycudaPass','p_email'].forEach(i=>document.getElementById(i).value='');
+  }
+  showModal('overlay-cred');setTimeout(()=>p_cno.focus(),50);
+}
+document.getElementById('p_cno').addEventListener('input',()=>{
+  const c=lookupCustomer(p_cno.value);
+  if(c&&!p_name.value)p_name.value=c.name;
+});
+function saveCred(e){
+  e.preventDefault();
+  const rec={id:p_id.value||uid(),cno:p_cno.value.trim(),name:p_name.value.trim(),
+    mplUser:p_mplUser.value.trim(),mplPass:p_mplPass.value.trim(),
+    customPass:p_customPass.value.trim(),asycudaPass:p_asycudaPass.value.trim(),email:p_email.value.trim()};
+  if(p_id.value){creds[creds.findIndex(x=>x.id===p_id.value)]=rec;toast('Login updated');}
+  else{creds.push(rec);toast('Login added');}
+  saveCreds();ensureCustomer(rec.cno,rec.name);
+  renderCreds();updateCounts();closeModal('overlay-cred');
+  return false;
+}
+function delCred(id){
+  const r=creds.find(x=>x.id===id);
+  if(!confirm(`Delete login for "${r.cno||r.name}"?`))return;
+  creds=creds.filter(x=>x.id!==id);saveCreds();renderCreds();updateCounts();toast('Login deleted');
+}
+function exportCreds(){
+  if(!confirm('Export will include PASSWORDS in plain text in the Excel file. Continue?'))return;
+  xlsExport('lion-logins',
+    ['C NUMBER','NAME','MPL USERNAME','MPL PASSWORD','CUSTOM PORTAL PASSWORD','ASYCUDA PASSWORD','REGISTERED EMAIL'],
+    filteredCreds().map(r=>[r.cno,r.name,r.mplUser,r.mplPass,r.customPass,r.asycudaPass,r.email]));
+}
+
+/* ============ DO extension alerts ============ */
+function switchView(view){
+  document.querySelector('#nav button[data-view="'+view+'"]').dispatchEvent(new MouseEvent('click',{bubbles:true}));
+}
+function goToDOList(){
+  switchView('containers');
+  document.getElementById('c_dueFilter').value='doextend';
+  cState.page=1;renderConts();
+}
+function showCreds(cno){
+  switchView('creds');
+  const s=document.getElementById('p_search');
+  s.value=cno||'';pState.page=1;renderCreds();
+}
+function renderAlerts(){
+  const bar=document.getElementById('alertbar');
+  const need=containers.filter(needsDOExtend);
+  const urgent=need.filter(r=>{const d=daysLeft(r.lastDate);return d!==null&&d<=3});
+  if(!need.length){bar.classList.remove('show');return;}
+  const names=need.slice(0,3).map(r=>r.containerNo||r.blNo||r.cno).join(', ');
+  const askBtn=('Notification' in window)&&Notification.permission==='default'
+    ?' <button class="bellbtn" onclick="requestNotif(event)">🔔 Enable desktop alerts</button>':'';
+  bar.innerHTML=`⚠ <strong>${need.length}</strong> container${need.length>1?'s':''} need the DO extended on my.port.mv`
+    +(urgent.length?` — <strong>${urgent.length} URGENT (≤3 days)</strong>`:'')
+    +` &nbsp;(${esc(names)}${need.length>3?', …':''}) — click to view`+askBtn;
+  bar.classList.add('show');
+  if(typeof fitTables==='function')fitTables();
+}
+function requestNotif(ev){
+  ev.stopPropagation();
+  Notification.requestPermission().then(p=>{
+    if(p==='granted'){toast('Desktop notifications enabled');notifyDO();}
+    else toast('Notifications not allowed by browser');
+    renderAlerts();
+  });
+}
+function notifyDO(){
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  const need=containers.filter(needsDOExtend);
+  if(!need.length)return;
+  const lines=need.slice(0,4).map(r=>{
+    const d=daysLeft(r.lastDate);
+    return (r.containerNo||r.blNo||r.cno)+' — last date '+fmtDate(r.lastDate)+(d!==null?(d<0?' ('+Math.abs(d)+'d OVER)':' ('+d+'d left)'):'');
+  });
+  try{new Notification('⚠ Extend DO — '+need.length+' container'+(need.length>1?'s':''),{body:lines.join('\n')});}catch(e){}
+}
+
+/* ============ boot ============ */
+// Invoice rule: an entry with no BILL NO (invoice) is NOT cleared. Runs on every load.
+function enforceInvoiceRule(){
+  let flipped=0;
+  entries.forEach(r=>{
+    if(!r.billNo&&(r.status==='Cleared'||r.status==='Delivered')){r.status='Pending';flipped++;}
+  });
+  if(flipped)saveEntries();
+  return flipped;
+}
+// Containers linked to an entry without BILL NO cannot stay Cleared — reactivate them.
+function reconcileContainers(){
+  const byId=new Map(entries.map(r=>[r.id,r]));
+  let reopened=0;
+  containers.forEach(c=>{
+    if(!c.entryId)return;
+    const e=byId.get(c.entryId);
+    if(e&&!e.billNo&&c.status==='Cleared'){c.status='Pending DO';c.clearance='';reopened++;}
+  });
+  if(reopened)saveContainers();
+  return reopened;
+}
+// Sync: every MP entry in the Form Log gets a Container Status record (runs on every load, no duplicates).
+// Pending entries become active containers; Cleared/Delivered entries go to container history.
+function syncMPContainers(){
+  const linked=new Set(containers.map(c=>c.entryId).filter(Boolean));
+  let addedActive=0,addedHistory=0;
+  let nextNo=containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0);
+  entries.forEach(r=>{
+    if(r.type!=='MP'||linked.has(r.id))return;
+    const done=r.status==='Cleared'||r.status==='Delivered';
+    containers.push({id:uid(),entryId:r.id,no:++nextNo,
+      cno:r.cno,rNo:r.rNo,name:r.customer,blNo:r.awbBl,containerNo:'',
+      discharge:'',lastDate:'',doDate:'',clearance:done?(r.date||''):'',
+      status:done?'Cleared':'Pending DO',remark:'From Form Log'+(r.no?' NO '+r.no:'')});
+    if(done)addedHistory++;else addedActive++;
+  });
+  if(addedActive+addedHistory>0)saveContainers();
+  return addedActive+addedHistory;
+}
+(()=>{
+  const flipped=enforceInvoiceRule();
+  const synced=syncMPContainers();
+  const reopened=reconcileContainers();
+  if(flipped+reopened>0)toast(`Invoice rule: ${flipped} entries set Pending, ${reopened} containers back to active`);
+  else if(synced>0)toast('Synced '+synced+' MP shipments → Container Status');
+  renderAlerts();notifyDO();
+  setInterval(()=>{renderAlerts();},60*60*1000); // refresh the alert bar hourly while open
+})();
+wireAutofill('e_cno','e_customer','e_custHint');
+wireAutofill('c_cno','c_name','c_custHint');
+makeSortable('e_head',eState,renderEntries);
+makeSortable('c_head',cState,renderConts);
+makeSortable('u_head',uState,renderCusts);
+makeSortable('p_head',pState,renderCreds);
+[['e_search',renderEntries,eState],['e_statusFilter',renderEntries,eState],['e_typeFilter',renderEntries,eState],['e_monthFilter',renderEntries,eState],
+ ['c_search',renderConts,cState],['c_statusFilter',renderConts,cState],['c_dueFilter',renderConts,cState],
+ ['u_search',renderCusts,uState],['p_search',renderCreds,pState]].forEach(([id,fn,st])=>{
+  const el=document.getElementById(id);
+  el.addEventListener(el.tagName==='INPUT'?'input':'change',()=>{st.page=1;fn();});
+});
+document.getElementById('printdate').textContent='Generated '+new Date().toLocaleString('en-GB');
+// Fit each table to the window so its horizontal scrollbar is always on screen
+function fitTables(){
+  if(window.innerWidth<=720)return; // phone card view manages itself
+  document.querySelectorAll('section.view.active .scroll').forEach(sc=>{
+    sc.style.maxHeight='';
+    const top=sc.getBoundingClientRect().top;
+    const pager=sc.parentElement.querySelector('.pager');
+    const ph=pager?pager.offsetHeight:0;
+    sc.style.maxHeight=Math.max(260,window.innerHeight-top-ph-18)+'px';
+  });
+  if(typeof syncFloatbar==='function')syncFloatbar();
+}
+window.addEventListener('resize',fitTables);
+// Floating horizontal scrollbar (bottom of window) — mirrors the active table when its own bar is off-screen
+let fbSyncing=false;
+function syncFloatbar(){
+  const fb=document.getElementById('floatbar');
+  const inner=document.getElementById('floatbar-inner');
+  const sc=document.querySelector('section.view.active .scroll');
+  if(!sc||window.innerWidth<=720){fb.style.display='none';return;}
+  const rect=sc.getBoundingClientRect();
+  const needsH=sc.scrollWidth>sc.clientWidth+2;
+  const ownBarVisible=rect.bottom<=window.innerHeight-2;
+  if(needsH&&!ownBarVisible&&rect.top<window.innerHeight){
+    inner.style.width=sc.scrollWidth+'px';
+    fb.style.display='block';
+    fbSyncing=true;fb.scrollLeft=sc.scrollLeft;fbSyncing=false;
+  }else fb.style.display='none';
+}
+document.getElementById('floatbar').addEventListener('scroll',()=>{
+  if(fbSyncing)return;
+  const sc=document.querySelector('section.view.active .scroll');
+  if(sc){fbSyncing=true;sc.scrollLeft=document.getElementById('floatbar').scrollLeft;fbSyncing=false;}
+});
+window.addEventListener('scroll',syncFloatbar);
+window.addEventListener('resize',syncFloatbar);
+// Drag-to-pan: hold the mouse down on any table and drag to move it in any direction
+document.querySelectorAll('.scroll').forEach(sc=>{
+  let down=false,moved=false,sx=0,sy=0,sl=0,st=0;
+  sc.addEventListener('mousedown',e=>{
+    if(e.button!==0)return;
+    if(e.target.closest('button,select,input,a,textarea'))return;
+    down=true;moved=false;sx=e.clientX;sy=e.clientY;sl=sc.scrollLeft;st=sc.scrollTop;
+  });
+  window.addEventListener('mousemove',e=>{
+    if(!down)return;
+    const dx=e.clientX-sx,dy=e.clientY-sy;
+    if(!moved&&Math.abs(dx)+Math.abs(dy)>6){moved=true;sc.classList.add('grabbing');}
+    if(moved){sc.scrollLeft=sl-dx;sc.scrollTop=st-dy;e.preventDefault();}
+  });
+  window.addEventListener('mouseup',()=>{down=false;setTimeout(()=>sc.classList.remove('grabbing'),0);});
+  sc.addEventListener('click',e=>{if(moved){e.stopPropagation();e.preventDefault();moved=false;}},true);
+  sc.addEventListener('scroll',()=>{
+    if(fbSyncing)return;
+    const fb=document.getElementById('floatbar');
+    if(fb.style.display!=='none'){fbSyncing=true;fb.scrollLeft=sc.scrollLeft;fbSyncing=false;}
+  });
+});
+buildEntryFilters();renderEntries();renderConts();renderCusts();renderCreds();updateCounts();
+fitTables();setTimeout(fitTables,300);
+
+// Bridge for the cloud-sync module (module scripts can't reach these top-level lets directly)
+window.__app={
+  get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,team:()=>team},
+  set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},team:v=>{team=v}},
+  rerender(){buildEntryFilters();renderEntries();renderConts();renderCusts();renderCreds();updateCounts();}
+};
+</script>
+
+<script type="module">
+/* ============ Team Cloud Sync (Firebase) ============ */
+const COLS=['entries','customers','creds','containers','team'];
+const KEYMAP={entries:'lion_clearance_v2',customers:'lion_customers_v1',creds:'lion_creds_v1',
+  containers:'lion_containers_v1',team:'lion_team_v1'};
+const cmpStr=r=>{const{u,...rest}=r;return JSON.stringify(rest,Object.keys(rest).sort());};
+const shadow={},debounces={};
+let db=null,auth=null,fx=null; // fx = firestore module fns
+
+function chip(t,bg){const c=document.getElementById('syncchip');c.textContent=t;
+  c.style.background=bg||'';c.style.color=bg?'#fff':'';c.style.borderColor=bg||'';}
+function showSection(id){['cloud-setup','cloud-login','cloud-account'].forEach(s=>
+  document.getElementById(s).style.display=s===id?'block':'none');}
+
+window.cloudOffline=()=>{localStorage.setItem('lion_cloud_mode','offline');
+  closeModal('overlay-cloud');chip('☁ Offline');toast('Staying offline on this device');};
+window.cloudReset=()=>{
+  if(!confirm('Clear the saved cloud settings on this device? (Your data stays.)'))return;
+  localStorage.removeItem('lion_fb_config');localStorage.removeItem('lion_cloud_joined');
+  localStorage.removeItem('lion_cloud_mode');location.reload();};
+window.cloudSaveConfig=()=>{
+  const raw=document.getElementById('cf_config').value;
+  const m=raw.match(/\{[\s\S]*\}/);
+  if(!m){toast('Could not read the config — paste the whole firebaseConfig block');return;}
+  let cfg;
+  try{cfg=Function('return ('+m[0]+')')();}catch(e){toast('Config not valid: '+e.message);return;}
+  if(!cfg.apiKey||!cfg.projectId){toast('Config is missing apiKey / projectId');return;}
+  localStorage.setItem('lion_fb_config',JSON.stringify(cfg));
+  localStorage.setItem('lion_cloud_mode','on');
+  toast('Saved — connecting…');location.reload();};
+window.cloudSignIn=async()=>{
+  const email=document.getElementById('cf_email').value.trim();
+  const pass=document.getElementById('cf_pass').value;
+  if(!email||!pass){toast('Enter email and password');return;}
+  try{await fx.signInWithEmailAndPassword(auth,email,pass);}
+  catch(e){toast('Sign-in failed: '+(e.code||e.message).replace('auth/','').replace(/-/g,' '));}
+};
+window.cloudSignOut=async()=>{await fx.signOut(auth);location.reload();};
+
+async function mergeSnap(col,s){
+  const app=window.__app;
+  const local=app.get[col]();
+  const byId=new Map(local.map(r=>[r.id,r]));
+  let changed=false;
+  s.docChanges().forEach(ch=>{
+    const id=ch.doc.id;
+    if(ch.type==='removed'){
+      if(byId.has(id)){byId.delete(id);changed=true;}
+      shadow[col].delete(id);
+    }else{
+      const d=ch.doc.data();
+      shadow[col].set(id,cmpStr(d));
+      const loc=byId.get(id);
+      if(!loc){byId.set(id,d);changed=true;}
+      else if((d.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(d)){byId.set(id,d);changed=true;}
+    }
+  });
+  if(changed){
+    const arr=[...byId.values()];
+    app.set[col](arr);
+    localStorage.setItem(KEYMAP[col],JSON.stringify(arr));
+    app.rerender();
+  }
+}
+
+async function pushCol(col){
+  if(!db||!auth.currentUser)return;
+  const arr=window.__app.get[col]();
+  const sh=shadow[col];if(!sh)return;
+  const now=Date.now();
+  const sets=[],dels=[];
+  const ids=new Set();
+  arr.forEach(r=>{
+    ids.add(r.id);
+    const c=cmpStr(r);
+    if(sh.get(r.id)!==c){r.u=now;sets.push(r);sh.set(r.id,c);}
+  });
+  sh.forEach((_,id)=>{if(!ids.has(id)){dels.push(id);sh.delete(id);}});
+  if(!sets.length&&!dels.length)return;
+  localStorage.setItem(KEYMAP[col],JSON.stringify(arr));
+  try{
+    chip('☁ Syncing…','#d97706');
+    const ref=fx.collection(db,col);
+    const ops=[...sets.map(r=>['set',r]),...dels.map(id=>['del',id])];
+    for(let i=0;i<ops.length;i+=400){
+      const b=fx.writeBatch(db);
+      ops.slice(i,i+400).forEach(([kind,x])=>{
+        if(kind==='set')b.set(fx.doc(ref,x.id),JSON.parse(JSON.stringify(x)));
+        else b.delete(fx.doc(ref,x));
+      });
+      await b.commit();
+    }
+    chip('☁ Synced','#16a34a');
+  }catch(e){
+    chip('☁ Will sync when online','#d97706');
+  }
+}
+
+async function startSync(){
+  chip('☁ Syncing…','#d97706');
+  const app=window.__app;
+  const joined=localStorage.getItem('lion_cloud_joined');
+  for(const col of COLS){
+    shadow[col]=new Map();
+    const ref=fx.collection(db,col);
+    const snap=await fx.getDocs(ref);
+    const localArr=app.get[col]();
+    if(!joined){
+      if(snap.empty&&localArr.length){
+        // first device: upload everything
+        const now=Date.now();
+        for(let i=0;i<localArr.length;i+=400){
+          const b=fx.writeBatch(db);
+          localArr.slice(i,i+400).forEach(r=>{
+            r.u=now;
+            b.set(fx.doc(ref,r.id),JSON.parse(JSON.stringify(r)));
+            shadow[col].set(r.id,cmpStr(r));
+          });
+          await b.commit();
+        }
+        localStorage.setItem(KEYMAP[col],JSON.stringify(localArr));
+      }else{
+        // joining device: the cloud is the source of truth
+        const arr=snap.docs.map(d=>d.data());
+        app.set[col](arr);
+        localStorage.setItem(KEYMAP[col],JSON.stringify(arr));
+        snap.docs.forEach(d=>shadow[col].set(d.id,cmpStr(d.data())));
+      }
+    }else{
+      snap.docs.forEach(d=>shadow[col].set(d.id,cmpStr(d.data())));
+    }
+    fx.onSnapshot(ref,s=>mergeSnap(col,s),()=>{});
+  }
+  localStorage.setItem('lion_cloud_joined','1');
+  window.__cloudPush=col=>{clearTimeout(debounces[col]);debounces[col]=setTimeout(()=>pushCol(col),800);};
+  COLS.forEach(c=>window.__cloudPush(c)); // push offline edits made before sign-in
+  app.rerender();
+  chip('☁ Synced','#16a34a');
+}
+
+(async()=>{
+  // LION Tracker project config (console.firebase.google.com → lion-tracker-47830)
+  const DEFAULT_CFG={apiKey:"AIzaSyAkNK-8qXg6kHTqrpof90BwIM81vh5ER4o",
+    authDomain:"lion-tracker-47830.firebaseapp.com",projectId:"lion-tracker-47830",
+    storageBucket:"lion-tracker-47830.firebasestorage.app",
+    messagingSenderId:"1076678882929",appId:"1:1076678882929:web:bf0a470ec4b5e639b20dd0"};
+  const cfgRaw=localStorage.getItem('lion_fb_config')||JSON.stringify(DEFAULT_CFG);
+  const mode=localStorage.getItem('lion_cloud_mode');
+  if(!cfgRaw){
+    chip('☁ Set up cloud');showSection('cloud-setup');
+    if(mode!=='offline')showModal('overlay-cloud');
+    return;
+  }
+  chip('☁ Connecting…');
+  try{
+    const V='10.12.5';
+    const [appM,authM,fsM]=await Promise.all([
+      import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
+      import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
+      import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`)
+    ]);
+    fx={...authM,...fsM};
+    const fbApp=appM.initializeApp(JSON.parse(cfgRaw));
+    auth=fx.getAuth(fbApp);
+    try{db=fsM.initializeFirestore(fbApp,{localCache:fsM.persistentLocalCache()});}
+    catch(e){db=fsM.getFirestore(fbApp);}
+    fx.onAuthStateChanged(auth,user=>{
+      if(user){
+        document.getElementById('cf_user').textContent=user.email;
+        showSection('cloud-account');closeModal('overlay-cloud');
+        startSync().catch(e=>{chip('☁ Sync error');toast('Cloud sync error: '+e.message);});
+      }else{
+        chip('☁ Sign in','#d97706');showSection('cloud-login');
+        showModal('overlay-cloud');
+      }
+    });
+  }catch(e){
+    chip('☁ No internet');
+    toast('Cloud unavailable — working offline. Changes will sync next time.');
+  }
+})();
+</script>
+</body>
+</html>
