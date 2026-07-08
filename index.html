@@ -13,6 +13,25 @@
     --shadow:0 1px 3px rgba(15,23,42,.08),0 8px 24px rgba(15,23,42,.06);
   }
   *{box-sizing:border-box}
+  /* Login gate — covers the whole app until a staff member signs in */
+  #authgate{position:fixed;inset:0;z-index:9999;background:linear-gradient(135deg,#1e293b,#0f172a);
+    display:flex;align-items:center;justify-content:center;padding:20px}
+  #authgate.hidden{display:none}
+  body.locked{overflow:hidden}
+  #authgate .gatecard{background:#fff;border-radius:18px;padding:34px 30px;width:100%;max-width:360px;
+    box-shadow:0 24px 70px rgba(0,0,0,.45);text-align:center}
+  #authgate .gatelogo{width:60px;height:60px;border-radius:15px;background:linear-gradient(135deg,#f59e0b,#d97706);
+    display:grid;place-items:center;font-size:32px;margin:0 auto 14px}
+  #authgate h1{font-size:19px;margin:0 0 2px;color:#0f172a}
+  #authgate .gatesub{margin:0 0 22px;font-size:13px;color:#64748b}
+  #authgate form{display:flex;flex-direction:column;gap:11px}
+  #authgate input{padding:13px 14px;border:1px solid #e2e8f0;border-radius:10px;font-size:16px;outline:none}
+  #authgate input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  #authgate button{padding:13px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+  #authgate button:hover{background:#1d4ed8}
+  #authgate button:disabled{opacity:.6;cursor:default}
+  #authgate .gatemsg{min-height:18px;margin-top:12px;font-size:13px;font-weight:600;color:#dc2626}
+  #authgate .gatefoot{margin-top:16px;font-size:11.5px;color:#94a3b8}
   body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
     background:#f1f5f9;color:var(--ink);-webkit-font-smoothing:antialiased}
   header.app{background:linear-gradient(135deg,#1e293b,#0f172a);color:#fff;padding:14px 24px 0;
@@ -195,6 +214,20 @@
 </style>
 </head>
 <body>
+<div id="authgate">
+  <div class="gatecard">
+    <div class="gatelogo">🦁</div>
+    <h1>LION Clearance Tracker</h1>
+    <p class="gatesub">Staff sign-in required</p>
+    <form onsubmit="return gateSignIn(event)">
+      <input id="g_email" type="email" placeholder="Email" autocomplete="username" required>
+      <input id="g_pass" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button type="submit" class="primary" id="g_btn">Sign in</button>
+    </form>
+    <div id="g_msg" class="gatemsg"></div>
+    <div class="gatefoot" id="g_foot">Connecting…</div>
+  </div>
+</div>
 <header class="app">
   <div class="headrow">
     <div class="logo">🦁</div>
@@ -1600,17 +1633,53 @@ async function startSync(){
       if(user){
         document.getElementById('cf_user').textContent=user.email;
         showSection('cloud-account');closeModal('overlay-cloud');
+        revealApp();
         startSync().catch(e=>{chip('☁ Sync error');toast('Cloud sync error: '+e.message);});
       }else{
         chip('☁ Sign in','#d97706');showSection('cloud-login');
-        showModal('overlay-cloud');
+        lockApp();
+        document.getElementById('g_foot').textContent='Enter the login your admin gave you';
       }
     });
   }catch(e){
+    // Firebase couldn't load (no internet on a device with no saved session) — keep the gate closed, no app leak
     chip('☁ No internet');
-    toast('Cloud unavailable — working offline. Changes will sync next time.');
+    document.getElementById('g_msg').textContent='';
+    document.getElementById('g_foot').textContent='No internet — connect to sign in';
+    const b=document.getElementById('g_btn');b.disabled=false;
   }
 })();
+
+// ---- Login gate ----
+function revealApp(){
+  const g=document.getElementById('authgate');
+  g.classList.add('hidden');
+  document.body.classList.remove('locked');
+}
+function lockApp(){
+  const g=document.getElementById('authgate');
+  g.classList.remove('hidden');
+  document.body.classList.add('locked');
+  document.getElementById('g_btn').disabled=false;
+}
+window.gateSignIn=async(e)=>{
+  e.preventDefault();
+  const email=document.getElementById('g_email').value.trim();
+  const pass=document.getElementById('g_pass').value;
+  const msg=document.getElementById('g_msg'), btn=document.getElementById('g_btn');
+  msg.style.color='#dc2626';msg.textContent='';
+  if(!auth||!fx){msg.textContent='Still connecting — try again in a moment.';return false;}
+  btn.disabled=true;btn.textContent='Signing in…';
+  try{
+    await fx.signInWithEmailAndPassword(auth,email,pass);
+    // onAuthStateChanged will reveal the app
+  }catch(err){
+    const code=(err.code||err.message||'').replace('auth/','').replace(/-/g,' ');
+    msg.textContent='Sign-in failed: '+code;
+    btn.disabled=false;btn.textContent='Sign in';
+  }
+  return false;
+};
 </script>
 </body>
 </html>
