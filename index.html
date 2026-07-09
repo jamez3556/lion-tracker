@@ -930,6 +930,8 @@ function saveEntry(e){
   let note='';
   // "no invoice = not cleared" — but a container cleared by hand also proves clearance, so don't force Pending then
   if(!rec.billNo&&rec.status!=='Pending'&&!(prevLinked&&prevLinked.status==='Cleared')){rec.status='Pending';note=' — no BILL NO (invoice), status kept Pending';}
+  // "invoice = cleared": a BILL NO means the shipment is cleared → lift Pending to Cleared
+  else if(rec.billNo&&rec.status==='Pending'){rec.status='Cleared';note=' — BILL NO present, marked Cleared';}
   if(rec.file)localStorage.setItem('lion_last_file',rec.file); // remember this device's staff code
   if(e_id.value){entries[entries.findIndex(x=>x.id===e_id.value)]=rec;toast('Entry updated'+note);}
   else{entries.push(rec);toast('Entry added'+note);}
@@ -1544,7 +1546,11 @@ function notifyDO(){
 function enforceInvoiceRule(){
   let flipped=0;
   entries.forEach(r=>{
-    if(!r.billNo&&(r.status==='Cleared'||r.status==='Delivered')){
+    if(r.billNo){
+      // has an invoice (BILL NO) ⇒ the shipment is cleared. Lift Pending → Cleared (keep Delivered as-is).
+      if(r.status==='Pending'){r.status='Cleared';flipped++;}
+    }else if(r.status==='Cleared'||r.status==='Delivered'){
+      // no invoice ⇒ not cleared — unless its container was cleared by hand at the port (that proves clearance)
       const c=containers.find(x=>x.entryId===r.id);
       if(c&&c.status==='Cleared')return;
       r.status='Pending';flipped++;
