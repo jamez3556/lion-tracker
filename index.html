@@ -993,13 +993,18 @@ function filteredConts(){
     }
     return true;
   });
-  // Default view: fastest-demurrage (soonest last date) on top; noted/cleared sink to the bottom.
+  // Default view, three tiers:
+  //  0 = active demurrage clock (discharged, not noted) → soonest last date on top (fastest demurrage)
+  //  1 = noted / under control (clearance set)          → kept in entry order
+  //  2 = no discharge date yet (no clock)               → kept in entry order, at the bottom
+  // A brand-new container (no dates) lands in tier 2, so it appends at the end instead of jumping to No 1.
   if(cState.key==='lastDate'){
+    const tier=r=>isNoted(r)?1:(effLast(r).next?0:2);
     rows.sort((a,b)=>{
-      const pa=isNoted(a)?1:0, pb=isNoted(b)?1:0;
-      if(pa!==pb)return (pa-pb)*cState.dir;
-      const na=effLast(a).next||'9999-99-99', nb=effLast(b).next||'9999-99-99';
-      return (na<nb?-1:na>nb?1:0)*cState.dir;
+      const ta=tier(a), tb=tier(b);
+      if(ta!==tb)return (ta-tb)*cState.dir;
+      if(ta===0){const na=effLast(a).next,nb=effLast(b).next;return (na<nb?-1:na>nb?1:0)*cState.dir;} // by deadline
+      return ((Number(a.no)||0)-(Number(b.no)||0))*cState.dir; // noted / no-date → creation (entry) order
     });
     return rows;
   }
