@@ -319,7 +319,7 @@
       <input id="c_search" type="text" placeholder="Search container, C-No, name, BL…">
     </div>
     <select class="filter" id="c_statusFilter">
-      <option value="">All statuses</option><option>Pending DO</option><option>DO Not Approved</option><option>DO Approved</option><option>Cleared</option>
+      <option value="">All statuses</option><option>Pending DO</option><option>DO Not Approved</option><option>DO Approved</option><option>Cleared</option><option>Delivered</option>
     </select>
     <select class="filter" id="c_dueFilter">
       <option value="">All deadlines</option><option value="doextend">⚠ Needs DO extension</option><option value="notedtoday">📌 Noted for today</option><option value="notedtomorrow">📌 Noted for tomorrow</option><option value="overdue">Overdue</option><option value="soon">Due ≤ 3 days</option><option value="week">Due ≤ 7 days</option>
@@ -498,7 +498,7 @@
       <div class="grid3">
         <div class="field"><label>CLEARANCE DATE</label><input id="c_clearance" type="date"></div>
         <div class="field"><label>STATUS</label>
-          <select id="c_status"><option>Pending DO</option><option>DO Not Approved</option><option>DO Approved</option><option>Cleared</option></select></div>
+          <select id="c_status"><option>Pending DO</option><option>DO Not Approved</option><option>DO Approved</option><option>Cleared</option><option>Delivered</option></select></div>
         <div class="field"><label>REMARK</label><input id="c_remark"></div>
       </div>
       <div class="actions">
@@ -652,11 +652,13 @@ function effLast(r){
   const latest=all.length?all.sort()[all.length-1]:'';
   return {next,latest};
 }
-// A container is "noted / under control" once a clearance date is set (or it's cleared) — stop warning about it.
-function isNoted(r){return r.status==='Cleared'||!!r.clearance;}
-// Containers physically in port for one BL record = discharged, not taken out, not cleared (counted per CONTAINER)
+// A shipment is "done" once it's Cleared (customs, by hand) or Delivered (invoiced). Both leave the active list.
+function isDone(r){return r.status==='Cleared'||r.status==='Delivered';}
+// A container is "noted / under control" once a clearance date is set (or it's done) — stop warning about it.
+function isNoted(r){return isDone(r)||!!r.clearance;}
+// Containers physically in port for one BL record = discharged, not taken out, not done (counted per CONTAINER)
 function inPortCount(r){
-  if(r.status==='Cleared')return 0;
+  if(isDone(r))return 0;
   const list=contNoList(r);
   const withInfo=list.filter(cn=>ctnInfo(r,cn).discharge);
   if(withInfo.length)return list.filter(cn=>{const i=ctnInfo(r,cn);return i.discharge&&!i.out;}).length;
@@ -664,7 +666,7 @@ function inPortCount(r){
   return 0;
 }
 function needsDOExtend(r){
-  if(r.status==='Cleared'||r.clearance)return false; // cleared or already noted → under control
+  if(isDone(r)||r.clearance)return false; // done or already noted → under control
   const latest=effLast(r).latest;
   return !!latest&&(!r.doDate||r.doDate<latest);
 }
@@ -816,7 +818,7 @@ function renderEntries(){
   const invPending=entries.filter(r=>!r.billNo).length; // no BILL NO = not invoiced yet
   // container-derived metrics brought up to the Form Log top (click a card to open Container Status filtered)
   const todayIso=isoLocal(new Date()), tomorrowIso=addDays(todayIso,1);
-  const activeC=containers.filter(r=>r.status!=='Cleared');
+  const activeC=containers.filter(r=>!isDone(r));
   const dueSoon=activeC.filter(r=>!isNoted(r)&&(()=>{const d=daysLeft(effLast(r).next);return d!==null&&d>=0&&d<=3})()).length;
   const notedToday=activeC.filter(r=>r.clearance===todayIso).length;
   const notedTomorrow=activeC.filter(r=>r.clearance===tomorrowIso).length;
@@ -851,14 +853,11 @@ function renderEntries(){
 function cycleEntryStatus(id){
   const r=entries.find(x=>x.id===id);if(!r)return;
   const linked=containers.find(c=>c.entryId===r.id);
-  // block Cleared without an invoice — UNLESS its container is already cleared (that proves clearance)
-  if(r.status==='Pending'&&!r.billNo&&!(linked&&linked.status==='Cleared')){
-    toast('⚠ No BILL NO (invoice) — cannot mark as Cleared. Edit the entry and add it first.');
-    return;
-  }
+  // Delivered is set ONLY by the invoice (BILL NO) — a billed entry is locked to Delivered
+  if(r.billNo){toast('Delivered is set by the invoice (BILL NO) — remove it to change the status');return;}
   const before={status:r.status,billNo:r.billNo};
-  const o=['Pending','Cleared','Delivered'];
-  r.status=o[(o.indexOf(r.status)+1)%3];saveEntries();renderEntries();
+  // no invoice → toggle between Pending and Cleared only (Delivered needs an invoice)
+  r.status=r.status==='Cleared'?'Pending':'Cleared';saveEntries();renderEntries();
   if(linked)syncContFromEntry(r,before,linked); // propagate the status change to the container
 }
 function toggleContBox(){
@@ -934,10 +933,10 @@ function saveEntry(e){
     time:e_time.value,status:e_status.value,
     containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
   let note='';
-  // "no invoice = not cleared" — but a container cleared by hand also proves clearance, so don't force Pending then
-  if(!rec.billNo&&rec.status!=='Pending'&&!(prevLinked&&prevLinked.status==='Cleared')){rec.status='Pending';note=' — no BILL NO (invoice), status kept Pending';}
-  // "invoice = cleared": a BILL NO means the shipment is cleared → lift Pending to Cleared
-  else if(rec.billNo&&rec.status==='Pending'){rec.status='Cleared';note=' — BILL NO present, marked Cleared';}
+  // "invoice = Delivered": a BILL NO means the shipment is delivered (billed). Set automatically, always.
+  if(rec.billNo){if(rec.status!=='Delivered'){rec.status='Delivered';note=' — BILL NO present → Delivered';}}
+  // no invoice ⇒ can't be Delivered. Cleared is allowed (manual/customs); otherwise Pending.
+  else if(rec.status==='Delivered'){rec.status='Cleared';note=' — no BILL NO, set Cleared (Delivered needs an invoice)';}
   if(rec.file)localStorage.setItem('lion_last_file',rec.file); // remember this device's staff code
   if(e_id.value){entries[entries.findIndex(x=>x.id===e_id.value)]=rec;toast('Entry updated'+note);}
   else{entries.push(rec);toast('Entry added'+note);}
@@ -945,7 +944,7 @@ function saveEntry(e){
   // MP (sea) shipments automatically go to Container Status for the 10-day clearance tracking
   let newContId=null;
   const linked=containers.find(c=>c.entryId===rec.id);
-  const billCleared=!!rec.billNo; // invoice raised = shipment cleared
+  const billCleared=!!rec.billNo; // invoice raised = shipment delivered
   if(rec.type==='MP'&&!linked){
     newContId=uid();
     const nCtns=(rec.containerNo||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean).length;
@@ -954,9 +953,9 @@ function saveEntry(e){
       cno:rec.cno,rNo:rec.rNo,name:rec.customer,blNo:rec.awbBl,containerNo:rec.containerNo||'',logNo:rec.no,
       ctnsLeft:nCtns||null,_billCleared:billCleared||undefined,
       discharge:'',lastDate:'',doDate:'',clearance:billCleared?(rec.date||isoLocal(new Date())):'',
-      status:billCleared?'Cleared':'Pending DO',remark:''});
+      status:billCleared?'Delivered':'Pending DO',remark:''});
     saveContainers();
-    if(billCleared)newContId=null; // don't jump-to/highlight a container that's already cleared
+    if(billCleared)newContId=null; // don't jump-to/highlight a container that's already delivered
   }else if(linked){
     if(rec.containerNo&&linked.containerNo!==rec.containerNo)linked.containerNo=rec.containerNo;
     linked.logNo=rec.no;
@@ -1029,14 +1028,14 @@ function filteredConts(){
   const df=document.getElementById('c_dueFilter').value;
   let rows=containers.filter(r=>{
     if(q&&![r.cno,r.name,r.blNo,r.containerNo,r.rNo].join(' ').toLowerCase().includes(q))return false;
-    if(!sf&&r.status==='Cleared')return false; // cleared containers leave the active list
+    if(!sf&&isDone(r))return false; // done (Cleared / Delivered) containers leave the active list
     if(sf&&r.status!==sf)return false;
     if(df){
       if(df==='doextend')return needsDOExtend(r);
-      if(df==='notedtoday')return r.status!=='Cleared'&&r.clearance===isoLocal(new Date());
-      if(df==='notedtomorrow')return r.status!=='Cleared'&&r.clearance===addDays(isoLocal(new Date()),1);
+      if(df==='notedtoday')return !isDone(r)&&r.clearance===isoLocal(new Date());
+      if(df==='notedtomorrow')return !isDone(r)&&r.clearance===addDays(isoLocal(new Date()),1);
       const d=daysLeft(effLast(r).next);
-      if(d===null||r.status==='Cleared')return false;
+      if(d===null||isDone(r))return false;
       if(df==='overdue'&&!(d<0))return false;
       if(df==='soon'&&!(d>=0&&d<=3))return false;
       if(df==='week'&&!(d>=0&&d<=7))return false;
@@ -1061,7 +1060,7 @@ function filteredConts(){
   return sortRows(rows,cState,['no','ctnsLeft']);
 }
 function renderConts(){
-  const active=containers.filter(r=>r.status!=='Cleared');
+  const active=containers.filter(r=>!isDone(r));
   const inPort=containers.reduce((s,r)=>s+inPortCount(r),0);
   // once noted (clearance set) a container is under control — exclude from overdue/soon warnings
   const overdue=active.filter(r=>!isNoted(r)&&(()=>{const d=daysLeft(effLast(r).next);return d!==null&&d<0})()).length;
@@ -1137,7 +1136,7 @@ function containerNoCell(r){
     const numHtml=multi?`<span style="background:${bg};color:${fg};padding:1px 7px;border-radius:6px">${esc(cn)}</span>`:esc(cn);
     const sizeTag=info.size?` <span class="typechip" style="background:#e0f2fe;color:#0369a1">${esc(info.size)}${(info.size==='LCL'&&info.cbm)?' · '+esc(info.cbm)+'cbm':''}</span>`:'';
     let badge='';
-    const outBtn=(r.status!=='Cleared')?`<button class="copybtn" onclick="markCtnOut('${r.id}','${esc(cn)}')" title="Mark this container taken out of port">📤</button>`:'';
+    const outBtn=(!isDone(r))?`<button class="copybtn" onclick="markCtnOut('${r.id}','${esc(cn)}')" title="Mark this container taken out of port">📤</button>`:'';
     if(info.out){
       badge=` <span class="daysbadge d-ok" style="opacity:.55;cursor:pointer" onclick="markCtnOut('${r.id}','${esc(cn)}')" title="Taken out of port — click to undo">OUT ✓</span>`;
     }else if(info.clearance){
@@ -1172,7 +1171,7 @@ function ctnsLeftCell(r){
   if(r.ctnsLeft===null||r.ctnsLeft===undefined||r.ctnsLeft==='')return '<span class="d-none">—</span>';
   const n=Number(r.ctnsLeft);
   const cls=n===0?'d-ok':'d-warn';
-  const btns=r.status==='Cleared'?'':`<button class="copybtn" onclick="bumpCtnsLeft('${r.id}',-1)" title="One container taken out">−</button>`;
+  const btns=isDone(r)?'':`<button class="copybtn" onclick="bumpCtnsLeft('${r.id}',-1)" title="One container taken out">−</button>`;
   return `<span class="daysbadge ${cls}">${n} left</span>${btns}`;
 }
 function bumpCtnsLeft(id,delta){
@@ -1246,7 +1245,9 @@ document.getElementById('c_containerNo').addEventListener('input',renderCtnDetai
 document.getElementById('c_ctnCount').addEventListener('input',renderCtnDetails);
 function cycleContStatus(id){
   const r=containers.find(x=>x.id===id);if(!r)return;
-  const o=['Pending DO','DO Not Approved','DO Approved','Cleared'];
+  // Delivered is set only by the invoice — a delivered container is locked (remove the BILL NO to change)
+  if(r.status==='Delivered'){toast('Delivered is set by the invoice (BILL NO) — remove it to change the status');return;}
+  const o=['Pending DO','DO Not Approved','DO Approved','Cleared']; // manual cycle never reaches Delivered
   r.status=o[(o.indexOf(r.status)+1)%o.length];
   r._manual=true; // user set this by hand → auto-rules won't override it
   delete r._billCleared; // hand-picked status drops invoice provenance (never auto-reopened)
@@ -1306,11 +1307,16 @@ function saveCont(e){
     const outN=cns.filter(cn=>ctnInfo(rec,cn).out).length; // "left in port" drops only when a container is taken OUT (📤), not when clearance is noted
     rec.ctnsLeft=cns.length-outN;
   }
-  // manual override: if there's a bill but the user chose a non-cleared status, don't let auto-rules re-clear it
   const le=rec.entryId?entries.find(x=>x.id===rec.entryId):null;
-  if(le&&le.billNo&&rec.status!=='Cleared')rec._manual=true;
-  // user hand-picked Cleared without an invoice driving it → treat as a manual clear (stays cleared, never reopened)
-  if(rec.status==='Cleared'&&!(le&&le.billNo)){rec._manual=true;delete rec._billCleared;}
+  if(le&&le.billNo){
+    // invoice present ⇒ Delivered, always (locked; can't be downgraded by hand)
+    rec.status='Delivered';rec._billCleared=true;delete rec._manual;
+  }else if(rec.status==='Delivered'){
+    rec.status='Cleared'; // Delivered without an invoice isn't allowed → treat as a manual Cleared
+    rec._manual=true;delete rec._billCleared;
+  }else if(rec.status==='Cleared'){
+    rec._manual=true;delete rec._billCleared; // hand-picked Cleared (no invoice) — stays cleared, never auto-reopened
+  }
   if(c_id.value){containers[containers.findIndex(x=>x.id===c_id.value)]=rec;toast('Container updated');}
   else{containers.push(rec);toast('Container added');}
   saveContainers();ensureCustomer(rec.cno,rec.name);
@@ -1330,7 +1336,7 @@ function exportConts(){
 }
 // Audit report: how many containers cleared per month and per year (report only — not shown on screen)
 function exportContAudit(){
-  const cleared=containers.filter(c=>c.status==='Cleared'&&c.clearance);
+  const cleared=containers.filter(c=>isDone(c)&&c.clearance); // Cleared or Delivered
   if(!cleared.length){toast('No cleared containers to audit yet');return;}
   const byMonth={},byYear={};
   cleared.forEach(c=>{const m=c.clearance.slice(0,7),y=c.clearance.slice(0,4);byMonth[m]=(byMonth[m]||0)+1;byYear[y]=(byYear[y]||0)+1;});
@@ -1550,19 +1556,18 @@ function notifyDO(){
 }
 
 /* ============ boot ============ */
-// Invoice rule: an entry with no BILL NO (invoice) is NOT cleared. Runs on every load.
-// Exception: if its linked container is Cleared (cleared by hand at the port), that proves clearance — keep it.
+// Invoice rule (runs on every load):
+//  • BILL NO present  ⇒ Delivered (invoiced) — always.
+//  • no BILL NO       ⇒ can't be Delivered. Manual Cleared is kept; a stray Delivered is demoted
+//                       to Cleared (if its container is cleared by hand) or Pending.
 function enforceInvoiceRule(){
   let flipped=0;
   entries.forEach(r=>{
     if(r.billNo){
-      // has an invoice (BILL NO) ⇒ the shipment is cleared. Lift Pending → Cleared (keep Delivered as-is).
-      if(r.status==='Pending'){r.status='Cleared';flipped++;}
-    }else if(r.status==='Cleared'||r.status==='Delivered'){
-      // no invoice ⇒ not cleared — unless its container was cleared by hand at the port (that proves clearance)
+      if(r.status!=='Delivered'){r.status='Delivered';flipped++;}
+    }else if(r.status==='Delivered'){
       const c=containers.find(x=>x.entryId===r.id);
-      if(c&&c.status==='Cleared')return;
-      r.status='Pending';flipped++;
+      r.status=(c&&c.status==='Cleared')?'Cleared':'Pending';flipped++;
     }
   });
   if(flipped)saveEntries();
@@ -1571,71 +1576,74 @@ function enforceInvoiceRule(){
 // when a container is reopened (invoice removed / entry set Pending), pick the status that fits its dates
 function reopenStatus(c){return c.doDate?'DO Approved':'Pending DO';}
 // ---- bidirectional Form Log ⇄ Container Status sync ----
-// Propagate a Form Log entry's clearance CHANGE onto its linked container (transition-based, so editing an
-// unchanged entry never disturbs the container). Cleared/Delivered or an invoice ⇒ container Cleared;
-// switching the entry back to Pending (or removing the invoice) ⇒ container comes back to the active list.
+// Propagate a Form Log entry's CHANGE onto its linked container (transition-based, so editing an unchanged
+// entry never disturbs it). Desired container state from the entry: invoice ⇒ Delivered; hand-done (no bill)
+// ⇒ Cleared; otherwise active. Only acts when that desired state actually changes.
+function contDesiredFor(e){return e&&e.billNo?'Delivered':((e&&(e.status==='Cleared'||e.status==='Delivered'))?'Cleared':null);}
 function syncContFromEntry(e,before,cont){
   const c=cont||containers.find(x=>x.entryId===e.id);
   if(!c)return null;
-  const wasBill=!!(before&&before.billNo), nowBill=!!e.billNo;
-  const wasCl=!!(before&&(before.status==='Cleared'||before.status==='Delivered'));
-  const nowCl=e.status==='Cleared'||e.status==='Delivered';
-  const clearNow=(!wasBill&&nowBill)||(!wasCl&&nowCl);   // invoice added OR status moved to Cleared
-  const reopenNow=(wasBill&&!nowBill)||(wasCl&&!nowCl);  // invoice removed OR status moved to Pending
+  const want=contDesiredFor(e), prev=contDesiredFor(before);
+  if(want===prev)return null; // no relevant transition
   let act=null;
-  if(clearNow&&c.status!=='Cleared'){
-    c.status='Cleared';
-    if(!c.clearance)c.clearance=e.date||isoLocal(new Date());
-    if(nowBill)c._billCleared=true; // invoice-driven clear may auto-reopen later if the invoice is removed
-    act='cleared'; toast(nowBill?'Invoice entered → container marked Cleared ✓':'Form Log cleared → container marked Cleared ✓');
-  }else if(reopenNow&&c.status==='Cleared'){
-    c.status=reopenStatus(c); c.clearance='';
-    delete c._billCleared; delete c._manual; // explicit reopen from the Form Log overrides prior flags
-    act='reopened'; toast('Form Log set to Pending → container back in Container Status');
+  if(want==='Delivered'){
+    if(c.status!=='Delivered'){c.status='Delivered';if(!c.clearance)c.clearance=e.date||isoLocal(new Date());c._billCleared=true;delete c._manual;act='delivered';toast('Invoice entered → marked Delivered ✓');}
+  }else if(want==='Cleared'){
+    if(c.status!=='Cleared'){c.status='Cleared';if(!c.clearance)c.clearance=e.date||isoLocal(new Date());delete c._billCleared;act='cleared';toast('Form Log cleared → container marked Cleared ✓');}
+  }else{ // active → reopen a done container
+    if(isDone(c)){c.status=reopenStatus(c);c.clearance='';delete c._billCleared;delete c._manual;act='reopened';toast('Reopened → back in Container Status');}
   }
   if(act){saveContainers();renderConts();}
   return act;
 }
-// Propagate a container's status onto its linked Form Log entry: Cleared ⇒ entry Cleared; reopened ⇒ entry Pending.
+// Propagate a container's status onto its linked Form Log entry. Invoice always wins (Delivered);
+// otherwise a done container ⇒ entry Cleared, an active container ⇒ entry Pending.
 function applyContToEntry(c){
   const e=c&&c.entryId?entries.find(x=>x.id===c.entryId):null;
   if(!e)return false;
-  let ch=false;
-  if(c.status==='Cleared'){ if(e.status!=='Cleared'&&e.status!=='Delivered'){e.status='Cleared';ch=true;} }
-  else { if(e.status==='Cleared'||e.status==='Delivered'){e.status='Pending';ch=true;} }
-  if(ch){saveEntries();if(typeof renderEntries==='function')renderEntries();if(typeof buildEntryFilters==='function')buildEntryFilters();}
-  return ch;
+  const want=e.billNo?'Delivered':(isDone(c)?'Cleared':'Pending');
+  if(e.status===want)return false;
+  e.status=want;saveEntries();
+  if(typeof renderEntries==='function')renderEntries();
+  if(typeof buildEntryFilters==='function')buildEntryFilters();
+  return true;
 }
 // Rule: billing happens AFTER clearance, so a Form Log entry that HAS a BILL NO (invoice) means
-// its container is cleared, and one whose invoice was REMOVED is back to not-cleared. Auto-sync both
-// directions. Manual statuses (_manual) are always respected and never touched.
+// its container is DELIVERED; one whose invoice was REMOVED comes back. Invoice = Delivered wins over a
+// manual status; a hand-set Cleared (no invoice) is left alone.
 function autoClearFromBill(){
   const byId=new Map(entries.map(r=>[r.id,r]));
   let cleared=0,reopened=0;
   containers.forEach(c=>{
-    if(!c.entryId||c._manual)return;
+    if(!c.entryId)return;
     const e=byId.get(c.entryId);
     if(!e)return;
-    if(e.billNo&&c.status!=='Cleared'){c.status='Cleared';if(!c.clearance)c.clearance=e.date||isoLocal(new Date());c._billCleared=true;cleared++;}
-    // only reopen containers that were cleared BY an invoice (never ones cleared by hand)
-    else if(!e.billNo&&c.status==='Cleared'&&c._billCleared){c.status=reopenStatus(c);c.clearance='';delete c._billCleared;reopened++;}
+    if(e.billNo){
+      // invoice ⇒ Delivered, always (overrides a manual status)
+      if(c.status!=='Delivered'){c.status='Delivered';if(!c.clearance)c.clearance=e.date||isoLocal(new Date());c._billCleared=true;delete c._manual;cleared++;}
+    }else if(c.status==='Delivered'&&c._billCleared){
+      // invoice removed from a delivered container → bring it back
+      c.status=reopenStatus(c);c.clearance='';delete c._billCleared;reopened++;
+    }
   });
   if(cleared||reopened)saveContainers();
   return cleared+reopened;
 }
 // Sync: every MP entry in the Form Log gets a Container Status record (runs on every load, no duplicates).
-// Pending entries become active containers; Cleared/Delivered entries go to container history.
+// Invoiced entries land as Delivered; hand-cleared as Cleared; the rest as active (Pending DO).
 function syncMPContainers(){
   const linked=new Set(containers.map(c=>c.entryId).filter(Boolean));
   let addedActive=0,addedHistory=0;
   let nextNo=containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0);
   entries.forEach(r=>{
     if(r.type!=='MP'||linked.has(r.id))return;
-    const done=r.status==='Cleared'||r.status==='Delivered'||!!r.billNo;
+    const st=r.billNo?'Delivered':((r.status==='Cleared'||r.status==='Delivered')?'Cleared':'Pending DO');
+    const done=st!=='Pending DO';
     containers.push({id:uid(),entryId:r.id,no:++nextNo,
       cno:r.cno,rNo:r.rNo,name:r.customer,blNo:r.awbBl,containerNo:r.containerNo||'',logNo:r.no,
+      _billCleared:r.billNo?true:undefined,
       discharge:'',lastDate:'',doDate:'',clearance:done?(r.date||''):'',
-      status:done?'Cleared':'Pending DO',remark:''});
+      status:st,remark:''});
     if(done)addedHistory++;else addedActive++;
   });
   if(addedActive+addedHistory>0)saveContainers();
@@ -1655,7 +1663,7 @@ function syncMPContainers(){
 (()=>{
   let fixed=0;
   containers.forEach(c=>{
-    if(c.status==='Cleared'||!c.discharge)return;
+    if(isDone(c)||!c.discharge)return;
     const want=lastDateFor(c.discharge,c.blNo);
     if(want&&c.lastDate!==want){c.lastDate=want;fixed++;}
   });
