@@ -472,9 +472,11 @@
         <div class="hint" id="c_custHint"></div></div>
       <div class="grid3">
         <div class="field"><label>BL NO</label><input id="c_blNo"></div>
-        <div class="field"><label>CONTAINER NO(S) — commas for multiple</label><input id="c_containerNo" placeholder="TLLU5033169, SEKU5503423"></div>
+        <div class="field"><label>HOW MANY CONTAINERS?</label><input id="c_ctnCount" type="number" min="1" placeholder="1"></div>
         <div class="field"><label>CONTAINERS LEFT</label><input id="c_ctnsLeft" type="number" min="0"></div>
       </div>
+      <div class="field"><label>CONTAINER NO(S) — commas for multiple</label><input id="c_containerNo" placeholder="TLLU5033169, SEKU5503423">
+        <div class="hint" id="c_ctnHint"></div></div>
       <div id="c_ctnDetails" class="ctndetails"></div>
       <div class="grid3">
         <div class="field"><label>DISCHARGE DATE</label><input id="c_discharge" type="date"></div>
@@ -1054,12 +1056,18 @@ function renderConts(){
 function contNoList(r){
   return (r.containerNo||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean);
 }
+// distinct colour per container position — same colour in the table and in the edit-form chips
+const CTN_COLORS=[['#e0f2fe','#0369a1'],['#dcfce7','#15803d'],['#fef9c3','#a16207'],['#fce7f3','#be185d'],['#ede9fe','#6d28d9'],['#ffedd5','#c2410c'],['#cffafe','#0e7490'],['#f1f5f9','#334155']];
+function ctnColor(idx){return CTN_COLORS[idx%CTN_COLORS.length];}
 function containerNoCell(r){
   const list=contNoList(r);
   if(!list.length)return '—';
-  return list.map(cn=>{
+  const multi=list.length>1;
+  return list.map((cn,idx)=>{
     const info=ctnInfo(r,cn);
-    const sizeTag=info.size?` <span class="typechip" style="background:#e0f2fe;color:#0369a1">${esc(info.size)}${info.cbm?' · '+esc(info.cbm)+'cbm':''}</span>`:'';
+    const [bg,fg]=ctnColor(idx);
+    const numHtml=multi?`<span style="background:${bg};color:${fg};padding:1px 7px;border-radius:6px">${esc(cn)}</span>`:esc(cn);
+    const sizeTag=info.size?` <span class="typechip" style="background:#e0f2fe;color:#0369a1">${esc(info.size)}${(info.size==='LCL'&&info.cbm)?' · '+esc(info.cbm)+'cbm':''}</span>`:'';
     let badge='';
     if(info.clearance){
       badge=` <span class="daysbadge d-ok">cleared ${fmtDate(info.clearance)} ✓</span>`;
@@ -1076,7 +1084,7 @@ function containerNoCell(r){
     }else if(info.arrival){
       badge=` <span class="daysbadge d-warn" title="Arrived ${fmtDate(info.arrival)} — not discharged">arrived</span>`;
     }
-    return `<div style="font-weight:600">${esc(cn)}${sizeTag}${badge}</div>`;
+    return `<div style="font-weight:600;margin:1px 0">${numHtml}${sizeTag}${badge}</div>`;
   }).join('');
 }
 function markCtnOut(id,cn){
@@ -1111,16 +1119,29 @@ function ctnKey(cn){return Object.keys(__edPI).find(k=>k.toUpperCase()===cn.toUp
 function setCtnField(cn,field,val){
   const k=ctnKey(cn);
   __edPI[k]={...(__edPI[k]||{}),[field]:val};
+  if(field==='size'&&val!=='LCL')delete __edPI[k].cbm; // CBM only makes sense for LCL
   if(field!=='cbm')renderCtnDetails(); // re-render chips/state (cbm skipped so typing keeps focus)
 }
 function selCtn(cn){__edSel=cn;renderCtnDetails();}
 function renderCtnDetails(){
   const wrap=document.getElementById('c_ctnDetails');
+  const hint=document.getElementById('c_ctnHint');
   const list=(document.getElementById('c_containerNo').value||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean);
+  const want=Number((document.getElementById('c_ctnCount')||{}).value)||0;
+  // count guidance: "how many containers?" vs how many numbers are typed so far
+  if(want>list.length){
+    const more=want-list.length;
+    hint.innerHTML=`<span style="color:#c2410c;font-weight:600">${list.length} of ${want} entered — add ${more} more number${more>1?'s':''}, separated by commas</span>`;
+  }else if(want&&want<list.length){
+    hint.innerHTML=`<span style="color:#c2410c;font-weight:600">${list.length} numbers entered but count says ${want} — check the count box</span>`;
+  }else{
+    hint.textContent=list.length?`📦 ${list.length} container${list.length>1?'s':''} in this BL`:'';
+  }
   if(!list.length){wrap.innerHTML='';return;}
   const sizes=['',"20'","40'","40' HC","LCL"];
-  const sizeSel=(cn,i)=>`<div><label>SIZE / TYPE</label><select onchange="setCtnField('${esc(cn)}','size',this.value)">${sizes.map(s=>`<option${(i.size||'')===s?' selected':''}>${s||'—'}</option>`).join('')}</select></div>
-      <div><label>CBM (for LCL)</label><input type="number" step="any" min="0" value="${i.cbm||''}" oninput="setCtnField('${esc(cn)}','cbm',this.value)"></div>`;
+  // CBM box appears only when LCL is chosen
+  const sizeSel=(cn,i)=>`<div><label>SIZE / TYPE</label><select onchange="setCtnField('${esc(cn)}','size',this.value)">${sizes.map(s=>`<option${(i.size||'')===s?' selected':''}>${s||'—'}</option>`).join('')}</select></div>`+
+      ((i.size||'')==='LCL'?`<div><label>CBM (LCL)</label><input type="number" step="any" min="0" value="${i.cbm||''}" oninput="setCtnField('${esc(cn)}','cbm',this.value)"></div>`:'');
   if(list.length===1){
     // single container: size/type here, dates in the main fields below
     const cn=list[0],i=__edPI[ctnKey(cn)]||{};
@@ -1130,23 +1151,28 @@ function renderCtnDetails(){
   }
   // multiple containers under one BL: pick a container, enter its details — all stays under this one record
   if(!list.some(cn=>cn.toUpperCase()===(__edSel||'').toUpperCase()))__edSel=list[0];
-  const chips=list.map(cn=>{
+  const selIdx=list.findIndex(cn=>cn.toUpperCase()===__edSel.toUpperCase());
+  const chips=list.map((cn,idx)=>{
     const i=__edPI[ctnKey(cn)]||{};
-    const sel=cn.toUpperCase()===__edSel.toUpperCase();
+    const [bg,fg]=ctnColor(idx);
+    const sel=idx===selIdx;
     const state=i.clearance?' ✓':(i.discharge?' · '+fmtDate(addDays(i.discharge,10)):'');
-    return `<span class="daysbadge ${sel?'d-warn':'d-ok'}" style="cursor:pointer;margin:0 5px 5px 0;${sel?'outline:2px solid var(--brand);':''}" onclick="selCtn('${esc(cn)}')">${esc(cn)}${i.size?' · '+esc(i.size):''}${state}</span>`;
+    return `<span class="daysbadge" style="cursor:pointer;margin:0 5px 5px 0;background:${bg};color:${fg};${sel?'outline:2px solid var(--brand);':''}" onclick="selCtn('${esc(cn)}')">${esc(cn)}${i.size?' · '+esc(i.size):''}${state}</span>`;
   }).join('');
   const cn=__edSel,i=__edPI[ctnKey(cn)]||{};
+  const [bg,fg]=ctnColor(selIdx<0?0:selIdx);
   const ld=i.discharge?addDays(i.discharge,10):'';
-  wrap.innerHTML=`<div style="font-size:11.5px;color:var(--muted);margin:2px 0 6px">📦 ${list.length} containers under this BL — <strong>click a container</strong>, then enter its details:</div>
+  wrap.innerHTML=`<div style="font-size:11.5px;color:var(--muted);margin:2px 0 6px"><strong>Click a container</strong>, then enter its details — each keeps its own colour:</div>
   <div>${chips}</div>
-  <div class="cdrow"><div class="cdhead"><span>${esc(cn)}</span><span style="font-weight:600;font-size:11px;color:${i.clearance?'var(--ok)':'var(--muted)'}">${i.clearance?'cleared ✓':(ld?'last date '+fmtDate(ld):'no discharge yet')}</span></div><div class="cdgrid">
+  <div class="cdrow" style="border-left:4px solid ${fg}"><div class="cdhead"><span style="background:${bg};color:${fg};padding:1px 8px;border-radius:6px">${esc(cn)}</span><span style="font-weight:600;font-size:11px;color:${i.clearance?'var(--ok)':'var(--muted)'}">${i.clearance?'cleared ✓':(ld?'last date '+fmtDate(ld)+' (discharge +10d)':'no discharge yet')}</span></div><div class="cdgrid">
     ${sizeSel(cn,i)}
+    <div><label>ARRIVAL</label><input type="date" value="${i.arrival||''}" onchange="setCtnField('${esc(cn)}','arrival',this.value)"></div>
     <div><label>DISCHARGE</label><input type="date" value="${i.discharge||''}" onchange="setCtnField('${esc(cn)}','discharge',this.value)"></div>
     <div><label>CLEARANCE</label><input type="date" value="${i.clearance||''}" onchange="setCtnField('${esc(cn)}','clearance',this.value)"></div>
   </div></div>`;
 }
 document.getElementById('c_containerNo').addEventListener('input',renderCtnDetails);
+document.getElementById('c_ctnCount').addEventListener('input',renderCtnDetails);
 function cycleContStatus(id){
   const r=containers.find(x=>x.id===id);if(!r)return;
   const o=['Pending DO','DO Not Approved','DO Approved','Cleared'];
@@ -1169,6 +1195,7 @@ function openContForm(id){
     c_discharge.value=r.discharge||'';c_lastDate.value=r.lastDate||'';c_doDate.value=r.doDate||'';
     c_clearance.value=r.clearance||'';c_status.value=r.status;c_remark.value=r.remark||'';
     c_ctnsLeft.value=r.ctnsLeft??'';
+    c_ctnCount.value=contNoList(r).length||'';
     __edPI=JSON.parse(JSON.stringify(r.portInfo||{}));
   }else{
     t.textContent='Add Container';f.reset();c_id.value='';
