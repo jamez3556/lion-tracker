@@ -912,7 +912,7 @@ function saveEntry(e){
     containers.push({id:newContId,entryId:rec.id,
       no:containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1,
       cno:rec.cno,rNo:rec.rNo,name:rec.customer,blNo:rec.awbBl,containerNo:rec.containerNo||'',logNo:rec.no,
-      ctnsLeft:nCtns||null,
+      ctnsLeft:nCtns||null,_billCleared:billCleared||undefined,
       discharge:'',lastDate:'',doDate:'',clearance:billCleared?(rec.date||isoLocal(new Date())):'',
       status:billCleared?'Cleared':'Pending DO',remark:''});
     saveContainers();
@@ -924,12 +924,14 @@ function saveEntry(e){
     if(billCleared&&linked.status!=='Cleared'&&!linked._manual){
       linked.status='Cleared';
       if(!linked.clearance)linked.clearance=rec.date||isoLocal(new Date());
+      linked._billCleared=true; // remember this clear came from the invoice, so removing it can reopen
       toast('Invoice entered → container marked Cleared ✓');
     }
-    // invoice removed from the form → bring the container back to the active list (unless manually set)
-    else if(!billCleared&&linked.status==='Cleared'&&!linked._manual){
+    // invoice removed → reopen ONLY if this container was cleared BY the invoice (not cleared by hand)
+    else if(!billCleared&&linked.status==='Cleared'&&linked._billCleared&&!linked._manual){
       linked.status=reopenStatus(linked);
       linked.clearance=''; // clearance was auto-set from the invoice — undo it
+      delete linked._billCleared;
       toast('Invoice removed → container back in Container Status');
     }
     saveContainers();renderConts();
@@ -1184,6 +1186,7 @@ function cycleContStatus(id){
   const o=['Pending DO','DO Not Approved','DO Approved','Cleared'];
   r.status=o[(o.indexOf(r.status)+1)%o.length];
   r._manual=true; // user set this by hand → auto-rules won't override it
+  delete r._billCleared; // hand-picked status drops invoice provenance (never auto-reopened)
   if(r.status==='Cleared'){
     if(!r.clearance)r.clearance=isoLocal(new Date());
     toast('Cleared ✓ — removed from the active list');
@@ -1227,7 +1230,7 @@ function saveCont(e){
   const merged={...(prev&&prev.portInfo||{})};
   Object.keys(__edPI).forEach(k=>{merged[k]={...(merged[k]||{}),...__edPI[k]};});
   const rec={id:c_id.value||uid(),entryId:prev?prev.entryId:undefined,logNo:prev?prev.logNo:undefined,
-    _manual:prev?prev._manual:undefined,portInfo:merged,no:c_no.value===''?null:Number(c_no.value),
+    _manual:prev?prev._manual:undefined,_billCleared:prev?prev._billCleared:undefined,portInfo:merged,no:c_no.value===''?null:Number(c_no.value),
     cno:c_cno.value.trim(),rNo:c_rNo.value.trim(),name:c_name.value.trim(),
     blNo:c_blNo.value.trim(),containerNo:c_containerNo.value.trim(),
     ctnsLeft:c_ctnsLeft.value===''?null:Math.max(0,Number(c_ctnsLeft.value)),
@@ -1244,6 +1247,8 @@ function saveCont(e){
   // manual override: if there's a bill but the user chose a non-cleared status, don't let auto-rules re-clear it
   const le=rec.entryId?entries.find(x=>x.id===rec.entryId):null;
   if(le&&le.billNo&&rec.status!=='Cleared')rec._manual=true;
+  // user hand-picked Cleared without an invoice driving it → treat as a manual clear (stays cleared, never reopened)
+  if(rec.status==='Cleared'&&!(le&&le.billNo)){rec._manual=true;delete rec._billCleared;}
   if(c_id.value){containers[containers.findIndex(x=>x.id===c_id.value)]=rec;toast('Container updated');}
   else{containers.push(rec);toast('Container added');}
   saveContainers();ensureCustomer(rec.cno,rec.name);
@@ -1500,8 +1505,9 @@ function autoClearFromBill(){
     if(!c.entryId||c._manual)return;
     const e=byId.get(c.entryId);
     if(!e)return;
-    if(e.billNo&&c.status!=='Cleared'){c.status='Cleared';if(!c.clearance)c.clearance=e.date||isoLocal(new Date());cleared++;}
-    else if(!e.billNo&&c.status==='Cleared'){c.status=reopenStatus(c);c.clearance='';reopened++;}
+    if(e.billNo&&c.status!=='Cleared'){c.status='Cleared';if(!c.clearance)c.clearance=e.date||isoLocal(new Date());c._billCleared=true;cleared++;}
+    // only reopen containers that were cleared BY an invoice (never ones cleared by hand)
+    else if(!e.billNo&&c.status==='Cleared'&&c._billCleared){c.status=reopenStatus(c);c.clearance='';delete c._billCleared;reopened++;}
   });
   if(cleared||reopened)saveContainers();
   return cleared+reopened;
