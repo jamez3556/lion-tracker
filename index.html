@@ -105,12 +105,16 @@
   tr.row-danger{background:#fef2f2}
   tr.flashnew{animation:flashbg 2.6s ease}
   @keyframes flashbg{0%,60%{background:#dbeafe}100%{background:transparent}}
-  /* Form Log rows tinted by shipment type */
-  tbody tr.t-MP{background:#dcfce7}
+  /* Light zebra tint on every row so the page isn't all-white and is easy to read */
+  tbody tr:nth-child(odd){background:#f7f9fc}
+  tbody tr:nth-child(even){background:#eef2f8}
+  tbody tr:hover{background:#e4ebf5}
+  /* Form Log rows tinted by shipment type (override the zebra) */
+  tbody tr.t-MP,tbody tr.t-MP:nth-child(odd),tbody tr.t-MP:nth-child(even){background:#dcfce7}
   tbody tr.t-MP:hover{background:#cdf6db}
-  tbody tr.t-SG{background:#e0f2fe}
+  tbody tr.t-SG,tbody tr.t-SG:nth-child(odd),tbody tr.t-SG:nth-child(even){background:#e0f2fe}
   tbody tr.t-SG:hover{background:#d3ebfc}
-  tbody tr.t-HA{background:#fef9c3}
+  tbody tr.t-HA,tbody tr.t-HA:nth-child(odd),tbody tr.t-HA:nth-child(even){background:#fef9c3}
   tbody tr.t-HA:hover{background:#fdf3ab}
   .status-pill{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;border:none;cursor:pointer;white-space:nowrap}
   .st-Pending{background:var(--warnbg);color:var(--warn)}
@@ -267,11 +271,15 @@
     <select class="filter" id="e_statusFilter">
       <option value="">All statuses</option><option>Pending</option><option>Cleared</option><option>Delivered</option>
     </select>
+    <select class="filter" id="e_invFilter">
+      <option value="">All invoices</option><option value="pending">🧾 Invoice pending (no bill)</option><option value="done">Invoiced (has bill)</option>
+    </select>
     <select class="filter" id="e_typeFilter"><option value="">All types</option></select>
     <select class="filter" id="e_monthFilter"><option value="">All months</option></select>
     <button class="primary" onclick="openEntryForm()">＋ Add Entry</button>
     <button class="ghost" onclick="window.open('https://portal.customs.gov.mv/','_blank')">🏛 customs.gov.mv</button>
     <button class="ghost" onclick="exportEntries()">⬇ Excel</button>
+    <button class="ghost" onclick="exportEntryAudit()">📊 Audit</button>
     <button class="ghost" onclick="window.print()">🖨 Print</button>
   </div>
   <div class="tablewrap m-cards">
@@ -783,11 +791,14 @@ function buildEntryFilters(){
 function filteredEntries(){
   const q=document.getElementById('e_search').value.trim().toLowerCase();
   const sf=document.getElementById('e_statusFilter').value;
+  const inv=document.getElementById('e_invFilter').value;
   const tf=document.getElementById('e_typeFilter').value;
   const mf=document.getElementById('e_monthFilter').value;
   let rows=entries.filter(r=>{
     if(q&&![r.cno,r.customer,r.awbBl,r.billNo,r.rNo,r.file].join(' ').toLowerCase().includes(q))return false;
     if(sf&&r.status!==sf)return false;
+    if(inv==='pending'&&r.billNo)return false;   // invoice pending = no BILL NO
+    if(inv==='done'&&!r.billNo)return false;
     if(tf&&r.type!==tf)return false;
     if(mf&&(r.date||'').slice(0,7)!==mf)return false;
     return true;
@@ -795,17 +806,20 @@ function filteredEntries(){
   return sortRows(rows,eState,['no','grsWt','pkgs']);
 }
 function renderEntries(){
-  const total=entries.length;
   const pending=entries.filter(r=>r.status==='Pending').length;
-  const cleared=entries.filter(r=>r.status==='Cleared').length;
-  const delivered=entries.filter(r=>r.status==='Delivered').length;
-  const wt=entries.reduce((s,r)=>s+(Number(r.grsWt)||0),0);
+  const invPending=entries.filter(r=>!r.billNo).length; // no BILL NO = not invoiced yet
+  // container-derived metrics brought up to the Form Log top (click a card to open Container Status filtered)
+  const todayIso=isoLocal(new Date()), tomorrowIso=addDays(todayIso,1);
+  const activeC=containers.filter(r=>r.status!=='Cleared');
+  const dueSoon=activeC.filter(r=>!isNoted(r)&&(()=>{const d=daysLeft(effLast(r).next);return d!==null&&d>=0&&d<=3})()).length;
+  const notedToday=activeC.filter(r=>r.clearance===todayIso).length;
+  const notedTomorrow=activeC.filter(r=>r.clearance===tomorrowIso).length;
   document.getElementById('e_stats').innerHTML=`
-    <div class="card c-blue"><div class="n">${total.toLocaleString()}</div><div class="l">Total Entries</div></div>
     <div class="card c-warn"><div class="n">${pending.toLocaleString()}</div><div class="l">Pending</div></div>
-    <div class="card c-info"><div class="n">${cleared.toLocaleString()}</div><div class="l">Cleared</div></div>
-    <div class="card c-ok"><div class="n">${delivered.toLocaleString()}</div><div class="l">Delivered</div></div>
-    <div class="card c-purple"><div class="n" style="font-size:21px;padding-top:4px">${Math.round(wt).toLocaleString()} kg</div><div class="l">Total Grs Wt</div></div>`;
+    <div class="card c-danger" style="cursor:pointer" onclick="showInvoicePending()" title="Entries with no BILL NO — click to list them"><div class="n">${invPending.toLocaleString()}</div><div class="l">🧾 Invoice Pending</div></div>
+    <div class="card c-danger" style="cursor:pointer" onclick="goToContFilter('soon')" title="Containers due within 3 days — click to view"><div class="n">${dueSoon}</div><div class="l">Due ≤ 3 Days</div></div>
+    <div class="card c-info" style="cursor:pointer" onclick="goToContFilter('notedtoday')" title="Containers noted for today — click to view"><div class="n">${notedToday}</div><div class="l">Noted for Today</div></div>
+    <div class="card c-purple" style="cursor:pointer" onclick="goToContFilter('notedtomorrow')" title="Containers noted for tomorrow — click to view"><div class="n">${notedTomorrow}</div><div class="l">Noted for Tomorrow</div></div>`;
   const rows=filteredEntries();
   const slice=rows.slice((eState.page-1)*PAGE_SIZE,eState.page*PAGE_SIZE);
   document.getElementById('e_empty').style.display=rows.length===0?'block':'none';
@@ -968,6 +982,34 @@ function exportEntries(){
   xlsExport('lion-form-log',
     ['NO','C NO','DATE','CUSTOMER NAME','TYPE','FILE','R NO','BILL NO','GRS WT','PKGS','AWB / BL NO','TIME','STATUS'],
     filteredEntries().map(r=>[r.no,r.cno,r.date,r.customer,r.type,r.file,r.rNo,r.billNo,r.grsWt,r.pkgs,r.awbBl,r.time,r.status]));
+}
+// show only the entries that still need an invoice (no BILL NO)
+function showInvoicePending(){
+  document.getElementById('e_statusFilter').value='';
+  document.getElementById('e_invFilter').value='pending';
+  eState.page=1;renderEntries();
+  toast('Showing entries with no invoice (BILL NO)');
+}
+// jump to Container Status with a deadline filter applied (used by the Form Log summary cards)
+function goToContFilter(f){
+  switchView('containers');
+  document.getElementById('c_statusFilter').value='';
+  document.getElementById('c_dueFilter').value=f;
+  cState.page=1;renderConts();
+}
+// Audit report (Excel only, not shown on screen): the totals removed from the Form Log stat bar —
+// entries / grs wt / cleared / delivered / pending / invoice-pending, overall and broken down per month.
+function exportEntryAudit(){
+  const rows=[], src=filteredEntries();
+  const wt=a=>a.reduce((s,r)=>s+(Number(r.grsWt)||0),0);
+  const line=(label,a)=>rows.push([label,a.length,a.filter(r=>r.status==='Pending').length,a.filter(r=>r.status==='Cleared').length,a.filter(r=>r.status==='Delivered').length,a.filter(r=>!r.billNo).length,Math.round(wt(a))]);
+  const months=[...new Set(src.map(r=>(r.date||'').slice(0,7)).filter(Boolean))].sort().reverse();
+  months.forEach(m=>line(new Date(m+'-01T00:00:00').toLocaleDateString('en-GB',{month:'long',year:'numeric'}),src.filter(r=>(r.date||'').slice(0,7)===m)));
+  const noDate=src.filter(r=>!(r.date||'').slice(0,7));
+  if(noDate.length)line('(no date)',noDate);
+  rows.push(['','','','','','','']);
+  line('TOTAL',src);
+  xlsExport('lion-form-log-audit',['PERIOD','ENTRIES','PENDING','CLEARED','DELIVERED','INVOICE PENDING','TOTAL GRS WT (kg)'],rows);
 }
 
 /* ============ CONTAINERS ============ */
@@ -1619,7 +1661,7 @@ makeSortable('e_head',eState,renderEntries);
 makeSortable('c_head',cState,renderConts);
 makeSortable('u_head',uState,renderCusts);
 makeSortable('p_head',pState,renderCreds);
-[['e_search',renderEntries,eState],['e_statusFilter',renderEntries,eState],['e_typeFilter',renderEntries,eState],['e_monthFilter',renderEntries,eState],
+[['e_search',renderEntries,eState],['e_statusFilter',renderEntries,eState],['e_invFilter',renderEntries,eState],['e_typeFilter',renderEntries,eState],['e_monthFilter',renderEntries,eState],
  ['c_search',renderConts,cState],['c_statusFilter',renderConts,cState],['c_dueFilter',renderConts,cState],
  ['u_search',renderCusts,uState],['p_search',renderCreds,pState]].forEach(([id,fn,st])=>{
   const el=document.getElementById(id);
