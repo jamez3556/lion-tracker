@@ -363,7 +363,7 @@
   <div class="toolbar">
     <div class="search">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-      <input id="u_search" type="text" placeholder="Search C number or name…">
+      <input id="u_search" type="text" placeholder="Search C number, name or contact…">
     </div>
     <button class="primary" onclick="openCustForm()">＋ Add Customer</button>
     <button class="ghost" onclick="exportCusts()">⬇ Excel</button>
@@ -371,10 +371,11 @@
   </div>
   <div class="tablewrap m-cards">
     <div class="scroll">
-      <table style="min-width:560px">
+      <table style="min-width:680px">
         <thead><tr id="u_head">
           <th data-k="cno">C NUMBER <span class="arrow">▲▼</span></th>
           <th data-k="name">CUSTOMER NAME <span class="arrow">▲▼</span></th>
+          <th data-k="contact">CONTACT <span class="arrow">▲▼</span></th>
           <th class="nosort">JOBS IN LOG</th>
           <th class="nosort actcol"></th>
         </tr></thead>
@@ -400,10 +401,11 @@
   </div>
   <div class="tablewrap m-cards">
     <div class="scroll">
-      <table style="min-width:1100px">
+      <table style="min-width:1240px">
         <thead><tr id="p_head">
           <th data-k="cno">C NUMBER <span class="arrow">▲▼</span></th>
           <th data-k="name">NAME <span class="arrow">▲▼</span></th>
+          <th data-k="contact">CONTACT <span class="arrow">▲▼</span></th>
           <th data-k="mplUser">MPL USERNAME <span class="arrow">▲▼</span></th>
           <th class="nosort">MPL PASSWORD</th>
           <th class="nosort">CUSTOM PORTAL</th>
@@ -562,6 +564,7 @@ service cloud.firestore {
       <input type="hidden" id="u_id">
       <div class="field"><label>C NUMBER</label><input id="u_cno" required></div>
       <div class="field"><label>CUSTOMER NAME</label><input id="u_name" required></div>
+      <div class="field"><label>CONTACT (phone / mobile)</label><input id="u_contact" type="text" placeholder="e.g. 7712345"></div>
       <div class="actions">
         <button type="button" class="ghost" onclick="closeModal('overlay-cust')">Cancel</button>
         <button type="submit" class="primary">Save</button>
@@ -579,6 +582,7 @@ service cloud.firestore {
         <div class="field"><label>C NUMBER</label><input id="p_cno" autocomplete="off"></div>
         <div class="field"><label>NAME</label><input id="p_name"></div>
       </div>
+      <div class="field"><label>CONTACT (phone / mobile)</label><input id="p_contact" type="text" placeholder="e.g. 7712345"></div>
       <div class="grid2">
         <div class="field"><label>MPL USERNAME</label><input id="p_mplUser" autocomplete="off"></div>
         <div class="field"><label>MPL PASSWORD</label><input id="p_mplPass" autocomplete="off"></div>
@@ -1346,7 +1350,7 @@ const uState={key:'cno',dir:1,page:1};
 function custsPage(p){uState.page=p;renderCusts();}
 function filteredCusts(){
   const q=document.getElementById('u_search').value.trim().toLowerCase();
-  let rows=customers.filter(r=>!q||[r.cno,r.name].join(' ').toLowerCase().includes(q));
+  let rows=customers.filter(r=>!q||[r.cno,r.name,r.contact].join(' ').toLowerCase().includes(q));
   return sortRows(rows,uState,[]);
 }
 const jobCountCache={};
@@ -1371,6 +1375,7 @@ function renderCusts(){
     return `<tr>
       <td class="cno" data-l="C Number">${esc(r.cno)}</td>
       <td class="name" style="max-width:none" data-l="Name" title="${esc(r.name)}">${esc(r.name)}</td>
+      <td data-l="Contact">${r.contact?esc(r.contact)+`<button class="copybtn" onclick="copyText('${esc(r.contact)}')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}</td>
       <td data-l="Jobs">${jc?`<span class="daysbadge d-ok">${jc} job${jc>1?'s':''}</span>`:'<span class="d-none">—</span>'}</td>
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="openCustForm('${r.id}')" title="Edit">✏️</button>
@@ -1383,19 +1388,19 @@ function openCustForm(id){
   const t=document.getElementById('u_modalTitle');
   if(id){
     const r=customers.find(x=>x.id===id);t.textContent='Edit Customer';
-    u_id.value=r.id;u_cno.value=r.cno;u_name.value=r.name;
-  }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';}
+    u_id.value=r.id;u_cno.value=r.cno;u_name.value=r.name;u_contact.value=r.contact||'';
+  }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';u_contact.value='';}
   showModal('overlay-cust');setTimeout(()=>u_cno.focus(),50);
 }
 function saveCust(e){
   e.preventDefault();
-  const cno=u_cno.value.trim(),name=u_name.value.trim();
+  const cno=u_cno.value.trim(),name=u_name.value.trim(),contact=u_contact.value.trim();
   if(!u_id.value){
     const ex=lookupCustomer(cno);
     if(ex){toast('C number already in list: '+ex.name);return false;}
-    customers.push({id:uid(),cno,name});toast('Customer added');
+    customers.push({id:uid(),cno,name,contact});toast('Customer added');
   }else{
-    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;toast('Customer updated');
+    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;toast('Customer updated');
   }
   saveCustomers();renderCusts();updateCounts();closeModal('overlay-cust');
   return false;
@@ -1406,7 +1411,7 @@ function delCust(id){
   customers=customers.filter(x=>x.id!==id);saveCustomers();renderCusts();updateCounts();toast('Customer deleted');
 }
 function exportCusts(){
-  xlsExport('lion-customers',['C NUMBER','CUSTOMER NAME'],filteredCusts().map(r=>[r.cno,r.name]));
+  xlsExport('lion-customers',['C NUMBER','CUSTOMER NAME','CONTACT'],filteredCusts().map(r=>[r.cno,r.name,r.contact]));
 }
 
 /* ============ CREDENTIALS ============ */
@@ -1415,7 +1420,7 @@ function credsPage(p){pState.page=p;renderCreds();}
 const revealed=new Set();
 function filteredCreds(){
   const q=document.getElementById('p_search').value.trim().toLowerCase();
-  let rows=creds.filter(r=>!q||[r.cno,r.name,r.mplUser,r.email].join(' ').toLowerCase().includes(q));
+  let rows=creds.filter(r=>!q||[r.cno,r.name,r.contact,r.mplUser,r.email].join(' ').toLowerCase().includes(q));
   return sortRows(rows,pState,[]);
 }
 function pwCell(id,field,val){
@@ -1444,6 +1449,7 @@ function renderCreds(){
   document.getElementById('p_tbody').innerHTML=slice.map(r=>`<tr>
     <td class="cno" data-l="C Number">${esc(r.cno)||'—'}</td>
     <td class="name" data-l="Name" title="${esc(r.name)}">${esc(r.name)||'—'}</td>
+    <td data-l="Contact">${r.contact?esc(r.contact)+`<button class="copybtn" onclick="copyCred('${r.id}','contact')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}</td>
     <td data-l="MPL User">${r.mplUser?esc(r.mplUser)+`<button class="copybtn" onclick="copyCred('${r.id}','mplUser')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}</td>
     <td data-l="MPL Pass">${pwCell(r.id,'mplPass',r.mplPass)}</td>
     <td data-l="Custom Portal">${pwCell(r.id,'customPass',r.customPass)}</td>
@@ -1459,22 +1465,23 @@ function openCredForm(id){
   const t=document.getElementById('p_modalTitle');
   if(id){
     const r=creds.find(x=>x.id===id);t.textContent='Edit Login';
-    p_id.value=r.id;p_cno.value=r.cno||'';p_name.value=r.name||'';
+    p_id.value=r.id;p_cno.value=r.cno||'';p_name.value=r.name||'';p_contact.value=r.contact||'';
     p_mplUser.value=r.mplUser||'';p_mplPass.value=r.mplPass||'';
     p_customPass.value=r.customPass||'';p_asycudaPass.value=r.asycudaPass||'';p_email.value=r.email||'';
   }else{
     t.textContent='Add Login';
-    ['p_id','p_cno','p_name','p_mplUser','p_mplPass','p_customPass','p_asycudaPass','p_email'].forEach(i=>document.getElementById(i).value='');
+    ['p_id','p_cno','p_name','p_contact','p_mplUser','p_mplPass','p_customPass','p_asycudaPass','p_email'].forEach(i=>document.getElementById(i).value='');
   }
   showModal('overlay-cred');setTimeout(()=>p_cno.focus(),50);
 }
 document.getElementById('p_cno').addEventListener('input',()=>{
   const c=lookupCustomer(p_cno.value);
   if(c&&!p_name.value)p_name.value=c.name;
+  if(c&&c.contact&&!p_contact.value)p_contact.value=c.contact;
 });
 function saveCred(e){
   e.preventDefault();
-  const rec={id:p_id.value||uid(),cno:p_cno.value.trim(),name:p_name.value.trim(),
+  const rec={id:p_id.value||uid(),cno:p_cno.value.trim(),name:p_name.value.trim(),contact:p_contact.value.trim(),
     mplUser:p_mplUser.value.trim(),mplPass:p_mplPass.value.trim(),
     customPass:p_customPass.value.trim(),asycudaPass:p_asycudaPass.value.trim(),email:p_email.value.trim()};
   if(p_id.value){creds[creds.findIndex(x=>x.id===p_id.value)]=rec;toast('Login updated');}
@@ -1491,8 +1498,8 @@ function delCred(id){
 function exportCreds(){
   if(!confirm('Export will include PASSWORDS in plain text in the Excel file. Continue?'))return;
   xlsExport('lion-logins',
-    ['C NUMBER','NAME','MPL USERNAME','MPL PASSWORD','CUSTOM PORTAL PASSWORD','ASYCUDA PASSWORD','REGISTERED EMAIL'],
-    filteredCreds().map(r=>[r.cno,r.name,r.mplUser,r.mplPass,r.customPass,r.asycudaPass,r.email]));
+    ['C NUMBER','NAME','CONTACT','MPL USERNAME','MPL PASSWORD','CUSTOM PORTAL PASSWORD','ASYCUDA PASSWORD','REGISTERED EMAIL'],
+    filteredCreds().map(r=>[r.cno,r.name,r.contact,r.mplUser,r.mplPass,r.customPass,r.asycudaPass,r.email]));
 }
 
 /* ============ DO extension alerts ============ */
