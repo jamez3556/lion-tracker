@@ -926,6 +926,12 @@ function saveEntry(e){
       if(!linked.clearance)linked.clearance=rec.date||isoLocal(new Date());
       toast('Invoice entered → container marked Cleared ✓');
     }
+    // invoice removed from the form → bring the container back to the active list (unless manually set)
+    else if(!billCleared&&linked.status==='Cleared'&&!linked._manual){
+      linked.status=reopenStatus(linked);
+      linked.clearance=''; // clearance was auto-set from the invoice — undo it
+      toast('Invoice removed → container back in Container Status');
+    }
     saveContainers();renderConts();
   }
   buildEntryFilters();renderEntries();updateCounts();closeModal('overlay-entry');
@@ -1482,19 +1488,23 @@ function enforceInvoiceRule(){
   if(flipped)saveEntries();
   return flipped;
 }
-// Rule: billing happens AFTER clearance, so a Form Log entry that has a BILL NO (invoice)
-// means its container is cleared. Auto-mark those Cleared. (Manual "not cleared" is respected:
-// we only auto-clear, never auto-reopen — the user can set any status back by hand.)
+// when a container is reopened (invoice removed), pick the status that fits its dates
+function reopenStatus(c){return c.doDate?'DO Approved':'Pending DO';}
+// Rule: billing happens AFTER clearance, so a Form Log entry that HAS a BILL NO (invoice) means
+// its container is cleared, and one whose invoice was REMOVED is back to not-cleared. Auto-sync both
+// directions. Manual statuses (_manual) are always respected and never touched.
 function autoClearFromBill(){
   const byId=new Map(entries.map(r=>[r.id,r]));
-  let cleared=0;
+  let cleared=0,reopened=0;
   containers.forEach(c=>{
-    if(!c.entryId||c.status==='Cleared'||c._manual)return;
+    if(!c.entryId||c._manual)return;
     const e=byId.get(c.entryId);
-    if(e&&e.billNo){c.status='Cleared';if(!c.clearance)c.clearance=e.date||isoLocal(new Date());cleared++;}
+    if(!e)return;
+    if(e.billNo&&c.status!=='Cleared'){c.status='Cleared';if(!c.clearance)c.clearance=e.date||isoLocal(new Date());cleared++;}
+    else if(!e.billNo&&c.status==='Cleared'){c.status=reopenStatus(c);c.clearance='';reopened++;}
   });
-  if(cleared)saveContainers();
-  return cleared;
+  if(cleared||reopened)saveContainers();
+  return cleared+reopened;
 }
 // Sync: every MP entry in the Form Log gets a Container Status record (runs on every load, no duplicates).
 // Pending entries become active containers; Cleared/Delivered entries go to container history.
@@ -1528,7 +1538,7 @@ function syncMPContainers(){
   const flipped=enforceInvoiceRule();
   const synced=syncMPContainers();
   const autoCleared=autoClearFromBill();
-  if(autoCleared>0)toast(`${autoCleared} billed container${autoCleared>1?'s':''} marked Cleared`);
+  if(autoCleared>0)toast(`${autoCleared} container${autoCleared>1?'s':''} synced with invoice status`);
   else if(synced>0)toast('Synced '+synced+' MP shipments → Container Status');
   renderAlerts();notifyDO();
   setInterval(()=>{renderAlerts();},60*60*1000); // refresh the alert bar hourly while open
