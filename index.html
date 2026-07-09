@@ -155,6 +155,13 @@
   .field input:focus,.field select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(232,115,15,.15)}
   .field .hint{font-size:11px;color:var(--ok);margin-top:4px;font-weight:600;min-height:14px}
   .modal .actions{display:flex;justify-content:flex-end;gap:10px;padding:16px 24px;border-top:1px solid var(--line)}
+  .ctndetails{margin-bottom:14px}
+  .ctndetails .cdrow{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:8px;background:#f8fafc}
+  .ctndetails .cdhead{font-weight:700;font-size:13px;margin-bottom:7px;display:flex;justify-content:space-between;align-items:center}
+  .ctndetails .cdgrid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px}
+  .ctndetails label{font-size:10px;font-weight:700;color:var(--muted);display:block;margin-bottom:3px;letter-spacing:.3px}
+  .ctndetails input,.ctndetails select{width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:7px;font-size:13px;outline:none;font-family:inherit}
+  @media(max-width:720px){.ctndetails .cdgrid{grid-template-columns:1fr 1fr}}
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);
     background:#0f172a;color:#fff;padding:13px 20px;border-radius:10px;font-size:14px;font-weight:600;
     box-shadow:0 8px 24px rgba(0,0,0,.3);transition:.3s;z-index:99;opacity:0}
@@ -310,6 +317,7 @@
     <button class="primary" onclick="openContForm()">＋ Add Container</button>
     <button class="ghost" onclick="window.open('https://my.port.mv/login','_blank')">🌐 my.port.mv</button>
     <button class="ghost" onclick="exportConts()">⬇ Excel</button>
+    <button class="ghost" onclick="exportContAudit()">📊 Audit</button>
     <button class="ghost" onclick="window.print()">🖨 Print</button>
   </div>
   <div class="tablewrap m-cards">
@@ -328,7 +336,7 @@
           <th data-k="lastDate">LAST DATE <span class="arrow">▲▼</span></th>
           <th data-k="clearance">CLEARANCE <span class="arrow">▲▼</span></th>
           <th data-k="status">STATUS <span class="arrow">▲▼</span></th>
-          <th data-k="remark">REMARK <span class="arrow">▲▼</span></th>
+          <th data-k="logNo">LOG NO <span class="arrow">▲▼</span></th>
           <th class="nosort actcol"></th>
         </tr></thead>
         <tbody id="c_tbody"></tbody>
@@ -467,6 +475,7 @@
         <div class="field"><label>CONTAINER NO(S) — commas for multiple</label><input id="c_containerNo" placeholder="TLLU5033169, SEKU5503423"></div>
         <div class="field"><label>CONTAINERS LEFT</label><input id="c_ctnsLeft" type="number" min="0"></div>
       </div>
+      <div id="c_ctnDetails" class="ctndetails"></div>
       <div class="grid3">
         <div class="field"><label>DISCHARGE DATE</label><input id="c_discharge" type="date"></div>
         <div class="field"><label>LAST DATE (auto +10d)</label><input id="c_lastDate" type="date"></div>
@@ -610,14 +619,22 @@ function ctnInfo(r,cn){const pi=r.portInfo||{};return pi[cn.toUpperCase()]||pi[c
 // Per-container deadlines: every discharged, still-in-port container has its own last date (discharge + 10).
 // next = the soonest deadline still pending (drives the countdown); latest = the furthest (the DO must cover it).
 function effLast(r){
-  const dates=contNoList(r).map(cn=>ctnInfo(r,cn)).filter(i=>i.discharge&&!i.out).map(i=>addDays(i.discharge,10));
+  const dates=contNoList(r).map(cn=>ctnInfo(r,cn)).filter(i=>i.discharge&&!i.out&&!i.clearance).map(i=>addDays(i.discharge,10));
   const next=dates.length?dates.slice().sort()[0]:(r.lastDate||'');
   const all=dates.concat(r.lastDate?[r.lastDate]:[]);
   const latest=all.length?all.sort()[all.length-1]:'';
   return {next,latest};
 }
-function needsDOExtend(r){
+// A container is "noted / under control" once a clearance date is set (or it's cleared) — stop warning about it.
+function isNoted(r){return r.status==='Cleared'||!!r.clearance;}
+// Physically in port = discharged and not yet taken out, and not cleared.
+function isInPort(r){
   if(r.status==='Cleared')return false;
+  if(r.discharge)return true;
+  return contNoList(r).some(cn=>{const i=ctnInfo(r,cn);return i.discharge&&!i.out;});
+}
+function needsDOExtend(r){
+  if(r.status==='Cleared'||r.clearance)return false; // cleared or already noted → under control
   const latest=effLast(r).latest;
   return !!latest&&(!r.doDate||r.doDate<latest);
 }
@@ -883,20 +900,28 @@ function saveEntry(e){
   // MP (sea) shipments automatically go to Container Status for the 10-day clearance tracking
   let newContId=null;
   const linked=containers.find(c=>c.entryId===rec.id);
+  const billCleared=!!rec.billNo; // invoice raised = shipment cleared
   if(rec.type==='MP'&&!linked){
     newContId=uid();
     const nCtns=(rec.containerNo||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean).length;
     containers.push({id:newContId,entryId:rec.id,
       no:containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1,
-      cno:rec.cno,rNo:rec.rNo,name:rec.customer,blNo:rec.awbBl,containerNo:rec.containerNo||'',
+      cno:rec.cno,rNo:rec.rNo,name:rec.customer,blNo:rec.awbBl,containerNo:rec.containerNo||'',logNo:rec.no,
       ctnsLeft:nCtns||null,
-      discharge:'',lastDate:'',doDate:'',clearance:'',status:'Pending DO',remark:''});
+      discharge:'',lastDate:'',doDate:'',clearance:billCleared?(rec.date||isoLocal(new Date())):'',
+      status:billCleared?'Cleared':'Pending DO',remark:''});
     saveContainers();
-  }else if(linked&&rec.containerNo&&linked.containerNo!==rec.containerNo){
-    // container number edited on the entry — carry it to the linked container
-    linked.containerNo=rec.containerNo;
+    if(billCleared)newContId=null; // don't jump-to/highlight a container that's already cleared
+  }else if(linked){
+    if(rec.containerNo&&linked.containerNo!==rec.containerNo)linked.containerNo=rec.containerNo;
+    linked.logNo=rec.no;
+    // invoice entered on the form → auto-clear its container (unless manually overridden)
+    if(billCleared&&linked.status!=='Cleared'&&!linked._manual){
+      linked.status='Cleared';
+      if(!linked.clearance)linked.clearance=rec.date||isoLocal(new Date());
+      toast('Invoice entered → container marked Cleared ✓');
+    }
     saveContainers();renderConts();
-    toast('Container number updated in Container Status');
   }
   buildEntryFilters();renderEntries();updateCounts();closeModal('overlay-entry');
   if(newContId){
@@ -950,12 +975,24 @@ function filteredConts(){
     }
     return true;
   });
+  // Default view: fastest-demurrage (soonest last date) on top; noted/cleared sink to the bottom.
+  if(cState.key==='lastDate'){
+    rows.sort((a,b)=>{
+      const pa=isNoted(a)?1:0, pb=isNoted(b)?1:0;
+      if(pa!==pb)return (pa-pb)*cState.dir;
+      const na=effLast(a).next||'9999-99-99', nb=effLast(b).next||'9999-99-99';
+      return (na<nb?-1:na>nb?1:0)*cState.dir;
+    });
+    return rows;
+  }
   return sortRows(rows,cState,['no','ctnsLeft']);
 }
 function renderConts(){
   const active=containers.filter(r=>r.status!=='Cleared');
-  const overdue=active.filter(r=>{const d=daysLeft(effLast(r).next);return d!==null&&d<0}).length;
-  const soon=active.filter(r=>{const d=daysLeft(effLast(r).next);return d!==null&&d>=0&&d<=3}).length;
+  const inPort=containers.filter(isInPort).length;
+  // once noted (clearance set) a container is under control — exclude from overdue/soon warnings
+  const overdue=active.filter(r=>!isNoted(r)&&(()=>{const d=daysLeft(effLast(r).next);return d!==null&&d<0})()).length;
+  const soon=active.filter(r=>!isNoted(r)&&(()=>{const d=daysLeft(effLast(r).next);return d!==null&&d>=0&&d<=3})()).length;
   const doExt=containers.filter(needsDOExtend).length;
   const ctnsLeft=active.reduce((s,r)=>s+(Number(r.ctnsLeft)||0),0);
   const todayIso=isoLocal(new Date());
@@ -963,28 +1000,27 @@ function renderConts(){
   const notedToday=active.filter(r=>r.clearance===todayIso).length;
   const notedTomorrow=active.filter(r=>r.clearance===tomorrowIso).length;
   document.getElementById('c_stats').innerHTML=`
-    <div class="card c-blue"><div class="n">${containers.length}</div><div class="l">Total Containers</div></div>
-    <div class="card c-warn"><div class="n">${active.length}</div><div class="l">In Port / Active</div></div>
+    <div class="card c-warn"><div class="n">${inPort}</div><div class="l">In Port / Active</div></div>
     <div class="card c-info"><div class="n">${notedToday}</div><div class="l">Noted for Today</div></div>
     <div class="card c-purple"><div class="n">${notedTomorrow}</div><div class="l">Noted for Tomorrow</div></div>
     <div class="card c-purple"><div class="n">${ctnsLeft}</div><div class="l">Ctns Left in Port</div></div>
     <div class="card c-danger"><div class="n">${doExt}</div><div class="l">⚠ DO to Extend</div></div>
     <div class="card c-danger"><div class="n">${overdue}</div><div class="l">Past Last Date</div></div>
-    <div class="card c-danger"><div class="n">${soon}</div><div class="l">Due ≤ 3 Days</div></div>
-    <div class="card c-ok"><div class="n">${containers.filter(r=>r.status==='Cleared').length}</div><div class="l">Cleared</div></div>`;
+    <div class="card c-danger"><div class="n">${soon}</div><div class="l">Due ≤ 3 Days</div></div>`;
   const rows=filteredConts();
   const slice=rows.slice((cState.page-1)*PAGE_SIZE,cState.page*PAGE_SIZE);
   document.getElementById('c_empty').style.display=rows.length===0?'block':'none';
   document.getElementById('c_tbody').innerHTML=slice.map(r=>{
     const effNext=effLast(r).next;
     const d=daysLeft(effNext);
+    const noted=isNoted(r);
     let badge=effNext?`<span class="daysbadge d-ok">${fmtDate(effNext)}</span>`:'<span class="d-none">—</span>',rowcls='';
-    if(d!==null&&r.status!=='Cleared'){
+    if(d!==null&&!noted){ // once noted/cleared, it's under control — no red/countdown
       if(d<0){badge=`<span class="daysbadge d-danger">${fmtDate(effNext)} · ${Math.abs(d)}d over</span>`;rowcls='row-danger';}
       else if(d<=3){badge=`<span class="daysbadge d-danger">${fmtDate(effNext)} · ${d}d left</span>`;rowcls='row-danger';}
       else if(d<=7){badge=`<span class="daysbadge d-warn">${fmtDate(effNext)} · ${d}d left</span>`;rowcls='row-warn';}
       else{badge=`<span class="daysbadge d-ok">${fmtDate(effNext)} · ${d}d left</span>`;}
-    }
+    }else if(noted&&effNext){badge=`<span class="daysbadge d-ok">${fmtDate(effNext)} ✓ noted</span>`;}
     const stCls='st-'+r.status.replace(/\s/g,'');
     return `<tr class="${rowcls}" id="crow-${r.id}">
       <td class="num" data-l="No">${r.no??'—'}</td>
@@ -999,7 +1035,7 @@ function renderConts(){
       <td data-l="Last Date">${badge}</td>
       <td data-l="Clearance">${fmtDate(r.clearance)}</td>
       <td data-l="Status"><button class="status-pill ${stCls}" onclick="cycleContStatus('${r.id}')">${r.status}</button></td>
-      <td data-l="Remark">${esc(r.remark)||'—'}</td>
+      <td data-l="Log No">${r.logNo!=null&&r.logNo!==''?('#'+esc(r.logNo)):(esc(r.remark)||'—')}</td>
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="showCreds('${esc(r.cno)}')" title="Port login for this customer">🔑</button>
         <button class="iconbtn" onclick="openContForm('${r.id}')" title="Edit">✏️</button>
@@ -1019,20 +1055,24 @@ function containerNoCell(r){
   if(!list.length)return '—';
   return list.map(cn=>{
     const info=ctnInfo(r,cn);
+    const sizeTag=info.size?` <span class="typechip" style="background:#e0f2fe;color:#0369a1">${esc(info.size)}${info.cbm?' · '+esc(info.cbm)+'cbm':''}</span>`:'';
     let badge='';
-    if(info.out){
+    if(info.clearance){
+      badge=` <span class="daysbadge d-ok">cleared ${fmtDate(info.clearance)} ✓</span>`;
+    }else if(info.out){
       badge=` <span class="daysbadge d-ok" style="opacity:.55;cursor:pointer" onclick="markCtnOut('${r.id}','${esc(cn)}')" title="Taken out of port — click to undo">OUT ✓</span>`;
     }else if(info.discharge){
       const ld=addDays(info.discharge,10);
       const dl=daysLeft(ld);
-      const cls=dl<=3?'d-danger':dl<=7?'d-warn':'d-ok';
-      const txt=dl<0?Math.abs(dl)+'d over':dl+'d left';
+      const noted=isNoted(r);
+      const cls=noted?'d-ok':(dl<=3?'d-danger':dl<=7?'d-warn':'d-ok');
+      const txt=noted?'✓':(dl<0?Math.abs(dl)+'d over':dl+'d left');
       badge=` <span class="daysbadge ${cls}" title="Discharged ${fmtDate(info.discharge)} — its last date is ${fmtDate(ld)}">${fmtDate(ld)} · ${txt}</span>`;
       if(r.status!=='Cleared')badge+=`<button class="copybtn" onclick="markCtnOut('${r.id}','${esc(cn)}')" title="Mark this container taken out of port">📤</button>`;
     }else if(info.arrival){
       badge=` <span class="daysbadge d-warn" title="Arrived ${fmtDate(info.arrival)} — not discharged">arrived</span>`;
     }
-    return `<div style="font-weight:600">${esc(cn)}${badge}</div>`;
+    return `<div style="font-weight:600">${esc(cn)}${sizeTag}${badge}</div>`;
   }).join('');
 }
 function markCtnOut(id,cn){
@@ -1061,21 +1101,40 @@ function bumpCtnsLeft(id,delta){
   saveContainers();renderConts();
   if(n===0)toast('All containers taken out ✓ — you can mark it Cleared now');
 }
+// ---- per-container detail editor (size, CBM, discharge, clearance for each box under one BL) ----
+let __edPI={};
+function ctnKey(cn){return Object.keys(__edPI).find(k=>k.toUpperCase()===cn.toUpperCase())||cn;}
+function setCtnField(cn,field,val){
+  const k=ctnKey(cn);
+  __edPI[k]={...(__edPI[k]||{}),[field]:val};
+  if(field==='discharge')renderCtnDetails();
+}
+function renderCtnDetails(){
+  const wrap=document.getElementById('c_ctnDetails');
+  const list=(document.getElementById('c_containerNo').value||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean);
+  if(list.length<=1){wrap.innerHTML='';return;} // single container uses the main date fields; panel only for multiple
+  const sizes=['',"20'","40'","40' HC","LCL"];
+  wrap.innerHTML='<div style="font-size:11.5px;color:var(--muted);margin:2px 0 8px">📦 Enter each container\'s size &amp; dates (last date auto = discharge + 10 days):</div>'
+    +list.map(cn=>{
+    const i=__edPI[ctnKey(cn)]||{};
+    const ld=i.discharge?addDays(i.discharge,10):'';
+    return `<div class="cdrow"><div class="cdhead"><span>${esc(cn)}</span><span style="font-weight:600;font-size:11px;color:${i.clearance?'var(--ok)':(ld?'var(--muted)':'#cbd5e1')}">${i.clearance?'cleared ✓':(ld?'last date '+fmtDate(ld):'')}</span></div><div class="cdgrid">
+      <div><label>SIZE</label><select onchange="setCtnField('${esc(cn)}','size',this.value)">${sizes.map(s=>`<option${(i.size||'')===s?' selected':''}>${s}</option>`).join('')}</select></div>
+      <div><label>CBM (LCL)</label><input type="number" step="any" min="0" value="${i.cbm||''}" oninput="setCtnField('${esc(cn)}','cbm',this.value)"></div>
+      <div><label>DISCHARGE</label><input type="date" value="${i.discharge||''}" onchange="setCtnField('${esc(cn)}','discharge',this.value)"></div>
+      <div><label>CLEARANCE</label><input type="date" value="${i.clearance||''}" onchange="setCtnField('${esc(cn)}','clearance',this.value)"></div>
+    </div></div>`;
+  }).join('');
+}
+document.getElementById('c_containerNo').addEventListener('input',renderCtnDetails);
 function cycleContStatus(id){
   const r=containers.find(x=>x.id===id);if(!r)return;
   const o=['Pending DO','DO Not Approved','DO Approved','Cleared'];
-  const next=o[(o.indexOf(r.status)+1)%o.length];
-  if(next==='Cleared'&&r.entryId){
-    const e=entries.find(x=>x.id===r.entryId);
-    if(e&&!e.billNo){
-      toast('⚠ No BILL NO (invoice) in the Form Log entry — cannot mark container Cleared.');
-      return;
-    }
-  }
-  r.status=next;
+  r.status=o[(o.indexOf(r.status)+1)%o.length];
+  r._manual=true; // user set this by hand → auto-rules won't override it
   if(r.status==='Cleared'){
     if(!r.clearance)r.clearance=isoLocal(new Date());
-    toast('Cleared ✓ — removed from active list (see status filter “Cleared” for history)');
+    toast('Cleared ✓ — removed from the active list');
   }
   saveContainers();renderConts();
 }
@@ -1090,11 +1149,14 @@ function openContForm(id){
     c_discharge.value=r.discharge||'';c_lastDate.value=r.lastDate||'';c_doDate.value=r.doDate||'';
     c_clearance.value=r.clearance||'';c_status.value=r.status;c_remark.value=r.remark||'';
     c_ctnsLeft.value=r.ctnsLeft??'';
+    __edPI=JSON.parse(JSON.stringify(r.portInfo||{}));
   }else{
     t.textContent='Add Container';f.reset();c_id.value='';
     c_no.value=containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
     c_status.value='Pending DO';
+    __edPI={};
   }
+  renderCtnDetails();
   showModal('overlay-cont');setTimeout(()=>c_cno.focus(),50);
 }
 document.getElementById('c_discharge').addEventListener('change',()=>{
@@ -1108,12 +1170,27 @@ document.getElementById('c_discharge').addEventListener('change',()=>{
 function saveCont(e){
   e.preventDefault();
   const prev=c_id.value?containers.find(x=>x.id===c_id.value):null;
-  const rec={id:c_id.value||uid(),entryId:prev?prev.entryId:undefined,portInfo:prev?prev.portInfo:undefined,no:c_no.value===''?null:Number(c_no.value),
+  // merge per-container details (size/cbm/discharge/clearance), preserving agent-filled arrival/out
+  const merged={...(prev&&prev.portInfo||{})};
+  Object.keys(__edPI).forEach(k=>{merged[k]={...(merged[k]||{}),...__edPI[k]};});
+  const rec={id:c_id.value||uid(),entryId:prev?prev.entryId:undefined,logNo:prev?prev.logNo:undefined,
+    _manual:prev?prev._manual:undefined,portInfo:merged,no:c_no.value===''?null:Number(c_no.value),
     cno:c_cno.value.trim(),rNo:c_rNo.value.trim(),name:c_name.value.trim(),
     blNo:c_blNo.value.trim(),containerNo:c_containerNo.value.trim(),
     ctnsLeft:c_ctnsLeft.value===''?null:Math.max(0,Number(c_ctnsLeft.value)),
     discharge:c_discharge.value,lastDate:c_lastDate.value,doDate:c_doDate.value,
     clearance:c_clearance.value,status:c_status.value,remark:c_remark.value.trim()};
+  // multi-container: derive summary discharge/last-date & ctns-left from the per-container details
+  const cns=contNoList(rec);
+  if(cns.length>1){
+    const disch=cns.map(cn=>ctnInfo(rec,cn).discharge).filter(Boolean).sort();
+    if(disch.length){rec.discharge=disch[0];if(!rec.lastDate)rec.lastDate=addDays(disch[0],10);}
+    const outN=cns.filter(cn=>{const i=ctnInfo(rec,cn);return i.out||i.clearance;}).length;
+    rec.ctnsLeft=cns.length-outN;
+  }
+  // manual override: if there's a bill but the user chose a non-cleared status, don't let auto-rules re-clear it
+  const le=rec.entryId?entries.find(x=>x.id===rec.entryId):null;
+  if(le&&le.billNo&&rec.status!=='Cleared')rec._manual=true;
   if(c_id.value){containers[containers.findIndex(x=>x.id===c_id.value)]=rec;toast('Container updated');}
   else{containers.push(rec);toast('Container added');}
   saveContainers();ensureCustomer(rec.cno,rec.name);
@@ -1127,8 +1204,24 @@ function delCont(id){
 }
 function exportConts(){
   xlsExport('lion-containers',
-    ['NO','C NUMBER','NAME','R NUMBER','BL NO','CONTAINER NO','CTNS LEFT','DO APPROVAL DATE','DISCHARGE DATE','LAST DATE','CLEARANCE DATE','STATUS','REMARK'],
-    filteredConts().map(r=>[r.no,r.cno,r.name,r.rNo,r.blNo,r.containerNo,r.ctnsLeft,r.doDate,r.discharge,r.lastDate,r.clearance,r.status,r.remark]));
+    ['NO','C NUMBER','NAME','LOG NO','R NUMBER','BL NO','CONTAINER NO','SIZE(S)','CTNS LEFT','DO APPROVAL DATE','DISCHARGE DATE','LAST DATE','CLEARANCE DATE','STATUS'],
+    filteredConts().map(r=>[r.no,r.cno,r.name,r.logNo,r.rNo,r.blNo,r.containerNo,contNoList(r).map(cn=>ctnInfo(r,cn).size).filter(Boolean).join(' / '),r.ctnsLeft,r.doDate,r.discharge,r.lastDate,r.clearance,r.status]));
+}
+// Audit report: how many containers cleared per month and per year (report only — not shown on screen)
+function exportContAudit(){
+  const cleared=containers.filter(c=>c.status==='Cleared'&&c.clearance);
+  if(!cleared.length){toast('No cleared containers to audit yet');return;}
+  const byMonth={},byYear={};
+  cleared.forEach(c=>{const m=c.clearance.slice(0,7),y=c.clearance.slice(0,4);byMonth[m]=(byMonth[m]||0)+1;byYear[y]=(byYear[y]||0)+1;});
+  const rows=[];
+  Object.keys(byYear).sort().forEach(y=>{
+    rows.push(['YEAR '+y,byYear[y]]);
+    Object.keys(byMonth).filter(m=>m.startsWith(y)).sort().forEach(m=>{
+      rows.push(['   '+new Date(m+'-01T00:00:00').toLocaleDateString('en-GB',{month:'long',year:'numeric'}),byMonth[m]]);
+    });
+  });
+  rows.push(['',''],['TOTAL CONTAINERS CLEARED',cleared.length]);
+  xlsExport('lion-clearance-audit',['PERIOD','CONTAINERS CLEARED'],rows);
 }
 
 /* ============ CUSTOMERS ============ */
@@ -1342,17 +1435,19 @@ function enforceInvoiceRule(){
   if(flipped)saveEntries();
   return flipped;
 }
-// Containers linked to an entry without BILL NO cannot stay Cleared — reactivate them.
-function reconcileContainers(){
+// Rule: billing happens AFTER clearance, so a Form Log entry that has a BILL NO (invoice)
+// means its container is cleared. Auto-mark those Cleared. (Manual "not cleared" is respected:
+// we only auto-clear, never auto-reopen — the user can set any status back by hand.)
+function autoClearFromBill(){
   const byId=new Map(entries.map(r=>[r.id,r]));
-  let reopened=0;
+  let cleared=0;
   containers.forEach(c=>{
-    if(!c.entryId)return;
+    if(!c.entryId||c.status==='Cleared'||c._manual)return;
     const e=byId.get(c.entryId);
-    if(e&&!e.billNo&&c.status==='Cleared'){c.status='Pending DO';c.clearance='';reopened++;}
+    if(e&&e.billNo){c.status='Cleared';if(!c.clearance)c.clearance=e.date||isoLocal(new Date());cleared++;}
   });
-  if(reopened)saveContainers();
-  return reopened;
+  if(cleared)saveContainers();
+  return cleared;
 }
 // Sync: every MP entry in the Form Log gets a Container Status record (runs on every load, no duplicates).
 // Pending entries become active containers; Cleared/Delivered entries go to container history.
@@ -1362,11 +1457,11 @@ function syncMPContainers(){
   let nextNo=containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0);
   entries.forEach(r=>{
     if(r.type!=='MP'||linked.has(r.id))return;
-    const done=r.status==='Cleared'||r.status==='Delivered';
+    const done=r.status==='Cleared'||r.status==='Delivered'||!!r.billNo;
     containers.push({id:uid(),entryId:r.id,no:++nextNo,
-      cno:r.cno,rNo:r.rNo,name:r.customer,blNo:r.awbBl,containerNo:'',
+      cno:r.cno,rNo:r.rNo,name:r.customer,blNo:r.awbBl,containerNo:r.containerNo||'',logNo:r.no,
       discharge:'',lastDate:'',doDate:'',clearance:done?(r.date||''):'',
-      status:done?'Cleared':'Pending DO',remark:'From Form Log'+(r.no?' NO '+r.no:'')});
+      status:done?'Cleared':'Pending DO',remark:''});
     if(done)addedHistory++;else addedActive++;
   });
   if(addedActive+addedHistory>0)saveContainers();
@@ -1375,8 +1470,8 @@ function syncMPContainers(){
 (()=>{
   const flipped=enforceInvoiceRule();
   const synced=syncMPContainers();
-  const reopened=reconcileContainers();
-  if(flipped+reopened>0)toast(`Invoice rule: ${flipped} entries set Pending, ${reopened} containers back to active`);
+  const autoCleared=autoClearFromBill();
+  if(autoCleared>0)toast(`${autoCleared} billed container${autoCleared>1?'s':''} marked Cleared`);
   else if(synced>0)toast('Synced '+synced+' MP shipments → Container Status');
   renderAlerts();notifyDO();
   setInterval(()=>{renderAlerts();},60*60*1000); // refresh the alert bar hourly while open
