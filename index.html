@@ -819,12 +819,16 @@ function renderEntries(){
 }
 function cycleEntryStatus(id){
   const r=entries.find(x=>x.id===id);if(!r)return;
-  if(r.status==='Pending'&&!r.billNo){
+  const linked=containers.find(c=>c.entryId===r.id);
+  // block Cleared without an invoice — UNLESS its container is already cleared (that proves clearance)
+  if(r.status==='Pending'&&!r.billNo&&!(linked&&linked.status==='Cleared')){
     toast('⚠ No BILL NO (invoice) — cannot mark as Cleared. Edit the entry and add it first.');
     return;
   }
+  const before={status:r.status,billNo:r.billNo};
   const o=['Pending','Cleared','Delivered'];
   r.status=o[(o.indexOf(r.status)+1)%3];saveEntries();renderEntries();
+  if(linked)syncContFromEntry(r,before,linked); // propagate the status change to the container
 }
 function toggleContBox(){
   document.getElementById('e_contWrap').style.display=e_type.value==='MP'?'':'none';
@@ -889,6 +893,8 @@ function openEntryForm(id){
 document.getElementById('e_type').addEventListener('change',toggleContBox);
 function saveEntry(e){
   e.preventDefault();
+  const prevEntry=e_id.value?entries.find(x=>x.id===e_id.value):null;      // state before this save (for transition detection)
+  const prevLinked=e_id.value?containers.find(c=>c.entryId===e_id.value):null;
   const rec={id:e_id.value||uid(),no:e_no.value===''?null:Number(e_no.value),
     cno:e_cno.value.trim(),date:e_date.value,customer:e_customer.value.trim(),
     type:e_type.value,file:e_file.value.trim(),rNo:e_rNo.value.trim(),
@@ -897,7 +903,8 @@ function saveEntry(e){
     time:e_time.value,status:e_status.value,
     containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
   let note='';
-  if(!rec.billNo&&rec.status!=='Pending'){rec.status='Pending';note=' — no BILL NO (invoice), status kept Pending';}
+  // "no invoice = not cleared" — but a container cleared by hand also proves clearance, so don't force Pending then
+  if(!rec.billNo&&rec.status!=='Pending'&&!(prevLinked&&prevLinked.status==='Cleared')){rec.status='Pending';note=' — no BILL NO (invoice), status kept Pending';}
   if(rec.file)localStorage.setItem('lion_last_file',rec.file); // remember this device's staff code
   if(e_id.value){entries[entries.findIndex(x=>x.id===e_id.value)]=rec;toast('Entry updated'+note);}
   else{entries.push(rec);toast('Entry added'+note);}
@@ -920,21 +927,8 @@ function saveEntry(e){
   }else if(linked){
     if(rec.containerNo&&linked.containerNo!==rec.containerNo)linked.containerNo=rec.containerNo;
     linked.logNo=rec.no;
-    // invoice entered on the form → auto-clear its container (unless manually overridden)
-    if(billCleared&&linked.status!=='Cleared'&&!linked._manual){
-      linked.status='Cleared';
-      if(!linked.clearance)linked.clearance=rec.date||isoLocal(new Date());
-      linked._billCleared=true; // remember this clear came from the invoice, so removing it can reopen
-      toast('Invoice entered → container marked Cleared ✓');
-    }
-    // invoice removed → reopen ONLY if this container was cleared BY the invoice (not cleared by hand)
-    else if(!billCleared&&linked.status==='Cleared'&&linked._billCleared&&!linked._manual){
-      linked.status=reopenStatus(linked);
-      linked.clearance=''; // clearance was auto-set from the invoice — undo it
-      delete linked._billCleared;
-      toast('Invoice removed → container back in Container Status');
-    }
-    saveContainers();renderConts();
+    // propagate this entry's clearance change (invoice added/removed OR status Cleared↔Pending) onto its container
+    syncContFromEntry(rec,prevEntry,linked);
   }
   buildEntryFilters();renderEntries();updateCounts();closeModal('overlay-entry');
   if(newContId){
@@ -1191,7 +1185,9 @@ function cycleContStatus(id){
     if(!r.clearance)r.clearance=isoLocal(new Date());
     toast('Cleared ✓ — removed from the active list');
   }
-  saveContainers();renderConts();
+  saveContainers();
+  applyContToEntry(r); // keep the Form Log entry's status in sync with this container
+  renderConts();
 }
 function openContForm(id){
   const t=document.getElementById('c_modalTitle');
@@ -1252,6 +1248,7 @@ function saveCont(e){
   if(c_id.value){containers[containers.findIndex(x=>x.id===c_id.value)]=rec;toast('Container updated');}
   else{containers.push(rec);toast('Container added');}
   saveContainers();ensureCustomer(rec.cno,rec.name);
+  applyContToEntry(rec); // keep the Form Log entry's status in sync with this container
   renderConts();updateCounts();closeModal('overlay-cont');
   return false;
 }
@@ -1485,16 +1482,57 @@ function notifyDO(){
 
 /* ============ boot ============ */
 // Invoice rule: an entry with no BILL NO (invoice) is NOT cleared. Runs on every load.
+// Exception: if its linked container is Cleared (cleared by hand at the port), that proves clearance — keep it.
 function enforceInvoiceRule(){
   let flipped=0;
   entries.forEach(r=>{
-    if(!r.billNo&&(r.status==='Cleared'||r.status==='Delivered')){r.status='Pending';flipped++;}
+    if(!r.billNo&&(r.status==='Cleared'||r.status==='Delivered')){
+      const c=containers.find(x=>x.entryId===r.id);
+      if(c&&c.status==='Cleared')return;
+      r.status='Pending';flipped++;
+    }
   });
   if(flipped)saveEntries();
   return flipped;
 }
-// when a container is reopened (invoice removed), pick the status that fits its dates
+// when a container is reopened (invoice removed / entry set Pending), pick the status that fits its dates
 function reopenStatus(c){return c.doDate?'DO Approved':'Pending DO';}
+// ---- bidirectional Form Log ⇄ Container Status sync ----
+// Propagate a Form Log entry's clearance CHANGE onto its linked container (transition-based, so editing an
+// unchanged entry never disturbs the container). Cleared/Delivered or an invoice ⇒ container Cleared;
+// switching the entry back to Pending (or removing the invoice) ⇒ container comes back to the active list.
+function syncContFromEntry(e,before,cont){
+  const c=cont||containers.find(x=>x.entryId===e.id);
+  if(!c)return null;
+  const wasBill=!!(before&&before.billNo), nowBill=!!e.billNo;
+  const wasCl=!!(before&&(before.status==='Cleared'||before.status==='Delivered'));
+  const nowCl=e.status==='Cleared'||e.status==='Delivered';
+  const clearNow=(!wasBill&&nowBill)||(!wasCl&&nowCl);   // invoice added OR status moved to Cleared
+  const reopenNow=(wasBill&&!nowBill)||(wasCl&&!nowCl);  // invoice removed OR status moved to Pending
+  let act=null;
+  if(clearNow&&c.status!=='Cleared'){
+    c.status='Cleared';
+    if(!c.clearance)c.clearance=e.date||isoLocal(new Date());
+    if(nowBill)c._billCleared=true; // invoice-driven clear may auto-reopen later if the invoice is removed
+    act='cleared'; toast(nowBill?'Invoice entered → container marked Cleared ✓':'Form Log cleared → container marked Cleared ✓');
+  }else if(reopenNow&&c.status==='Cleared'){
+    c.status=reopenStatus(c); c.clearance='';
+    delete c._billCleared; delete c._manual; // explicit reopen from the Form Log overrides prior flags
+    act='reopened'; toast('Form Log set to Pending → container back in Container Status');
+  }
+  if(act){saveContainers();renderConts();}
+  return act;
+}
+// Propagate a container's status onto its linked Form Log entry: Cleared ⇒ entry Cleared; reopened ⇒ entry Pending.
+function applyContToEntry(c){
+  const e=c&&c.entryId?entries.find(x=>x.id===c.entryId):null;
+  if(!e)return false;
+  let ch=false;
+  if(c.status==='Cleared'){ if(e.status!=='Cleared'&&e.status!=='Delivered'){e.status='Cleared';ch=true;} }
+  else { if(e.status==='Cleared'||e.status==='Delivered'){e.status='Pending';ch=true;} }
+  if(ch){saveEntries();if(typeof renderEntries==='function')renderEntries();if(typeof buildEntryFilters==='function')buildEntryFilters();}
+  return ch;
+}
 // Rule: billing happens AFTER clearance, so a Form Log entry that HAS a BILL NO (invoice) means
 // its container is cleared, and one whose invoice was REMOVED is back to not-cleared. Auto-sync both
 // directions. Manual statuses (_manual) are always respected and never touched.
