@@ -7,7 +7,7 @@
 <style>
   :root{
     --bg:#0f172a; --panel:#ffffff; --ink:#0f172a; --muted:#64748b;
-    --line:#e2e8f0; --brand:#2563eb; --brand-dark:#1d4ed8;
+    --line:#e2e8f0; --brand:#e8730f; --brand-dark:#c65f08; --brandbright:#f88838;
     --ok:#16a34a; --okbg:#dcfce7; --warn:#d97706; --warnbg:#fef3c7;
     --danger:#dc2626; --dangerbg:#fee2e2; --info:#0891b2; --infobg:#cffafe;
     --shadow:0 1px 3px rgba(15,23,42,.08),0 8px 24px rgba(15,23,42,.06);
@@ -26,9 +26,9 @@
   #authgate .gatesub{margin:0 0 22px;font-size:13px;color:#64748b}
   #authgate form{display:flex;flex-direction:column;gap:11px}
   #authgate input{padding:13px 14px;border:1px solid #e2e8f0;border-radius:10px;font-size:16px;outline:none}
-  #authgate input:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
-  #authgate button{padding:13px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
-  #authgate button:hover{background:#1d4ed8}
+  #authgate input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(232,115,15,.15)}
+  #authgate button{padding:13px;border:none;border-radius:10px;background:var(--brand);color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+  #authgate button:hover{background:var(--brand-dark)}
   #authgate button:disabled{opacity:.6;cursor:default}
   #authgate .gatemsg{min-height:18px;margin-top:12px;font-size:13px;font-weight:600;color:#dc2626}
   #authgate .gatefoot{margin-top:16px;font-size:11.5px;color:#94a3b8}
@@ -63,7 +63,7 @@
   .search{flex:1;min-width:220px;position:relative}
   .search input{width:100%;padding:11px 14px 11px 40px;border:1px solid var(--line);border-radius:10px;
     font-size:14px;background:#fff;outline:none}
-  .search input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .search input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(232,115,15,.15)}
   .search svg{position:absolute;left:13px;top:11px;color:var(--muted)}
   select.filter{padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13.5px;outline:none;max-width:170px}
   button{font-family:inherit;cursor:pointer;border:none;border-radius:10px;font-size:14px;font-weight:600;
@@ -152,7 +152,7 @@
   .field{margin-bottom:14px}
   .field label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:6px}
   .field input,.field select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:14px;outline:none;font-family:inherit}
-  .field input:focus,.field select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .field input:focus,.field select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(232,115,15,.15)}
   .field .hint{font-size:11px;color:var(--ok);margin-top:4px;font-weight:600;min-height:14px}
   .modal .actions{display:flex;justify-content:flex-end;gap:10px;padding:16px 24px;border-top:1px solid var(--line)}
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);
