@@ -334,6 +334,7 @@
     <div class="scroll">
       <table style="min-width:1250px">
         <thead><tr id="c_head">
+          <th class="nosort actcol"></th>
           <th data-k="no" class="num">NO <span class="arrow">▲▼</span></th>
           <th data-k="cno">C NO <span class="arrow">▲▼</span></th>
           <th data-k="name">NAME <span class="arrow">▲▼</span></th>
@@ -347,7 +348,6 @@
           <th data-k="clearance">CLEARANCE <span class="arrow">▲▼</span></th>
           <th data-k="status">STATUS <span class="arrow">▲▼</span></th>
           <th data-k="logNo">LOG NO <span class="arrow">▲▼</span></th>
-          <th class="nosort actcol"></th>
         </tr></thead>
         <tbody id="c_tbody"></tbody>
       </table>
@@ -1096,6 +1096,11 @@ function renderConts(){
     }else if(noted&&effNext){badge=`<span class="daysbadge d-ok">${fmtDate(effNext)} ✓ noted</span>`;}
     const stCls='st-'+r.status.replace(/\s/g,'');
     return `<tr class="${rowcls}" id="crow-${r.id}">
+      <td class="actcol"><div class="rowact">
+        <button class="iconbtn" onclick="showCreds('${esc(r.cno)}')" title="Port login for this customer">🔑</button>
+        <button class="iconbtn" onclick="openContForm('${r.id}')" title="Edit">✏️</button>
+        <button class="iconbtn del" onclick="delCont('${r.id}')" title="Delete">🗑️</button>
+      </div></td>
       <td class="num" data-l="No">${pageStart+idx+1}</td>
       <td class="cno" data-l="C No">${esc(r.cno)||'—'}</td>
       <td class="name" data-l="Name" title="${esc(r.name)}">${esc(r.name)||'—'}</td>
@@ -1108,12 +1113,7 @@ function renderConts(){
       <td data-l="Last Date">${badge}</td>
       <td data-l="Clearance">${fmtDate(r.clearance)}</td>
       <td data-l="Status"><button class="status-pill ${stCls}" onclick="cycleContStatus('${r.id}')">${r.status}</button></td>
-      <td data-l="Log No">${r.logNo!=null&&r.logNo!==''?('Log '+esc(r.logNo)):(esc(r.remark)||'—')}</td>
-      <td class="actcol"><div class="rowact">
-        <button class="iconbtn" onclick="showCreds('${esc(r.cno)}')" title="Port login for this customer">🔑</button>
-        <button class="iconbtn" onclick="openContForm('${r.id}')" title="Edit">✏️</button>
-        <button class="iconbtn del" onclick="delCont('${r.id}')" title="Delete">🗑️</button>
-      </div></td></tr>`;
+      <td data-l="Log No">${r.logNo!=null&&r.logNo!==''?('Log '+esc(r.logNo)):(esc(r.remark)||'—')}</td></tr>`;
   }).join('');
   pagerHTML(document.getElementById('c_pager'),cState,rows.length,'conts');
   renderAlerts();
