@@ -118,11 +118,11 @@
   tbody tr.t-SG:hover{background:#d3ebfc}
   tbody tr.t-HA,tbody tr.t-HA:nth-child(odd),tbody tr.t-HA:nth-child(even){background:#fef9c3}
   tbody tr.t-HA:hover{background:#fdf3ab}
-  /* AP form logged in the morning shift (00:00–12:00): dark highlight, light text (beats zebra) */
-  tbody tr.ap-am,tbody tr.ap-am:nth-child(odd),tbody tr.ap-am:nth-child(even){background:#475569;color:#f1f5f9}
-  tbody tr.ap-am:hover{background:#3b475a}
-  tbody tr.ap-am td,tbody tr.ap-am .cno,tbody tr.ap-am .name{color:#f1f5f9}
-  tbody tr.ap-am .sub{color:#cbd5e1}
+  /* AP form uploaded TODAY: dark highlight, light text (beats zebra); clears at 00:00 */
+  tbody tr.ap-today,tbody tr.ap-today:nth-child(odd),tbody tr.ap-today:nth-child(even){background:#475569;color:#f1f5f9}
+  tbody tr.ap-today:hover{background:#3b475a}
+  tbody tr.ap-today td,tbody tr.ap-today .cno,tbody tr.ap-today .name{color:#f1f5f9}
+  tbody tr.ap-today .sub{color:#cbd5e1}
   .status-pill{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;border:none;cursor:pointer;white-space:nowrap}
   .st-Pending{background:var(--warnbg);color:var(--warn)}
   .st-Cleared{background:var(--okbg);color:var(--ok)}
@@ -824,8 +824,9 @@ function filteredEntries(){
   });
   return sortRows(rows,eState,['no','grsWt','pkgs']);
 }
-// AP shipment logged in the morning shift (00:00–12:00) → dark highlight row
-function apMorning(r){return r.type==='AP'&&!!r.time&&(r.time.slice(0,5)<='12:00');}
+// AP shipment logged TODAY → dark highlight row (so the team can see what was uploaded today).
+// Compares the entry DATE to today's local date, so the highlight clears automatically at 00:00.
+function apToday(r){return r.type==='AP'&&r.date===isoLocal(new Date());}
 function renderEntries(){
   const pending=entries.filter(r=>r.status==='Pending').length;
   const invPending=entries.filter(r=>!r.billNo).length; // no BILL NO = not invoiced yet
@@ -844,7 +845,7 @@ function renderEntries(){
   const rows=filteredEntries();
   const slice=rows.slice((eState.page-1)*PAGE_SIZE,eState.page*PAGE_SIZE);
   document.getElementById('e_empty').style.display=rows.length===0?'block':'none';
-  document.getElementById('e_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}${apMorning(r)?' ap-am':''}">
+  document.getElementById('e_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}${apToday(r)?' ap-today':''}">
     <td class="num" data-l="No">${r.no??'—'}</td>
     <td class="cno" data-l="C No">${esc(r.cno)}</td>
     <td data-l="Date">${fmtDate(r.date)}${r.time?`<div class="sub">${esc(r.time)}</div>`:''}</td>
@@ -1743,7 +1744,7 @@ function syncMPContainers(){
   if(autoCleared>0)toast(`${autoCleared} container${autoCleared>1?'s':''} synced with invoice status`);
   else if(synced>0)toast('Synced '+synced+' MP shipments → Container Status');
   renderAlerts();notifyDO();
-  setInterval(()=>{renderAlerts();},60*60*1000); // refresh the alert bar hourly while open
+  setInterval(()=>{renderAlerts();renderEntries();},60*60*1000); // hourly: refresh alerts + roll the "today" AP highlight past midnight
 })();
 wireAutofill('e_cno','e_customer','e_custHint');
 wireAutofill('c_cno','c_name','c_custHint');
