@@ -118,6 +118,11 @@
   tbody tr.t-SG:hover{background:#d3ebfc}
   tbody tr.t-HA,tbody tr.t-HA:nth-child(odd),tbody tr.t-HA:nth-child(even){background:#fef9c3}
   tbody tr.t-HA:hover{background:#fdf3ab}
+  /* AP form logged in the morning shift (00:00–12:00): dark highlight, light text (beats zebra) */
+  tbody tr.ap-am,tbody tr.ap-am:nth-child(odd),tbody tr.ap-am:nth-child(even){background:#475569;color:#f1f5f9}
+  tbody tr.ap-am:hover{background:#3b475a}
+  tbody tr.ap-am td,tbody tr.ap-am .cno,tbody tr.ap-am .name{color:#f1f5f9}
+  tbody tr.ap-am .sub{color:#cbd5e1}
   .status-pill{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;border:none;cursor:pointer;white-space:nowrap}
   .st-Pending{background:var(--warnbg);color:var(--warn)}
   .st-Cleared{background:var(--okbg);color:var(--ok)}
@@ -453,7 +458,8 @@
         <div class="field"><label>PKGS</label><input id="e_pkgs" type="number" min="0"></div>
       </div>
       <div class="grid3">
-        <div class="field"><label>AWB / BL NO</label><input id="e_awbBl"></div>
+        <div class="field"><label>AWB / BL NO</label><input id="e_awbBl">
+          <div class="hint" id="e_awbHint" style="color:#dc2626;font-weight:600"></div></div>
         <div class="field"><label>TIME</label><input id="e_time" type="time" step="1"></div>
         <div class="field"><label>STATUS</label>
           <select id="e_status"><option>Pending</option><option>Cleared</option><option>Delivered</option></select></div>
@@ -818,6 +824,8 @@ function filteredEntries(){
   });
   return sortRows(rows,eState,['no','grsWt','pkgs']);
 }
+// AP shipment logged in the morning shift (00:00–12:00) → dark highlight row
+function apMorning(r){return r.type==='AP'&&!!r.time&&(r.time.slice(0,5)<='12:00');}
 function renderEntries(){
   const pending=entries.filter(r=>r.status==='Pending').length;
   const invPending=entries.filter(r=>!r.billNo).length; // no BILL NO = not invoiced yet
@@ -836,7 +844,7 @@ function renderEntries(){
   const rows=filteredEntries();
   const slice=rows.slice((eState.page-1)*PAGE_SIZE,eState.page*PAGE_SIZE);
   document.getElementById('e_empty').style.display=rows.length===0?'block':'none';
-  document.getElementById('e_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}">
+  document.getElementById('e_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}${apMorning(r)?' ap-am':''}">
     <td class="num" data-l="No">${r.no??'—'}</td>
     <td class="cno" data-l="C No">${esc(r.cno)}</td>
     <td data-l="Date">${fmtDate(r.date)}${r.time?`<div class="sub">${esc(r.time)}</div>`:''}</td>
@@ -905,6 +913,7 @@ function openEntryForm(id){
   const t=document.getElementById('e_modalTitle');
   const f=document.querySelector('#overlay-entry form');
   document.getElementById('e_custHint').textContent='';
+  document.getElementById('e_awbHint').textContent='';
   if(id){
     const r=entries.find(x=>x.id===id);t.textContent='Edit Entry';
     e_id.value=r.id;e_no.value=r.no??'';e_cno.value=r.cno;e_date.value=r.date||'';
@@ -937,6 +946,18 @@ function saveEntry(e){
     pkgs:e_pkgs.value===''?null:Number(e_pkgs.value),awbBl:e_awbBl.value.trim(),
     time:e_time.value,status:e_status.value,
     containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
+  // block a duplicate AWB / BL NO — the same shipment must not be logged twice
+  const awbHint=document.getElementById('e_awbHint');awbHint.textContent='';
+  if(rec.awbBl){
+    const key=rec.awbBl.replace(/\s+/g,'').toUpperCase();
+    const dup=entries.find(x=>x.id!==rec.id&&(x.awbBl||'').replace(/\s+/g,'').toUpperCase()===key);
+    if(dup){
+      const msg='⚠ AWB / BL "'+rec.awbBl+'" already entered — NO '+(dup.no??'—')+', R NO '+(dup.rNo||'—')+' ('+(dup.customer||'—')+', '+fmtDate(dup.date)+')';
+      awbHint.textContent=msg;toast(msg);
+      e_awbBl.focus();
+      return false; // don't save
+    }
+  }
   let note='';
   // "invoice = Delivered": a BILL NO means the shipment is delivered (billed). Set automatically, always.
   if(rec.billNo){if(rec.status!=='Delivered'){rec.status='Delivered';note=' — BILL NO present → Delivered';}}
