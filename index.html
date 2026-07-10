@@ -617,7 +617,9 @@ const SEED_CONTAINERS=[];
 /* ============ shared helpers ============ */
 const PAGE_SIZE=100;
 function uid(){return 'id'+Math.random().toString(36).slice(2,10)+Date.now().toString(36)}
-function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+// for user data inside onclick="fn('…')" handlers: escape for the JS string first, then for the attribute
+function jatt(s){return esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));}
 function daysLeft(d){
   if(!d)return null;
   const t=new Date();t.setHours(0,0,0,0);
@@ -641,16 +643,19 @@ function lastDateFor(discharge,bl){
   while(counted<10){d.setDate(d.getDate()+1);if(d.getDay()!==5)counted++;} // step forward, skip Fridays, count 10
   return isoLocal(d);
 }
-function ctnInfo(r,cn){const pi=r.portInfo||{};return pi[cn.toUpperCase()]||pi[cn]||{};}
+function ctnInfo(r,cn){const pi=r.portInfo||{};if(pi[cn])return pi[cn];const k=Object.keys(pi).find(x=>x.toUpperCase()===cn.toUpperCase());return k?pi[k]:{};}
 // Per-container deadlines: every discharged, still-in-port container has its own last date (discharge + 10).
 // next = the soonest deadline still pending (drives the countdown); latest = the furthest (the DO must cover it).
 function effLast(r){
-  const dates=contNoList(r).map(cn=>ctnInfo(r,cn)).filter(i=>i.discharge&&!i.out&&!i.clearance).map(i=>lastDateFor(i.discharge,r.blNo));
+  const infos=contNoList(r).map(cn=>ctnInfo(r,cn));
+  const hasInfo=infos.some(i=>i.discharge); // per-container data exists → it is the whole truth
+  const dates=infos.filter(i=>i.discharge&&!i.out&&!i.clearance).map(i=>lastDateFor(i.discharge,r.blNo));
+  if(hasInfo){
+    const sorted=dates.slice().sort();
+    return {next:sorted[0]||'',latest:sorted[sorted.length-1]||''}; // all out/cleared → no pending deadline
+  }
   const recLast=r.discharge?lastDateFor(r.discharge,r.blNo):(r.lastDate||''); // record-level fallback, computed by the rule
-  const next=dates.length?dates.slice().sort()[0]:recLast;
-  const all=dates.concat(recLast?[recLast]:[]);
-  const latest=all.length?all.sort()[all.length-1]:'';
-  return {next,latest};
+  return {next:recLast,latest:recLast};
 }
 // A shipment is "done" once it's Cleared (customs, by hand) or Delivered (invoiced). Both leave the active list.
 function isDone(r){return r.status==='Cleared'||r.status==='Delivered';}
@@ -690,7 +695,7 @@ function xlsExport(filename,head,rowArrays){
   html+='</table>';
   const blob=new Blob(['﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>'+html+'</body></html>'],{type:'application/vnd.ms-excel'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
-  a.download=filename+'-'+new Date().toISOString().slice(0,10)+'.xls';
+  a.download=filename+'-'+isoLocal(new Date())+'.xls'; // local date, not UTC (Maldives +5)
   a.click();URL.revokeObjectURL(a.href);
   toast('Exported '+rowArrays.length+' rows');
 }
@@ -935,8 +940,11 @@ function saveEntry(e){
   let note='';
   // "invoice = Delivered": a BILL NO means the shipment is delivered (billed). Set automatically, always.
   if(rec.billNo){if(rec.status!=='Delivered'){rec.status='Delivered';note=' — BILL NO present → Delivered';}}
-  // no invoice ⇒ can't be Delivered. Cleared is allowed (manual/customs); otherwise Pending.
-  else if(rec.status==='Delivered'){rec.status='Cleared';note=' — no BILL NO, set Cleared (Delivered needs an invoice)';}
+  // no invoice ⇒ can't be Delivered: invoice removed → back to ACTIVE (Cleared only if the container was hand-cleared)
+  else if(rec.status==='Delivered'){
+    rec.status=(prevLinked&&prevLinked.status==='Cleared')?'Cleared':'Pending';
+    note=rec.status==='Cleared'?' — no BILL NO, kept Cleared (container hand-cleared)':' — invoice removed → back to Pending';
+  }
   if(rec.file)localStorage.setItem('lion_last_file',rec.file); // remember this device's staff code
   if(e_id.value){entries[entries.findIndex(x=>x.id===e_id.value)]=rec;toast('Entry updated'+note);}
   else{entries.push(rec);toast('Entry added'+note);}
@@ -946,21 +954,23 @@ function saveEntry(e){
   const linked=containers.find(c=>c.entryId===rec.id);
   const billCleared=!!rec.billNo; // invoice raised = shipment delivered
   if(rec.type==='MP'&&!linked){
-    newContId=uid();
+    newContId='ct_'+rec.id; // deterministic id: every device creates the SAME doc for this entry (no cloud duplicates)
     const nCtns=(rec.containerNo||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean).length;
+    const newSt=billCleared?'Delivered':(rec.status==='Cleared'?'Cleared':'Pending DO'); // mirror syncMPContainers
     containers.push({id:newContId,entryId:rec.id,
       no:containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1,
       cno:rec.cno,rNo:rec.rNo,name:rec.customer,blNo:rec.awbBl,containerNo:rec.containerNo||'',logNo:rec.no,
-      ctnsLeft:nCtns||null,_billCleared:billCleared||undefined,
-      discharge:'',lastDate:'',doDate:'',clearance:billCleared?(rec.date||isoLocal(new Date())):'',
-      status:billCleared?'Delivered':'Pending DO',remark:''});
+      ctnsLeft:nCtns||null,_billCleared:billCleared||undefined,_manual:(!billCleared&&newSt==='Cleared')||undefined,
+      discharge:'',lastDate:'',doDate:'',clearance:newSt!=='Pending DO'?(rec.date||isoLocal(new Date())):'',
+      status:newSt,remark:''});
     saveContainers();
-    if(billCleared)newContId=null; // don't jump-to/highlight a container that's already delivered
+    if(newSt!=='Pending DO')newContId=null; // don't jump-to/highlight a container that's already done
   }else if(linked){
     if(rec.containerNo&&linked.containerNo!==rec.containerNo)linked.containerNo=rec.containerNo;
     linked.logNo=rec.no;
     // propagate this entry's clearance change (invoice added/removed OR status Cleared↔Pending) onto its container
     syncContFromEntry(rec,prevEntry,linked);
+    saveContainers();renderConts(); // persist containerNo/logNo edits even when no status transition happened
   }
   buildEntryFilters();renderEntries();updateCounts();closeModal('overlay-entry');
   if(newContId){
@@ -992,7 +1002,10 @@ function exportEntries(){
 }
 // show only the entries that still need an invoice (no BILL NO)
 function showInvoicePending(){
+  document.getElementById('e_search').value='';
   document.getElementById('e_statusFilter').value='';
+  document.getElementById('e_typeFilter').value='';
+  document.getElementById('e_monthFilter').value='';
   document.getElementById('e_invFilter').value='pending';
   eState.page=1;renderEntries();
   toast('Showing entries with no invoice (BILL NO)');
@@ -1000,6 +1013,7 @@ function showInvoicePending(){
 // jump to Container Status with a deadline filter applied (used by the Form Log summary cards)
 function goToContFilter(f){
   switchView('containers');
+  document.getElementById('c_search').value='';
   document.getElementById('c_statusFilter').value='';
   document.getElementById('c_dueFilter').value=f;
   cState.page=1;renderConts();
@@ -1035,7 +1049,7 @@ function filteredConts(){
       if(df==='notedtoday')return !isDone(r)&&r.clearance===isoLocal(new Date());
       if(df==='notedtomorrow')return !isDone(r)&&r.clearance===addDays(isoLocal(new Date()),1);
       const d=daysLeft(effLast(r).next);
-      if(d===null||isDone(r))return false;
+      if(d===null||isNoted(r))return false; // noted/done = under control → same rule as the stat cards
       if(df==='overdue'&&!(d<0))return false;
       if(df==='soon'&&!(d>=0&&d<=3))return false;
       if(df==='week'&&!(d>=0&&d<=7))return false;
@@ -1057,7 +1071,7 @@ function filteredConts(){
     });
     return rows;
   }
-  return sortRows(rows,cState,['no','ctnsLeft']);
+  return sortRows(rows,cState,['no','ctnsLeft','logNo']);
 }
 function renderConts(){
   const active=containers.filter(r=>!isDone(r));
@@ -1097,7 +1111,7 @@ function renderConts(){
     const stCls='st-'+r.status.replace(/\s/g,'');
     return `<tr class="${rowcls}" id="crow-${r.id}">
       <td class="actcol"><div class="rowact">
-        <button class="iconbtn" onclick="showCreds('${esc(r.cno)}')" title="Port login for this customer">🔑</button>
+        <button class="iconbtn" onclick="showCreds('${jatt(r.cno)}')" title="Port login for this customer">🔑</button>
         <button class="iconbtn" onclick="openContForm('${r.id}')" title="Edit">✏️</button>
         <button class="iconbtn del" onclick="delCont('${r.id}')" title="Delete">🗑️</button>
       </div></td>
@@ -1136,9 +1150,9 @@ function containerNoCell(r){
     const numHtml=multi?`<span style="background:${bg};color:${fg};padding:1px 7px;border-radius:6px">${esc(cn)}</span>`:esc(cn);
     const sizeTag=info.size?` <span class="typechip" style="background:#e0f2fe;color:#0369a1">${esc(info.size)}${(info.size==='LCL'&&info.cbm)?' · '+esc(info.cbm)+'cbm':''}</span>`:'';
     let badge='';
-    const outBtn=(!isDone(r))?`<button class="copybtn" onclick="markCtnOut('${r.id}','${esc(cn)}')" title="Mark this container taken out of port">📤</button>`:'';
+    const outBtn=(!isDone(r))?`<button class="copybtn" onclick="markCtnOut('${r.id}','${jatt(cn)}')" title="Mark this container taken out of port">📤</button>`:'';
     if(info.out){
-      badge=` <span class="daysbadge d-ok" style="opacity:.55;cursor:pointer" onclick="markCtnOut('${r.id}','${esc(cn)}')" title="Taken out of port — click to undo">OUT ✓</span>`;
+      badge=` <span class="daysbadge d-ok" style="opacity:.55;cursor:pointer" onclick="markCtnOut('${r.id}','${jatt(cn)}')" title="Taken out of port — click to undo">OUT ✓</span>`;
     }else if(info.clearance){
       // clearance noted = customs done, but the container is still physically in port until it's taken OUT (📤)
       badge=` <span class="daysbadge d-ok" title="Clearance noted ${fmtDate(info.clearance)} — still in port until taken out">noted ${fmtDate(info.clearance)} ✓</span>`+outBtn;
@@ -1157,6 +1171,7 @@ function containerNoCell(r){
 }
 function markCtnOut(id,cn){
   const r=containers.find(x=>x.id===id);if(!r)return;
+  if(isDone(r)){toast('Record is Cleared/Delivered — reopen it before changing container flags');return;}
   r.portInfo=r.portInfo||{};
   const key=Object.keys(r.portInfo).find(k=>k.toUpperCase()===cn.toUpperCase())||cn;
   const nowOut=!(r.portInfo[key]&&r.portInfo[key].out);
@@ -1182,12 +1197,13 @@ function bumpCtnsLeft(id,delta){
   if(n===0)toast('All containers taken out ✓ — you can mark it Cleared now');
 }
 // ---- per-container detail editor (size, CBM, discharge, clearance for each box under one BL) ----
-let __edPI={},__edSel='';
+let __edPI={},__edSel='',__edDirty={};
 function ctnKey(cn){return Object.keys(__edPI).find(k=>k.toUpperCase()===cn.toUpperCase())||cn;}
 function setCtnField(cn,field,val){
   const k=ctnKey(cn);
   __edPI[k]={...(__edPI[k]||{}),[field]:val};
-  if(field==='size'&&val!=='LCL')delete __edPI[k].cbm; // CBM only makes sense for LCL
+  (__edDirty[k]=__edDirty[k]||{})[field]=true; // remember exactly what the user touched
+  if(field==='size'&&val!=='LCL'){delete __edPI[k].cbm;__edDirty[k].cbm=true;} // CBM only makes sense for LCL
   if(field!=='cbm')renderCtnDetails(); // re-render chips/state (cbm skipped so typing keeps focus)
 }
 function selCtn(cn){__edSel=cn;renderCtnDetails();}
@@ -1209,8 +1225,8 @@ function renderCtnDetails(){
   const bl=(document.getElementById('c_blNo')||{}).value||''; // BL drives the last-date rule (COAU vs default)
   const sizes=['',"20'","40'","40' HC","LCL"];
   // CBM box appears only when LCL is chosen
-  const sizeSel=(cn,i)=>`<div><label>SIZE / TYPE</label><select onchange="setCtnField('${esc(cn)}','size',this.value)">${sizes.map(s=>`<option${(i.size||'')===s?' selected':''}>${s||'—'}</option>`).join('')}</select></div>`+
-      ((i.size||'')==='LCL'?`<div><label>CBM (LCL)</label><input type="number" step="any" min="0" value="${i.cbm||''}" oninput="setCtnField('${esc(cn)}','cbm',this.value)"></div>`:'');
+  const sizeSel=(cn,i)=>`<div><label>SIZE / TYPE</label><select onchange="setCtnField('${jatt(cn)}','size',this.value)">${sizes.map(s=>`<option${(i.size||'')===s?' selected':''}>${s||'—'}</option>`).join('')}</select></div>`+
+      ((i.size||'')==='LCL'?`<div><label>CBM (LCL)</label><input type="number" step="any" min="0" value="${i.cbm||''}" oninput="setCtnField('${jatt(cn)}','cbm',this.value)"></div>`:'');
   if(list.length===1){
     // single container: size/type here, dates in the main fields below
     const cn=list[0],i=__edPI[ctnKey(cn)]||{};
@@ -1226,7 +1242,7 @@ function renderCtnDetails(){
     const [bg,fg]=ctnColor(idx);
     const sel=idx===selIdx;
     const state=i.clearance?' ✓':(i.discharge?' · '+fmtDate(lastDateFor(i.discharge,bl)):'');
-    return `<span class="daysbadge" style="cursor:pointer;margin:0 5px 5px 0;background:${bg};color:${fg};${sel?'outline:2px solid var(--brand);':''}" onclick="selCtn('${esc(cn)}')">${esc(cn)}${i.size?' · '+esc(i.size):''}${state}</span>`;
+    return `<span class="daysbadge" style="cursor:pointer;margin:0 5px 5px 0;background:${bg};color:${fg};${sel?'outline:2px solid var(--brand);':''}" onclick="selCtn('${jatt(cn)}')">${esc(cn)}${i.size?' · '+esc(i.size):''}${state}</span>`;
   }).join('');
   const cn=__edSel,i=__edPI[ctnKey(cn)]||{};
   const [bg,fg]=ctnColor(selIdx<0?0:selIdx);
@@ -1236,9 +1252,9 @@ function renderCtnDetails(){
   <div>${chips}</div>
   <div class="cdrow" style="border-left:4px solid ${fg}"><div class="cdhead"><span style="background:${bg};color:${fg};padding:1px 8px;border-radius:6px">${esc(cn)}</span><span style="font-weight:600;font-size:11px;color:${i.clearance?'var(--ok)':'var(--muted)'}">${i.clearance?'cleared ✓':(ld?'last date '+fmtDate(ld)+' '+ldNote:'no discharge yet')}</span></div><div class="cdgrid">
     ${sizeSel(cn,i)}
-    <div><label>ARRIVAL</label><input type="date" value="${i.arrival||''}" onchange="setCtnField('${esc(cn)}','arrival',this.value)"></div>
-    <div><label>DISCHARGE</label><input type="date" value="${i.discharge||''}" onchange="setCtnField('${esc(cn)}','discharge',this.value)"></div>
-    <div><label>CLEARANCE</label><input type="date" value="${i.clearance||''}" onchange="setCtnField('${esc(cn)}','clearance',this.value)"></div>
+    <div><label>ARRIVAL</label><input type="date" value="${i.arrival||''}" onchange="setCtnField('${jatt(cn)}','arrival',this.value)"></div>
+    <div><label>DISCHARGE</label><input type="date" value="${i.discharge||''}" onchange="setCtnField('${jatt(cn)}','discharge',this.value)"></div>
+    <div><label>CLEARANCE</label><input type="date" value="${i.clearance||''}" onchange="setCtnField('${jatt(cn)}','clearance',this.value)"></div>
   </div></div>`;
 }
 document.getElementById('c_containerNo').addEventListener('input',renderCtnDetails);
@@ -1248,12 +1264,15 @@ function cycleContStatus(id){
   // Delivered is set only by the invoice — a delivered container is locked (remove the BILL NO to change)
   if(r.status==='Delivered'){toast('Delivered is set by the invoice (BILL NO) — remove it to change the status');return;}
   const o=['Pending DO','DO Not Approved','DO Approved','Cleared']; // manual cycle never reaches Delivered
+  const prevSt=r.status;
   r.status=o[(o.indexOf(r.status)+1)%o.length];
   r._manual=true; // user set this by hand → auto-rules won't override it
   delete r._billCleared; // hand-picked status drops invoice provenance (never auto-reopened)
   if(r.status==='Cleared'){
     if(!r.clearance)r.clearance=isoLocal(new Date());
     toast('Cleared ✓ — removed from the active list');
+  }else if(prevSt==='Cleared'){
+    r.clearance=''; // left Cleared (wrap-around) → un-note so DO/due warnings work again
   }
   saveContainers();
   applyContToEntry(r); // keep the Form Log entry's status in sync with this container
@@ -1271,12 +1290,12 @@ function openContForm(id){
     c_clearance.value=r.clearance||'';c_status.value=r.status;c_remark.value=r.remark||'';
     c_ctnsLeft.value=r.ctnsLeft??'';
     c_ctnCount.value=contNoList(r).length||'';
-    __edPI=JSON.parse(JSON.stringify(r.portInfo||{}));
+    __edPI=JSON.parse(JSON.stringify(r.portInfo||{}));__edDirty={};
   }else{
     t.textContent='Add Container';f.reset();c_id.value='';
     c_no.value=containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
     c_status.value='Pending DO';
-    __edPI={};
+    __edPI={};__edDirty={};
   }
   renderCtnDetails();
   showModal('overlay-cont');setTimeout(()=>c_cno.focus(),50);
@@ -1289,9 +1308,17 @@ document.getElementById('c_discharge').addEventListener('change',()=>{
 function saveCont(e){
   e.preventDefault();
   const prev=c_id.value?containers.find(x=>x.id===c_id.value):null;
-  // merge per-container details (size/cbm/discharge/clearance), preserving agent-filled arrival/out
-  const merged={...(prev&&prev.portInfo||{})};
-  Object.keys(__edPI).forEach(k=>{merged[k]={...(merged[k]||{}),...__edPI[k]};});
+  // merge per-container details onto the FRESH record: only the fields the user actually touched (__edDirty),
+  // so agent/teammate updates that arrived while the form was open are preserved
+  const merged=JSON.parse(JSON.stringify(prev&&prev.portInfo||{}));
+  Object.keys(__edDirty).forEach(k=>{
+    const mk=Object.keys(merged).find(x=>x.toUpperCase()===k.toUpperCase())||k;
+    merged[mk]=merged[mk]||{};
+    Object.keys(__edDirty[k]).forEach(f=>{
+      const v=(__edPI[k]||{})[f];
+      if(v===undefined)delete merged[mk][f];else merged[mk][f]=v;
+    });
+  });
   const rec={id:c_id.value||uid(),entryId:prev?prev.entryId:undefined,logNo:prev?prev.logNo:undefined,
     _manual:prev?prev._manual:undefined,_billCleared:prev?prev._billCleared:undefined,portInfo:merged,no:c_no.value===''?null:Number(c_no.value),
     cno:c_cno.value.trim(),rNo:c_rNo.value.trim(),name:c_name.value.trim(),
@@ -1311,6 +1338,7 @@ function saveCont(e){
   if(le&&le.billNo){
     // invoice present ⇒ Delivered, always (locked; can't be downgraded by hand)
     rec.status='Delivered';rec._billCleared=true;delete rec._manual;
+    if(!rec.clearance)rec.clearance=le.date||isoLocal(new Date()); // keep it countable in the clearance audit
   }else if(rec.status==='Delivered'){
     rec.status='Cleared'; // Delivered without an invoice isn't allowed → treat as a manual Cleared
     rec._manual=true;delete rec._billCleared;
@@ -1359,6 +1387,7 @@ function filteredCusts(){
   let rows=customers.filter(r=>!q||[r.cno,r.name,r.contact].join(' ').toLowerCase().includes(q));
   return sortRows(rows,uState,[]);
 }
+function copyCustContact(id){const r=customers.find(x=>x.id===id);if(r&&r.contact)copyText(r.contact);}
 const jobCountCache={};
 function jobCount(cno){
   cno=cno.toUpperCase();
@@ -1381,7 +1410,7 @@ function renderCusts(){
     return `<tr>
       <td class="cno" data-l="C Number">${esc(r.cno)}</td>
       <td class="name" style="max-width:none" data-l="Name" title="${esc(r.name)}">${esc(r.name)}</td>
-      <td data-l="Contact">${r.contact?esc(r.contact)+`<button class="copybtn" onclick="copyText('${esc(r.contact)}')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}</td>
+      <td data-l="Contact">${r.contact?esc(r.contact)+`<button class="copybtn" onclick="copyCustContact('${r.id}')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}</td>
       <td data-l="Jobs">${jc?`<span class="daysbadge d-ok">${jc} job${jc>1?'s':''}</span>`:'<span class="d-none">—</span>'}</td>
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="openCustForm('${r.id}')" title="Edit">✏️</button>
@@ -1514,6 +1543,8 @@ function switchView(view){
 }
 function goToDOList(){
   switchView('containers');
+  document.getElementById('c_search').value='';
+  document.getElementById('c_statusFilter').value='';
   document.getElementById('c_dueFilter').value='doextend';
   cState.page=1;renderConts();
 }
@@ -1525,7 +1556,7 @@ function showCreds(cno){
 function renderAlerts(){
   const bar=document.getElementById('alertbar');
   const need=containers.filter(needsDOExtend);
-  const urgent=need.filter(r=>{const d=daysLeft(r.lastDate);return d!==null&&d<=3});
+  const urgent=need.filter(r=>{const d=daysLeft(effLast(r).latest);return d!==null&&d<=3}); // same deadline source as needsDOExtend
   if(!need.length){bar.classList.remove('show');return;}
   const names=need.slice(0,3).map(r=>r.containerNo||r.blNo||r.cno).join(', ');
   const askBtn=('Notification' in window)&&Notification.permission==='default'
@@ -1549,8 +1580,9 @@ function notifyDO(){
   const need=containers.filter(needsDOExtend);
   if(!need.length)return;
   const lines=need.slice(0,4).map(r=>{
-    const d=daysLeft(r.lastDate);
-    return (r.containerNo||r.blNo||r.cno)+' — last date '+fmtDate(r.lastDate)+(d!==null?(d<0?' ('+Math.abs(d)+'d OVER)':' ('+d+'d left)'):'');
+    const ld=effLast(r).latest; // same deadline source as needsDOExtend
+    const d=daysLeft(ld);
+    return (r.containerNo||r.blNo||r.cno)+' — last date '+fmtDate(ld)+(d!==null?(d<0?' ('+Math.abs(d)+'d OVER)':' ('+d+'d left)'):'');
   });
   try{new Notification('⚠ Extend DO — '+need.length+' container'+(need.length>1?'s':''),{body:lines.join('\n')});}catch(e){}
 }
@@ -1639,16 +1671,30 @@ function syncMPContainers(){
     if(r.type!=='MP'||linked.has(r.id))return;
     const st=r.billNo?'Delivered':((r.status==='Cleared'||r.status==='Delivered')?'Cleared':'Pending DO');
     const done=st!=='Pending DO';
-    containers.push({id:uid(),entryId:r.id,no:++nextNo,
+    containers.push({id:'ct_'+r.id,entryId:r.id,no:++nextNo, // deterministic id — every device creates the SAME doc (no cloud duplicates)
       cno:r.cno,rNo:r.rNo,name:r.customer,blNo:r.awbBl,containerNo:r.containerNo||'',logNo:r.no,
-      _billCleared:r.billNo?true:undefined,
-      discharge:'',lastDate:'',doDate:'',clearance:done?(r.date||''):'',
+      _billCleared:r.billNo?true:undefined,_manual:(!r.billNo&&done)||undefined,
+      discharge:'',lastDate:'',doDate:'',clearance:done?(r.date||isoLocal(new Date())):'',
       status:st,remark:''});
     if(done)addedHistory++;else addedActive++;
   });
   if(addedActive+addedHistory>0)saveContainers();
   return addedActive+addedHistory;
 }
+// migration: merge duplicate containers pointing at the same Form Log entry (old boot races on
+// multiple devices could create two records for one MP entry). Keep the richest, drop the rest.
+(()=>{
+  const byEntry={};
+  containers.forEach(c=>{if(c.entryId)(byEntry[c.entryId]=byEntry[c.entryId]||[]).push(c);});
+  const drop=new Set();
+  Object.values(byEntry).forEach(list=>{
+    if(list.length<2)return;
+    const score=c=>(c.discharge?8:0)+(c.portInfo&&Object.keys(c.portInfo).length?4:0)+(c.doDate?2:0)+(c.clearance?1:0);
+    list.sort((a,b)=>score(b)-score(a));
+    list.slice(1).forEach(dup=>drop.add(dup.id));
+  });
+  if(drop.size){containers=containers.filter(c=>!drop.has(c.id));saveContainers();}
+})();
 // one-time migration: old auto remarks "From Form Log NO 715" → logNo field ("Log 715" column)
 (()=>{
   let migrated=0;
@@ -1765,7 +1811,29 @@ window.__app={
 const COLS=['entries','customers','creds','containers','team'];
 const KEYMAP={entries:'lion_clearance_v2',customers:'lion_customers_v1',creds:'lion_creds_v1',
   containers:'lion_containers_v1',team:'lion_team_v1'};
-const cmpStr=r=>{const{u,...rest}=r;return JSON.stringify(rest,Object.keys(rest).sort());};
+// deep stable serializer: sorts keys at EVERY level (a replacer array would silently drop
+// nested keys like portInfo's container numbers — that bug made per-container edits invisible to sync)
+const stable=o=>{
+  if(o===null||typeof o!=='object')return JSON.stringify(o);
+  if(Array.isArray(o))return '['+o.map(stable).join(',')+']';
+  return '{'+Object.keys(o).sort().map(k=>o[k]===undefined?null:JSON.stringify(k)+':'+stable(o[k])).filter(Boolean).join(',')+'}';
+};
+const cmpStr=r=>{const{u,...rest}=r;return stable(rest);};
+// ids that the SERVER has confirmed (pushed by us, or seen in a cloud snapshot). Persisted so a
+// record missing from the cloud is treated as "teammate deleted it" ONLY if it was truly synced once —
+// an unpushed local record (u is stamped at save time) must never be dropped.
+const pushed={};
+const pushedKey=col=>'lion_pushed_v1_'+col;
+function savePushed(col){try{localStorage.setItem(pushedKey(col),JSON.stringify([...pushed[col]]));}catch(e){}}
+function loadPushed(col,cloudIds,localArr){
+  let s=null;
+  try{const raw=localStorage.getItem(pushedKey(col));if(raw)s=new Set(JSON.parse(raw));}catch(e){}
+  if(!s){ // first run on this version: legacy semantics — u was only ever stamped by a push/merge
+    s=new Set(localArr.filter(r=>r.u).map(r=>r.id));
+  }
+  cloudIds.forEach(id=>s.add(id));
+  pushed[col]=s;savePushed(col);
+}
 const shadow={},debounces={};
 let db=null,auth=null,fx=null; // fx = firestore module fns
 
@@ -1809,9 +1877,11 @@ async function mergeSnap(col,s){
     if(ch.type==='removed'){
       if(byId.has(id)){byId.delete(id);changed=true;}
       shadow[col].delete(id);
+      if(pushed[col]){pushed[col].delete(id);savePushed(col);}
     }else{
       const d=ch.doc.data();
       shadow[col].set(id,cmpStr(d));
+      if(pushed[col]&&!pushed[col].has(id)){pushed[col].add(id);savePushed(col);}
       const loc=byId.get(id);
       if(!loc){byId.set(id,d);changed=true;}
       else if((d.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(d)){byId.set(id,d);changed=true;}
@@ -1834,10 +1904,9 @@ async function pushCol(col){
   const ids=new Set();
   arr.forEach(r=>{
     ids.add(r.id);
-    const c=cmpStr(r);
-    if(sh.get(r.id)!==c){r.u=now;sets.push(r);sh.set(r.id,c);}
+    if(sh.get(r.id)!==cmpStr(r)){if(!r.u||r.u<now)r.u=now;sets.push(r);}
   });
-  sh.forEach((_,id)=>{if(!ids.has(id)){dels.push(id);sh.delete(id);}});
+  sh.forEach((_,id)=>{if(!ids.has(id))dels.push(id);});
   if(!sets.length&&!dels.length)return;
   localStorage.setItem(KEYMAP[col],JSON.stringify(arr));
   try{
@@ -1852,9 +1921,15 @@ async function pushCol(col){
       });
       await b.commit();
     }
+    // only mark as synced AFTER the server accepted the writes — a failed push stays pending and retries
+    sets.forEach(r=>{sh.set(r.id,cmpStr(r));if(pushed[col])pushed[col].add(r.id);});
+    dels.forEach(id=>{sh.delete(id);if(pushed[col])pushed[col].delete(id);});
+    if(pushed[col])savePushed(col);
     chip('☁ Synced','#16a34a');
   }catch(e){
     chip('☁ Will sync when online','#d97706');
+    clearTimeout(debounces['retry:'+col]);
+    debounces['retry:'+col]=setTimeout(()=>pushCol(col),30000); // keep retrying until it lands
   }
 }
 
@@ -1881,20 +1956,50 @@ async function startSync(){
           await b.commit();
         }
         localStorage.setItem(KEYMAP[col],JSON.stringify(localArr));
+        pushed[col]=new Set(localArr.map(r=>r.id));savePushed(col);
       }else{
         // joining device: the cloud is the source of truth
         const arr=snap.docs.map(d=>d.data());
         app.set[col](arr);
         localStorage.setItem(KEYMAP[col],JSON.stringify(arr));
         snap.docs.forEach(d=>shadow[col].set(d.id,cmpStr(d.data())));
+        pushed[col]=new Set(snap.docs.map(d=>d.id));savePushed(col);
       }
     }else{
-      snap.docs.forEach(d=>shadow[col].set(d.id,cmpStr(d.data())));
+      // already-joined device: reconcile with the cloud snapshot BEFORE anything can push, so
+      // a device that was offline can't re-stamp stale data over newer cloud edits or resurrect
+      // records a teammate deleted while it was away.
+      const local=app.get[col]();
+      const byId=new Map(local.map(r=>[r.id,r]));
+      const cloudIds=new Set(snap.docs.map(d=>d.id));
+      loadPushed(col,cloudIds,local); // confirmed-synced ids (seeded from legacy u semantics on first run)
+      let changed=false;
+      snap.docs.forEach(d=>{
+        const dd=d.data();
+        shadow[col].set(d.id,cmpStr(dd));
+        const loc=byId.get(d.id);
+        if(!loc){byId.set(d.id,dd);changed=true;}                                              // created by a teammate while we were away
+        else if((dd.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(dd)){byId.set(d.id,dd);changed=true;} // cloud is newer → take it
+      });
+      for(const [id] of [...byId]){ // gone from the cloud but CONFIRMED synced once → teammate deleted it
+        if(!cloudIds.has(id)&&pushed[col].has(id)){byId.delete(id);pushed[col].delete(id);changed=true;}
+      }
+      if(changed){
+        const arr=[...byId.values()];
+        app.set[col](arr);
+        localStorage.setItem(KEYMAP[col],JSON.stringify(arr));
+        savePushed(col);
+      }
     }
     fx.onSnapshot(ref,s=>mergeSnap(col,s),()=>{});
   }
   localStorage.setItem('lion_cloud_joined','1');
-  window.__cloudPush=col=>{clearTimeout(debounces[col]);debounces[col]=setTimeout(()=>pushCol(col),800);};
+  window.__cloudPush=col=>{
+    // stamp changed records at SAVE time (not push time) so LWW favours the truly newer edit
+    const sh=shadow[col];
+    if(sh){const now=Date.now();window.__app.get[col]().forEach(r=>{if(sh.get(r.id)!==cmpStr(r)&&(!r.u||r.u<now))r.u=now;});}
+    clearTimeout(debounces[col]);debounces[col]=setTimeout(()=>pushCol(col),800);
+  };
   COLS.forEach(c=>window.__cloudPush(c)); // push offline edits made before sign-in
   app.rerender();
   chip('☁ Synced','#16a34a');
