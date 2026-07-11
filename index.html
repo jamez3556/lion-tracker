@@ -908,9 +908,9 @@ function updateFileHint(){
   const mine=entries.filter(e=>e.file===code&&e.id!==e_id.value);
   const mCount=mine.filter(e=>(e.date||'').slice(0,7)===ym).length;
   const yCount=mine.filter(e=>(e.date||'').slice(0,4)===y).length;
-  const nextNo=mine.reduce((m,e)=>Math.max(m,Number(e.no)||0),0)+1;
-  if(!e_id.value)e_no.value=nextNo; // suggest this staff's next serial when adding
-  h.textContent=`${code} — ${mCount} form${mCount===1?'':'s'} this month · ${yCount} this year · next serial: ${nextNo}`;
+  // NOTE: NO is the COMPANY-wide serial (set in openEntryForm as global max+1) — do NOT override it per staff.
+  // This hint only reports this staff's month/year form counts.
+  h.textContent=`${code} — ${mCount} form${mCount===1?'':'s'} this month · ${yCount} this year`;
 }
 document.getElementById('e_file').addEventListener('change',updateFileHint);
 function openEntryForm(id){
@@ -961,6 +961,12 @@ function saveEntry(e){
       e_awbBl.focus();
       return false; // don't save
     }
+  }
+  // company-wide serial: a NEW entry must get a unique next NO. Guards the sync-race / partial-data case
+  // where the local list was incomplete and produced a low, duplicate serial.
+  if(!prevEntry){
+    const maxNo=entries.reduce((m,x)=>Math.max(m,Number(x.no)||0),0);
+    if(rec.no==null||entries.some(x=>Number(x.no)===Number(rec.no)))rec.no=maxNo+1;
   }
   let note='';
   // "invoice = Delivered": a BILL NO means the shipment is delivered (billed). Set automatically, always.
@@ -1720,6 +1726,29 @@ function syncMPContainers(){
   });
   if(drop.size){containers=containers.filter(c=>!drop.has(c.id));saveContainers();}
 })();
+// Repair the company-wide NO serial: a device that added an entry before its data finished syncing (or the
+// old per-staff numbering) could hand out a low DUPLICATE NO. Keep the earliest entry for each number and
+// bump the later duplicate(s) to the next free serial; keep any linked container's logNo in step. Idempotent.
+function dedupeEntryNos(){
+  let max=entries.reduce((m,e)=>Math.max(m,Number(e.no)||0),0);
+  const contByEntry=new Map();containers.forEach(c=>{if(c.entryId&&!contByEntry.has(c.entryId))contByEntry.set(c.entryId,c);});
+  const ord=e=>((e.date||'')+' '+(e.time||'')+' '+e.id); // earliest by shipment date, then time, then id
+  const byNo=new Map();
+  entries.forEach(e=>{const n=Number(e.no);if(!n)return;if(!byNo.has(n))byNo.set(n,[]);byNo.get(n).push(e);});
+  let fixed=0,contFixed=0;
+  byNo.forEach(group=>{
+    if(group.length<2)return;
+    group.sort((a,b)=>ord(a)<ord(b)?-1:ord(a)>ord(b)?1:0);
+    for(let i=1;i<group.length;i++){
+      group[i].no=++max;fixed++;
+      const c=contByEntry.get(group[i].id);if(c){c.logNo=max;contFixed++;}
+    }
+  });
+  if(fixed)saveEntries();
+  if(contFixed)saveContainers();
+  return fixed;
+}
+(()=>{const n=dedupeEntryNos();if(n)toast(n+' duplicate serial'+(n>1?'s':'')+' renumbered');})();
 // one-time migration: old auto remarks "From Form Log NO 715" → logNo field ("Log 715" column)
 (()=>{
   let migrated=0;
