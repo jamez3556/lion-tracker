@@ -1726,29 +1726,31 @@ function syncMPContainers(){
   });
   if(drop.size){containers=containers.filter(c=>!drop.has(c.id));saveContainers();}
 })();
-// Repair the company-wide NO serial: a device that added an entry before its data finished syncing (or the
-// old per-staff numbering) could hand out a low DUPLICATE NO. Keep the earliest entry for each number and
-// bump the later duplicate(s) to the next free serial; keep any linked container's logNo in step. Idempotent.
-function dedupeEntryNos(){
-  let max=entries.reduce((m,e)=>Math.max(m,Number(e.no)||0),0);
-  const contByEntry=new Map();containers.forEach(c=>{if(c.entryId&&!contByEntry.has(c.entryId))contByEntry.set(c.entryId,c);});
-  const ord=e=>((e.date||'')+' '+(e.time||'')+' '+e.id); // earliest by shipment date, then time, then id
-  const byNo=new Map();
-  entries.forEach(e=>{const n=Number(e.no);if(!n)return;if(!byNo.has(n))byNo.set(n,[]);byNo.get(n).push(e);});
-  let fixed=0,contFixed=0;
-  byNo.forEach(group=>{
-    if(group.length<2)return;
-    group.sort((a,b)=>ord(a)<ord(b)?-1:ord(a)>ord(b)?1:0);
-    for(let i=1;i<group.length;i++){
-      group[i].no=++max;fixed++;
-      const c=contByEntry.get(group[i].id);if(c){c.logNo=max;contFixed++;}
-    }
+// Company-wide serial = the order shipments were entered. Renumber ALL entries chronologically
+// (shipment date, then time, then previous NO to keep same-moment order stable, then id) so
+// NO 1 = the first shipment ever and today's newest always has the highest number — regardless of
+// which staff logged it. Deterministic + idempotent (no changes → no save); linked containers'
+// logNo follows the entry's new number. Runs on every load, so date edits re-slot too.
+function renumberEntries(){
+  const key=e=>((e.date||'0000-00-00')+' '+(e.time||'00:00:00'));
+  const sorted=[...entries].sort((a,b)=>{
+    const ka=key(a),kb=key(b);
+    if(ka!==kb)return ka<kb?-1:1;
+    const na=Number(a.no)||0,nb=Number(b.no)||0;
+    if(na!==nb)return na-nb;
+    return a.id<b.id?-1:a.id>b.id?1:0;
   });
-  if(fixed)saveEntries();
-  if(contFixed)saveContainers();
-  return fixed;
+  let changed=0;
+  sorted.forEach((e,i)=>{if(Number(e.no)!==i+1){e.no=i+1;changed++;}});
+  if(changed){
+    const byId=new Map(entries.map(e=>[e.id,e]));
+    let cl=0;
+    containers.forEach(c=>{if(c.entryId){const e=byId.get(c.entryId);if(e&&c.logNo!==e.no){c.logNo=e.no;cl++;}}});
+    saveEntries();if(cl)saveContainers();
+  }
+  return changed;
 }
-(()=>{const n=dedupeEntryNos();if(n)toast(n+' duplicate serial'+(n>1?'s':'')+' renumbered');})();
+(()=>{const n=renumberEntries();if(n)toast(n+' serial'+(n>1?'s':'')+' renumbered into entry order');})();
 // one-time migration: old auto remarks "From Form Log NO 715" → logNo field ("Log 715" column)
 (()=>{
   let migrated=0;
