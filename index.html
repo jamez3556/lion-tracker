@@ -854,7 +854,7 @@ function renderEntries(){
     <td data-l="Date">${fmtDate(r.date)}${r.time?`<div class="sub">${esc(r.time)}</div>`:''}</td>
     <td class="name" data-l="Customer" title="${esc(r.customer)}">${esc(r.customer)}</td>
     <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
-    <td data-l="File">${esc(r.file)||'—'}</td>
+    <td data-l="File">${r.file?esc(r.file)+(r.fileNo?' - '+r.fileNo:''):'—'}</td>
     <td data-l="R No">${esc(r.rNo)||'—'}</td>
     <td data-l="Bill No">${esc(r.billNo)||'—'}</td>
     <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
@@ -909,8 +909,8 @@ function updateFileHint(){
   const mCount=mine.filter(e=>(e.date||'').slice(0,7)===ym).length;
   const yCount=mine.filter(e=>(e.date||'').slice(0,4)===y).length;
   // NOTE: NO is the COMPANY-wide serial (set in openEntryForm as global max+1) — do NOT override it per staff.
-  // This hint only reports this staff's month/year form counts.
-  h.textContent=`${code} — ${mCount} form${mCount===1?'':'s'} this month · ${yCount} this year`;
+  // This hint reports the staff's counts and their next per-staff entry number ("CAD - 23").
+  h.textContent=`${code} — ${mCount} form${mCount===1?'':'s'} this month · ${yCount} this year`+(!e_id.value?` · this entry: ${code} - ${yCount+1}`:'');
 }
 document.getElementById('e_file').addEventListener('change',updateFileHint);
 function openEntryForm(id){
@@ -968,6 +968,14 @@ function saveEntry(e){
     const maxNo=entries.reduce((m,x)=>Math.max(m,Number(x.no)||0),0);
     if(rec.no==null||entries.some(x=>Number(x.no)===Number(rec.no)))rec.no=maxNo+1;
   }
+  // per-staff entry number ("CAD - 23"): this staff's Nth form of the year. New entries (or a changed
+  // staff code / year) get count+1 now; renumberEntries re-slots everything exactly on every load.
+  if(rec.file){
+    const y=(rec.date||'').slice(0,4);
+    const same=prevEntry&&prevEntry.file===rec.file&&(prevEntry.date||'').slice(0,4)===y;
+    if(same)rec.fileNo=prevEntry.fileNo;
+    else rec.fileNo=entries.filter(x=>x.id!==rec.id&&x.file===rec.file&&(x.date||'').slice(0,4)===y).length+1;
+  }else delete rec.fileNo;
   let note='';
   // "invoice = Delivered": a BILL NO means the shipment is delivered (billed). Set automatically, always.
   if(rec.billNo){if(rec.status!=='Delivered'){rec.status='Delivered';note=' — BILL NO present → Delivered';}}
@@ -1028,8 +1036,8 @@ function delEntry(id){
 }
 function exportEntries(){
   xlsExport('lion-form-log',
-    ['NO','C NO','DATE','CUSTOMER NAME','TYPE','FILE','R NO','BILL NO','GRS WT','PKGS','AWB / BL NO','TIME','STATUS'],
-    filteredEntries().map(r=>[r.no,r.cno,r.date,r.customer,r.type,r.file,r.rNo,r.billNo,r.grsWt,r.pkgs,r.awbBl,r.time,r.status]));
+    ['NO','C NO','DATE','CUSTOMER NAME','TYPE','FILE','FILE NO','R NO','BILL NO','GRS WT','PKGS','AWB / BL NO','TIME','STATUS'],
+    filteredEntries().map(r=>[r.no,r.cno,r.date,r.customer,r.type,r.file,r.fileNo,r.rNo,r.billNo,r.grsWt,r.pkgs,r.awbBl,r.time,r.status]));
 }
 // show only the entries that still need an invoice (no BILL NO)
 function showInvoicePending(){
@@ -1742,6 +1750,15 @@ function renumberEntries(){
   });
   let changed=0;
   sorted.forEach((e,i)=>{if(Number(e.no)!==i+1){e.no=i+1;changed++;}});
+  // per-staff entry number (resets each year): walking the same chronological order, the Nth form a
+  // staff code logs that year gets fileNo N → shown as "CAD - 23". Independent of the NO sequence.
+  const perStaff={};
+  sorted.forEach(e=>{
+    if(!e.file){if(e.fileNo!=null){delete e.fileNo;changed++;}return;}
+    const k=e.file+'|'+((e.date||'').slice(0,4)||'0000');
+    perStaff[k]=(perStaff[k]||0)+1;
+    if(Number(e.fileNo)!==perStaff[k]){e.fileNo=perStaff[k];changed++;}
+  });
   if(changed){
     const byId=new Map(entries.map(e=>[e.id,e]));
     let cl=0;
