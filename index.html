@@ -950,16 +950,20 @@ function saveEntry(e){
     pkgs:e_pkgs.value===''?null:Number(e_pkgs.value),awbBl:e_awbBl.value.trim(),
     time:e_time.value,status:e_status.value,
     containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
-  // block a duplicate AWB / BL NO — the same shipment must not be logged twice
+  // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
+  // invoice (AWB unchanged) is never blocked, even if a pre-existing duplicate exists elsewhere. When a
+  // new/changed AWB matches another entry, warn and let the user confirm (intentional repeats are allowed).
   const awbHint=document.getElementById('e_awbHint');awbHint.textContent='';
   if(rec.awbBl){
     const key=rec.awbBl.replace(/\s+/g,'').toUpperCase();
-    const dup=entries.find(x=>x.id!==rec.id&&(x.awbBl||'').replace(/\s+/g,'').toUpperCase()===key);
-    if(dup){
-      const msg='⚠ AWB / BL "'+rec.awbBl+'" already entered — NO '+(dup.no??'—')+', R NO '+(dup.rNo||'—')+' ('+(dup.customer||'—')+', '+fmtDate(dup.date)+')';
-      awbHint.textContent=msg;toast(msg);
-      e_awbBl.focus();
-      return false; // don't save
+    const prevKey=((prevEntry&&prevEntry.awbBl)||'').replace(/\s+/g,'').toUpperCase();
+    if(key!==prevKey){
+      const dup=entries.find(x=>x.id!==rec.id&&(x.awbBl||'').replace(/\s+/g,'').toUpperCase()===key);
+      if(dup){
+        const msg='⚠ AWB / BL "'+rec.awbBl+'" already entered — NO '+(dup.no??'—')+', R NO '+(dup.rNo||'—')+' ('+(dup.customer||'—')+', '+fmtDate(dup.date)+')';
+        awbHint.textContent=msg;
+        if(!confirm(msg+'\n\nEnter it again anyway?')){e_awbBl.focus();return false;}
+      }
     }
   }
   // company-wide serial: a NEW entry must get a unique next NO. Guards the sync-race / partial-data case
