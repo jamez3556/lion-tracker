@@ -961,8 +961,8 @@ function saveEntry(e){
       const dup=entries.find(x=>x.id!==rec.id&&(x.awbBl||'').replace(/\s+/g,'').toUpperCase()===key);
       if(dup){
         const msg='⚠ AWB / BL "'+rec.awbBl+'" already entered — NO '+(dup.no??'—')+', R NO '+(dup.rNo||'—')+' ('+(dup.customer||'—')+', '+fmtDate(dup.date)+')';
-        awbHint.textContent=msg;
-        if(!confirm(msg+'\n\nEnter it again anyway?')){e_awbBl.focus();return false;}
+        awbHint.textContent=msg;toast(msg);
+        e_awbBl.focus();return false; // hard block — a new/changed AWB/BL can't duplicate another entry
       }
     }
   }
