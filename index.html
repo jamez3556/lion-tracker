@@ -269,8 +269,8 @@
   </div>
   <nav class="tabs" id="nav">
     <button data-view="entries" class="active">📋 Form Log <span class="cnt" id="cnt-entries"></span></button>
-    <button data-view="mp">🛳️ MP Shipments <span class="cnt" id="cnt-mp"></span></button>
     <button data-view="containers">🚢 Container Status <span class="cnt" id="cnt-containers"></span></button>
+    <button data-view="mp">🛳️ MP Shipments <span class="cnt" id="cnt-mp"></span></button>
     <button data-view="payments">💰 Payment <span class="cnt" id="cnt-payments"></span></button>
     <button data-view="customers">👥 Customers <span class="cnt" id="cnt-customers"></span></button>
     <button data-view="creds">🔐 MPL &amp; Custom Logins <span class="cnt" id="cnt-creds"></span></button>
@@ -339,10 +339,7 @@
       <input id="mp_search" type="text" placeholder="Search customer, C-No, AWB/BL, Bill No, R-No…">
     </div>
     <select class="filter" id="mp_statusFilter">
-      <option value="">All statuses</option><option>Pending</option><option>Cleared</option><option>Delivered</option>
-    </select>
-    <select class="filter" id="mp_invFilter">
-      <option value="">All invoices</option><option value="pending">🧾 Invoice pending (no bill)</option><option value="done">Invoiced (has bill)</option>
+      <option value="">All statuses</option><option>Pending</option><option>Cleared</option>
     </select>
     <select class="filter" id="mp_monthFilter"><option value="">All months</option></select>
     <button class="primary" onclick="openEntryForm(null,'MP')">＋ Add MP Shipment</button>
@@ -371,7 +368,7 @@
         <tbody id="mp_tbody"></tbody>
       </table>
     </div>
-    <div class="empty" id="mp_empty" style="display:none"><div class="big">🛳️</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No MP (sea) shipments yet</div><div style="margin-top:4px">Every MP shipment logged in the Form Log appears here automatically.</div></div>
+    <div class="empty" id="mp_empty" style="display:none"><div class="big">🛳️</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No MP shipments awaiting a bill</div><div style="margin-top:4px">MP shipments appear here until a Bill No is entered for them in the Form Log.</div></div>
     <div class="pager" id="mp_pager"></div>
   </div>
 </section>
@@ -926,7 +923,7 @@ document.querySelectorAll('#nav button').forEach(b=>{
 });
 function updateCounts(){
   document.getElementById('cnt-entries').textContent=entries.length.toLocaleString();
-  document.getElementById('cnt-mp').textContent=entries.filter(e=>e.type==='MP').length.toLocaleString();
+  document.getElementById('cnt-mp').textContent=entries.filter(e=>e.type==='MP'&&!e.billNo).length.toLocaleString();
   document.getElementById('cnt-containers').textContent=containers.length.toLocaleString();
   document.getElementById('cnt-payments').textContent=payments.length.toLocaleString();
   document.getElementById('cnt-customers').textContent=customers.length.toLocaleString();
@@ -1580,14 +1577,12 @@ function buildMpMonthFilter(){
 function filteredMP(){
   const q=document.getElementById('mp_search').value.trim().toLowerCase();
   const sf=document.getElementById('mp_statusFilter').value;
-  const inv=document.getElementById('mp_invFilter').value;
   const mf=document.getElementById('mp_monthFilter').value;
   let rows=entries.filter(r=>{
     if(r.type!=='MP')return false;
-    if(q&&![r.cno,r.customer,r.awbBl,r.billNo,r.rNo,r.file,r.mpRemark].join(' ').toLowerCase().includes(q))return false;
+    if(r.billNo)return false;                 // billed → leaves the MP list (invoice entered in Form Log)
+    if(q&&![r.cno,r.customer,r.awbBl,r.rNo,r.file,r.mpRemark].join(' ').toLowerCase().includes(q))return false;
     if(sf&&r.status!==sf)return false;
-    if(inv==='pending'&&r.billNo)return false;
-    if(inv==='done'&&!r.billNo)return false;
     if(mf&&(r.date||'').slice(0,7)!==mf)return false;
     return true;
   });
@@ -1596,14 +1591,15 @@ function filteredMP(){
 function renderMP(){
   buildMpMonthFilter();
   const mp=entries.filter(e=>e.type==='MP');
-  const pendingInv=mp.filter(r=>!r.billNo).length;
-  const delivered=mp.filter(r=>r.status==='Delivered').length;
-  const active=mp.filter(r=>r.status!=='Delivered'&&r.status!=='Cleared').length;
+  const unbilled=mp.filter(r=>!r.billNo);            // the list shown here (billed ones drop off)
+  const notCleared=unbilled.filter(r=>r.status!=='Cleared').length;
+  const clearedNoBill=unbilled.filter(r=>r.status==='Cleared').length;
+  const billed=mp.length-unbilled.length;
   document.getElementById('mp_stats').innerHTML=`
-    <div class="card c-info"><div class="n">${mp.length.toLocaleString()}</div><div class="l">Total MP Shipments</div></div>
-    <div class="card c-warn"><div class="n">${active.toLocaleString()}</div><div class="l">Active (not cleared)</div></div>
-    <div class="card c-danger"><div class="n">${pendingInv.toLocaleString()}</div><div class="l">Invoice Pending</div></div>
-    <div class="card c-purple"><div class="n">${delivered.toLocaleString()}</div><div class="l">Delivered</div></div>`;
+    <div class="card c-info"><div class="n">${unbilled.length.toLocaleString()}</div><div class="l">Awaiting Bill</div></div>
+    <div class="card c-warn"><div class="n">${notCleared.toLocaleString()}</div><div class="l">Not Cleared</div></div>
+    <div class="card c-danger"><div class="n">${clearedNoBill.toLocaleString()}</div><div class="l">Cleared · Ready to Bill</div></div>
+    <div class="card c-purple"><div class="n">${billed.toLocaleString()}</div><div class="l">Billed (done)</div></div>`;
   const rows=filteredMP();
   const slice=rows.slice((mpState.page-1)*PAGE_SIZE,mpState.page*PAGE_SIZE);
   document.getElementById('mp_empty').style.display=rows.length===0?'block':'none';
@@ -2186,7 +2182,7 @@ makeSortable('pay_head',payState,renderPayments);
 makeSortable('mp_head',mpState,renderMP);
 [['e_search',renderEntries,eState],['e_statusFilter',renderEntries,eState],['e_invFilter',renderEntries,eState],['e_typeFilter',renderEntries,eState],['e_monthFilter',renderEntries,eState],
  ['c_search',renderConts,cState],['c_statusFilter',renderConts,cState],['c_dueFilter',renderConts,cState],
- ['mp_search',renderMP,mpState],['mp_statusFilter',renderMP,mpState],['mp_invFilter',renderMP,mpState],['mp_monthFilter',renderMP,mpState],
+ ['mp_search',renderMP,mpState],['mp_statusFilter',renderMP,mpState],['mp_monthFilter',renderMP,mpState],
  ['pay_search',renderPayments,payState],['pay_billFilter',renderPayments,payState],['pay_balFilter',renderPayments,payState],['pay_monthFilter',renderPayments,payState],
  ['u_search',renderCusts,uState],['p_search',renderCreds,pState]].forEach(([id,fn,st])=>{
   const el=document.getElementById(id);
