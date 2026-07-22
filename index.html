@@ -140,6 +140,8 @@
   .payhdr{background:#f8fafc;border:1px solid var(--line,#e5e7eb);border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:13px;line-height:1.7}
   .payhdr b{color:var(--ink)}
   .payhdr .k{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-right:6px}
+  .mpremark{width:100%;min-width:120px;padding:5px 8px;border:1px solid var(--line,#e5e7eb);border-radius:7px;font:inherit;font-size:12px;background:var(--card,#fff);color:var(--ink)}
+  .mpremark:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 2px rgba(37,99,235,.15)}
   .rowact{display:flex;gap:6px}
   .iconbtn{background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12.5px;color:var(--muted)}
   .iconbtn:hover{background:#f1f5f9;color:var(--ink)}
@@ -267,6 +269,7 @@
   </div>
   <nav class="tabs" id="nav">
     <button data-view="entries" class="active">📋 Form Log <span class="cnt" id="cnt-entries"></span></button>
+    <button data-view="mp">🛳️ MP Shipments <span class="cnt" id="cnt-mp"></span></button>
     <button data-view="containers">🚢 Container Status <span class="cnt" id="cnt-containers"></span></button>
     <button data-view="payments">💰 Payment <span class="cnt" id="cnt-payments"></span></button>
     <button data-view="customers">👥 Customers <span class="cnt" id="cnt-customers"></span></button>
@@ -324,6 +327,52 @@
     </div>
     <div class="empty" id="e_empty" style="display:none"><div class="big">📭</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No entries found</div></div>
     <div class="pager" id="e_pager"></div>
+  </div>
+</section>
+
+<!-- ==================== MP SHIPMENTS VIEW ==================== -->
+<section class="view" id="view-mp">
+  <div class="stats" id="mp_stats"></div>
+  <div class="toolbar">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="mp_search" type="text" placeholder="Search customer, C-No, AWB/BL, Bill No, R-No…">
+    </div>
+    <select class="filter" id="mp_statusFilter">
+      <option value="">All statuses</option><option>Pending</option><option>Cleared</option><option>Delivered</option>
+    </select>
+    <select class="filter" id="mp_invFilter">
+      <option value="">All invoices</option><option value="pending">🧾 Invoice pending (no bill)</option><option value="done">Invoiced (has bill)</option>
+    </select>
+    <select class="filter" id="mp_monthFilter"><option value="">All months</option></select>
+    <button class="primary" onclick="openEntryForm(null,'MP')">＋ Add MP Shipment</button>
+    <button class="ghost" onclick="exportMP()">⬇ Excel</button>
+    <button class="ghost" onclick="window.print()">🖨 Print</button>
+  </div>
+  <div class="tablewrap m-cards">
+    <div class="scroll">
+      <table style="min-width:1350px">
+        <thead><tr id="mp_head">
+          <th data-k="no" class="num">NO <span class="arrow">▲▼</span></th>
+          <th data-k="cno">C NO <span class="arrow">▲▼</span></th>
+          <th data-k="date">DATE <span class="arrow">▲▼</span></th>
+          <th data-k="customer">CUSTOMER NAME <span class="arrow">▲▼</span></th>
+          <th data-k="type">TYPE <span class="arrow">▲▼</span></th>
+          <th data-k="file">FILE <span class="arrow">▲▼</span></th>
+          <th data-k="rNo">R NO <span class="arrow">▲▼</span></th>
+          <th data-k="billNo">BILL NO <span class="arrow">▲▼</span></th>
+          <th data-k="grsWt" class="num">GRS WT <span class="arrow">▲▼</span></th>
+          <th data-k="pkgs" class="num">PKGS <span class="arrow">▲▼</span></th>
+          <th data-k="awbBl">AWB / BL NO <span class="arrow">▲▼</span></th>
+          <th data-k="status">STATUS <span class="arrow">▲▼</span></th>
+          <th data-k="mpRemark">REMARK <span class="arrow">▲▼</span></th>
+          <th class="nosort actcol"></th>
+        </tr></thead>
+        <tbody id="mp_tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="mp_empty" style="display:none"><div class="big">🛳️</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No MP (sea) shipments yet</div><div style="margin-top:4px">Every MP shipment logged in the Form Log appears here automatically.</div></div>
+    <div class="pager" id="mp_pager"></div>
   </div>
 </section>
 
@@ -864,7 +913,7 @@ function wireAutofill(cnoInput,nameInput,hintEl){
 }
 
 /* ============ nav ============ */
-const VIEWTITLES={entries:'Form Log',containers:'Container Status',payments:'Payment',customers:'Customer List',creds:'MPL & Custom Logins'};
+const VIEWTITLES={entries:'Form Log',mp:'MP Shipments',containers:'Container Status',payments:'Payment',customers:'Customer List',creds:'MPL & Custom Logins'};
 document.querySelectorAll('#nav button').forEach(b=>{
   b.addEventListener('click',()=>{
     document.querySelectorAll('#nav button').forEach(x=>x.classList.remove('active'));
@@ -877,6 +926,7 @@ document.querySelectorAll('#nav button').forEach(b=>{
 });
 function updateCounts(){
   document.getElementById('cnt-entries').textContent=entries.length.toLocaleString();
+  document.getElementById('cnt-mp').textContent=entries.filter(e=>e.type==='MP').length.toLocaleString();
   document.getElementById('cnt-containers').textContent=containers.length.toLocaleString();
   document.getElementById('cnt-payments').textContent=payments.length.toLocaleString();
   document.getElementById('cnt-customers').textContent=customers.length.toLocaleString();
@@ -957,7 +1007,7 @@ function cycleEntryStatus(id){
   if(r.billNo){toast('Delivered is set by the invoice (BILL NO) — remove it to change the status');return;}
   const before={status:r.status,billNo:r.billNo};
   // no invoice → toggle between Pending and Cleared only (Delivered needs an invoice)
-  r.status=r.status==='Cleared'?'Pending':'Cleared';saveEntries();renderEntries();
+  r.status=r.status==='Cleared'?'Pending':'Cleared';saveEntries();renderEntries();renderMP();
   if(linked)syncContFromEntry(r,before,linked); // propagate the status change to the container
 }
 function toggleContBox(){
@@ -996,7 +1046,7 @@ function updateFileHint(){
   h.textContent=`${code} — ${mCount} form${mCount===1?'':'s'} this month · ${yCount} this year`+(!e_id.value?` · this entry: ${code} - ${yCount+1}`:'');
 }
 document.getElementById('e_file').addEventListener('change',updateFileHint);
-function openEntryForm(id){
+function openEntryForm(id,defaultType){
   const t=document.getElementById('e_modalTitle');
   const f=document.querySelector('#overlay-entry form');
   document.getElementById('e_custHint').textContent='';
@@ -1014,7 +1064,7 @@ function openEntryForm(id){
     e_no.value=entries.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
     e_date.value=isoLocal(new Date());
     e_time.value=new Date().toTimeString().slice(0,8);
-    e_type.value='AP';buildFileSelect(localStorage.getItem('lion_last_file')||'LION-AB');e_status.value='Pending';
+    e_type.value=defaultType||'AP';buildFileSelect(localStorage.getItem('lion_last_file')||'LION-AB');e_status.value='Pending';
     e_containerNo.value='';
     toggleContBox();
   }
@@ -1033,6 +1083,7 @@ function saveEntry(e){
     pkgs:e_pkgs.value===''?null:Number(e_pkgs.value),awbBl:e_awbBl.value.trim(),
     time:e_time.value,status:e_status.value,
     containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
+  if(prevEntry&&prevEntry.mpRemark)rec.mpRemark=prevEntry.mpRemark; // MP-tab remark isn't on this form — keep it
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
   // invoice (AWB unchanged) is never blocked, even if a pre-existing duplicate exists elsewhere. When a
   // new/changed AWB matches another entry, warn and let the user confirm (intentional repeats are allowed).
@@ -1100,7 +1151,7 @@ function saveEntry(e){
     syncContFromEntry(rec,prevEntry,linked);
     saveContainers();renderConts(); // persist containerNo/logNo edits even when no status transition happened
   }
-  buildEntryFilters();renderEntries();updateCounts();closeModal('overlay-entry');
+  buildEntryFilters();renderEntries();renderMP();updateCounts();closeModal('overlay-entry');
   if(newContId){
     // show the user the container that was just created
     document.getElementById('c_search').value='';
@@ -1124,7 +1175,7 @@ function delEntry(id){
   entries=entries.filter(x=>x.id!==id);saveEntries();
   const pBefore=payments.length;payments=payments.filter(p=>p.entryId!==id&&p.id!=='pm_'+id); // remove its payment row
   if(payments.length!==pBefore){savePayments();renderPayments();}
-  renderEntries();updateCounts();toast('Entry deleted');
+  renderEntries();renderMP();updateCounts();toast('Entry deleted');
 }
 function exportEntries(){
   xlsExport('lion-form-log',
@@ -1508,6 +1559,85 @@ function exportContAudit(){
   });
   rows.push(['',''],['TOTAL CONTAINERS CLEARED',cleared.length]);
   xlsExport('lion-clearance-audit',['PERIOD','CONTAINERS CLEARED'],rows);
+}
+
+/* ============ MP SHIPMENTS ============
+   A filtered view of the Form Log showing only MP (sea) entries — same columns as the Form Log
+   plus an editable REMARK saved on the entry (field mpRemark, distinct from the container remark).
+   No separate collection: every MP entry already lives in `entries`, so new MP forms appear here
+   automatically and sync for free. Edit/status/delete all act on the same underlying entry. */
+const mpState={key:'no',dir:-1,page:1};
+function mpPage(p){mpState.page=p;renderMP();}
+function buildMpMonthFilter(){
+  const sel=document.getElementById('mp_monthFilter');if(!sel)return;
+  const cur=sel.value;
+  const months=[...new Set(entries.filter(e=>e.type==='MP').map(e=>(e.date||'').slice(0,7)).filter(Boolean))].sort().reverse();
+  sel.innerHTML='<option value="">All months</option>'+months.map(m=>{
+    const d=new Date(m+'-01T00:00:00');return `<option value="${m}">${d.toLocaleDateString('en-GB',{month:'short',year:'numeric'})}</option>`;
+  }).join('');
+  sel.value=cur;
+}
+function filteredMP(){
+  const q=document.getElementById('mp_search').value.trim().toLowerCase();
+  const sf=document.getElementById('mp_statusFilter').value;
+  const inv=document.getElementById('mp_invFilter').value;
+  const mf=document.getElementById('mp_monthFilter').value;
+  let rows=entries.filter(r=>{
+    if(r.type!=='MP')return false;
+    if(q&&![r.cno,r.customer,r.awbBl,r.billNo,r.rNo,r.file,r.mpRemark].join(' ').toLowerCase().includes(q))return false;
+    if(sf&&r.status!==sf)return false;
+    if(inv==='pending'&&r.billNo)return false;
+    if(inv==='done'&&!r.billNo)return false;
+    if(mf&&(r.date||'').slice(0,7)!==mf)return false;
+    return true;
+  });
+  return sortRows(rows,mpState,['no','grsWt','pkgs']);
+}
+function renderMP(){
+  buildMpMonthFilter();
+  const mp=entries.filter(e=>e.type==='MP');
+  const pendingInv=mp.filter(r=>!r.billNo).length;
+  const delivered=mp.filter(r=>r.status==='Delivered').length;
+  const active=mp.filter(r=>r.status!=='Delivered'&&r.status!=='Cleared').length;
+  document.getElementById('mp_stats').innerHTML=`
+    <div class="card c-info"><div class="n">${mp.length.toLocaleString()}</div><div class="l">Total MP Shipments</div></div>
+    <div class="card c-warn"><div class="n">${active.toLocaleString()}</div><div class="l">Active (not cleared)</div></div>
+    <div class="card c-danger"><div class="n">${pendingInv.toLocaleString()}</div><div class="l">Invoice Pending</div></div>
+    <div class="card c-purple"><div class="n">${delivered.toLocaleString()}</div><div class="l">Delivered</div></div>`;
+  const rows=filteredMP();
+  const slice=rows.slice((mpState.page-1)*PAGE_SIZE,mpState.page*PAGE_SIZE);
+  document.getElementById('mp_empty').style.display=rows.length===0?'block':'none';
+  document.getElementById('mp_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}">
+    <td class="num" data-l="No">${r.no??'—'}</td>
+    <td class="cno" data-l="C No">${esc(r.cno)}</td>
+    <td data-l="Date">${fmtDate(r.date)}${r.time?`<div class="sub">${esc(r.time)}</div>`:''}</td>
+    <td class="name" data-l="Customer" title="${esc(r.customer)}">${esc(r.customer)}</td>
+    <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
+    <td data-l="File">${r.file?esc(r.file)+(r.fileNo?' - '+r.fileNo:''):'—'}</td>
+    <td data-l="R No">${esc(r.rNo)||'—'}</td>
+    <td data-l="Bill No">${esc(r.billNo)||'—'}</td>
+    <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
+    <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
+    <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
+    <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
+    <td data-l="Remark"><input class="mpremark" value="${esc(r.mpRemark)}" placeholder="Add remark…" onchange="setMpRemark('${jatt(r.id)}',this.value)"></td>
+    <td class="actcol"><div class="rowact">
+      <button class="iconbtn" onclick="openEntryForm('${jatt(r.id)}')" title="Edit">✏️</button>
+      <button class="iconbtn del" onclick="delEntry('${jatt(r.id)}')" title="Delete">🗑️</button>
+    </div></td></tr>`).join('');
+  pagerHTML(document.getElementById('mp_pager'),mpState,rows.length,'mp');
+}
+function setMpRemark(id,val){
+  const r=entries.find(x=>x.id===id);if(!r)return;
+  const v=val.trim();
+  if((r.mpRemark||'')===v)return;
+  r.mpRemark=v;saveEntries();
+  // reflect anywhere the entry is shown (no full re-render, to keep the input focused)
+}
+function exportMP(){
+  xlsExport('lion-mp-shipments',
+    ['NO','C NO','DATE','CUSTOMER NAME','TYPE','FILE','FILE NO','R NO','BILL NO','GRS WT','PKGS','AWB / BL NO','STATUS','REMARK'],
+    filteredMP().map(r=>[r.no,r.cno,r.date,r.customer,r.type,r.file,r.fileNo,r.rNo,r.billNo,r.grsWt,r.pkgs,r.awbBl,r.status,r.mpRemark]));
 }
 
 /* ============ PAYMENT ============
@@ -2045,8 +2175,10 @@ makeSortable('c_head',cState,renderConts);
 makeSortable('u_head',uState,renderCusts);
 makeSortable('p_head',pState,renderCreds);
 makeSortable('pay_head',payState,renderPayments);
+makeSortable('mp_head',mpState,renderMP);
 [['e_search',renderEntries,eState],['e_statusFilter',renderEntries,eState],['e_invFilter',renderEntries,eState],['e_typeFilter',renderEntries,eState],['e_monthFilter',renderEntries,eState],
  ['c_search',renderConts,cState],['c_statusFilter',renderConts,cState],['c_dueFilter',renderConts,cState],
+ ['mp_search',renderMP,mpState],['mp_statusFilter',renderMP,mpState],['mp_invFilter',renderMP,mpState],['mp_monthFilter',renderMP,mpState],
  ['pay_search',renderPayments,payState],['pay_billFilter',renderPayments,payState],['pay_balFilter',renderPayments,payState],['pay_monthFilter',renderPayments,payState],
  ['u_search',renderCusts,uState],['p_search',renderCreds,pState]].forEach(([id,fn,st])=>{
   const el=document.getElementById(id);
@@ -2113,14 +2245,14 @@ document.querySelectorAll('.scroll').forEach(sc=>{
   });
 });
 syncPayments(true); // ensure every entry has a payment row (backfills existing data, prunes orphans)
-buildEntryFilters();renderEntries();renderConts();renderPayments();renderCusts();renderCreds();updateCounts();
+buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();updateCounts();
 fitTables();setTimeout(fitTables,300);
 
 // Bridge for the cloud-sync module (module scripts can't reach these top-level lets directly)
 window.__app={
   get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,payments:()=>payments,team:()=>team},
   set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},payments:v=>{payments=v},team:v=>{team=v}},
-  rerender(){syncPayments();buildEntryFilters();renderEntries();renderConts();renderPayments();renderCusts();renderCreds();updateCounts();}
+  rerender(){syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();updateCounts();}
 };
 </script>
 
