@@ -1121,7 +1121,7 @@ function saveEntry(e){
   }
   if(rec.file)localStorage.setItem('lion_last_file',rec.file); // remember this device's staff code
   if(e_id.value){entries[entries.findIndex(x=>x.id===e_id.value)]=rec;toast('Entry updated'+note);}
-  else{entries.push(rec);toast('Entry added'+note);}
+  else{entries.push(rec);toast('Entry added'+note);notifyZapier(rec);} // fire webhook only for brand-new shipments
   saveEntries();ensureCustomer(rec.cno,rec.customer);
   // every entry has a Payment row — create it / refresh its mirrored identity fields (incl. Bill Done)
   if(syncPaymentFromEntry(rec)){savePayments();renderPayments();}
@@ -1646,6 +1646,58 @@ const payState={key:'no',dir:-1,page:1};
 // Payment tracking starts on this date — only shipments dated on/after it appear in the Payment tab.
 // Older shipments are intentionally excluded (fresh start, no historical clutter).
 const PAY_START='2026-07-22';
+// ── Zapier webhook ──────────────────────────────────────────────────────────
+// When a NEW shipment is logged in the Form Log, POST its details to a Zapier
+// "Webhooks by Zapier → Catch Hook". Paste your catch-hook URL below to turn it
+// on. Empty string = disabled (the call is a harmless no-op). A failed webhook
+// is caught and logged — it never blocks a shipment from saving.
+const ZAPIER_HOOK_URL='https://hooks.zapier.com/hooks/catch/15397558/44imkl7/';
+// Low-level sender. `event` tags what happened so ONE Zap can catch both (filter/branch on it):
+//   'shipment_created' — a new Form Log entry (duty not yet known)
+//   'payment_saved'    — Payment tab saved, carrying the real duty/MACL/MPL/balance
+function zapierPost(payload){
+  if(!ZAPIER_HOOK_URL)return; // not configured yet — harmless no-op
+  try{
+    // No Content-Type header on purpose — avoids a CORS preflight; Zapier still parses the JSON body.
+    fetch(ZAPIER_HOOK_URL,{method:'POST',body:JSON.stringify(payload)})
+      .catch(e=>console.warn('Zapier notify failed',e));
+  }catch(e){console.warn('Zapier notify error',e);}
+}
+// Fired from saveEntry() for brand-new shipments (duty usually 0 here — entered later in the Payment tab).
+function notifyZapier(rec){
+  zapierPost({
+    event:'shipment_created',
+    shipmentRNumber:rec.rNo||'',
+    customerName:rec.customer||'',
+    cNumber:rec.cno||'',
+    awbBl:rec.awbBl||'',
+    type:rec.type||'',
+    dutyAmount:rec.duty!=null?rec.duty:0,
+    date:rec.date||'',
+    no:rec.no
+  });
+}
+// Fired from savePay() when a payment is saved — carries the real money fields.
+function notifyZapierPayment(p){
+  zapierPost({
+    event:'payment_saved',
+    shipmentRNumber:p.rNo||'',
+    customerName:p.name||'',
+    cNumber:p.cno||'',
+    awbBl:p.blNo||'',
+    dutyAmount:Number(p.duty)||0,
+    macl:Number(p.macl)||0,
+    mpl:Number(p.mpl)||0,
+    total:payTotal(p),
+    advance:Number(p.advance)||0,
+    balance:payBalance(p),
+    remark:p.remark||'',
+    billNo:p.billNo||'',
+    billDone:!!p.billNo,
+    date:p.date||'',
+    no:p.no
+  });
+}
 function payEligible(e){return e&&(e.date||'')>=PAY_START;}
 function paymentsPage(p){payState.page=p;renderPayments();}
 const payId=e=>'pm_'+e.id;
@@ -1784,6 +1836,7 @@ function savePay(e){
   p.advance=pay_advance.value===''?null:Number(pay_advance.value);
   p.remark=pay_remark.value.trim();
   savePayments();renderPayments();updateCounts();closeModal('overlay-pay');
+  notifyZapierPayment(p); // webhook with the real duty/MACL/MPL/balance
   toast('Payment saved');
   return false;
 }
