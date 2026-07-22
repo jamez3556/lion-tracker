@@ -306,6 +306,8 @@
           <th data-k="billNo">BILL NO <span class="arrow">▲▼</span></th>
           <th data-k="grsWt" class="num">GRS WT <span class="arrow">▲▼</span></th>
           <th data-k="pkgs" class="num">PKGS <span class="arrow">▲▼</span></th>
+          <th data-k="duty" class="num">DUTY <span class="arrow">▲▼</span></th>
+          <th data-k="advance" class="num">ADVANCE <span class="arrow">▲▼</span></th>
           <th data-k="awbBl">AWB / BL NO <span class="arrow">▲▼</span></th>
           <th data-k="status">STATUS <span class="arrow">▲▼</span></th>
           <th class="nosort actcol"></th>
@@ -459,6 +461,11 @@
         <div class="field"><label>BILL NO</label><input id="e_billNo" placeholder="L26/…"></div>
         <div class="field"><label>GRS WT (kg)</label><input id="e_grsWt" type="number" step="any" min="0"></div>
         <div class="field"><label>PKGS</label><input id="e_pkgs" type="number" min="0"></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>DUTY AMOUNT (MVR)</label><input id="e_duty" type="number" step="any" min="0"></div>
+        <div class="field"><label>ADVANCE PAID (MVR)</label><input id="e_advance" type="number" step="any" min="0"></div>
+        <div class="field"><label>BALANCE</label><input id="e_balance" type="text" readonly tabindex="-1" style="background:var(--panel2,#f1f5f9);font-weight:700"></div>
       </div>
       <div class="grid3">
         <div class="field"><label>AWB / BL NO</label><input id="e_awbBl">
@@ -825,7 +832,7 @@ function filteredEntries(){
     if(mf&&(r.date||'').slice(0,7)!==mf)return false;
     return true;
   });
-  return sortRows(rows,eState,['no','grsWt','pkgs']);
+  return sortRows(rows,eState,['no','grsWt','pkgs','duty','advance']);
 }
 // AP shipment logged TODAY → dark highlight row (so the team can see what was uploaded today).
 // Compares the entry DATE to today's local date, so the highlight clears automatically at 00:00.
@@ -859,6 +866,8 @@ function renderEntries(){
     <td data-l="Bill No">${esc(r.billNo)||'—'}</td>
     <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
     <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
+    <td class="num" data-l="Duty">${fmtNum(r.duty)}</td>
+    <td class="num" data-l="Advance"${(Number(r.advance)>0)?` title="Balance ${fmtNum((Number(r.duty)||0)-(Number(r.advance)||0))}"`:''}>${fmtNum(r.advance)}</td>
     <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
     <td class="actcol"><div class="rowact">
@@ -924,6 +933,7 @@ function openEntryForm(id){
     e_customer.value=r.customer;e_type.value=r.type||'';buildFileSelect(r.file||'');
     e_rNo.value=r.rNo||'';e_billNo.value=r.billNo||'';e_grsWt.value=r.grsWt??'';
     e_pkgs.value=r.pkgs??'';e_awbBl.value=r.awbBl||'';e_time.value=r.time||'';e_status.value=r.status;
+    e_duty.value=r.duty??'';e_advance.value=r.advance??'';
     e_containerNo.value=r.containerNo||'';
     toggleContBox();
   }else{
@@ -935,9 +945,16 @@ function openEntryForm(id){
     e_containerNo.value='';
     toggleContBox();
   }
-  updateFileHint();
+  updateFileHint();updateBalance();
   showModal('overlay-entry');setTimeout(()=>e_cno.focus(),50);
 }
+// live BALANCE = DUTY − ADVANCE (what's still owed after the customer's prepayment)
+function updateBalance(){
+  const d=Number(e_duty.value)||0,a=Number(e_advance.value)||0;
+  e_balance.value=(e_duty.value===''&&e_advance.value==='')?'':fmtNum(d-a);
+}
+document.getElementById('e_duty').addEventListener('input',updateBalance);
+document.getElementById('e_advance').addEventListener('input',updateBalance);
 document.getElementById('e_type').addEventListener('change',toggleContBox);
 function saveEntry(e){
   e.preventDefault();
@@ -948,6 +965,7 @@ function saveEntry(e){
     type:e_type.value,file:e_file.value.trim(),rNo:e_rNo.value.trim(),
     billNo:e_billNo.value.trim(),grsWt:e_grsWt.value===''?null:Number(e_grsWt.value),
     pkgs:e_pkgs.value===''?null:Number(e_pkgs.value),awbBl:e_awbBl.value.trim(),
+    duty:e_duty.value===''?null:Number(e_duty.value),advance:e_advance.value===''?null:Number(e_advance.value),
     time:e_time.value,status:e_status.value,
     containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
@@ -1040,8 +1058,8 @@ function delEntry(id){
 }
 function exportEntries(){
   xlsExport('lion-form-log',
-    ['NO','C NO','DATE','CUSTOMER NAME','TYPE','FILE','FILE NO','R NO','BILL NO','GRS WT','PKGS','AWB / BL NO','TIME','STATUS'],
-    filteredEntries().map(r=>[r.no,r.cno,r.date,r.customer,r.type,r.file,r.fileNo,r.rNo,r.billNo,r.grsWt,r.pkgs,r.awbBl,r.time,r.status]));
+    ['NO','C NO','DATE','CUSTOMER NAME','TYPE','FILE','FILE NO','R NO','BILL NO','GRS WT','PKGS','DUTY','ADVANCE','BALANCE','AWB / BL NO','TIME','STATUS'],
+    filteredEntries().map(r=>[r.no,r.cno,r.date,r.customer,r.type,r.file,r.fileNo,r.rNo,r.billNo,r.grsWt,r.pkgs,r.duty,r.advance,(r.duty!=null||r.advance!=null)?((Number(r.duty)||0)-(Number(r.advance)||0)):null,r.awbBl,r.time,r.status]));
 }
 // show only the entries that still need an invoice (no BILL NO)
 function showInvoicePending(){
