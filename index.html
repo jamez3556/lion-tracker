@@ -2391,8 +2391,12 @@ async function startSync(){
   chip('☁ Syncing…','#d97706');
   const app=window.__app;
   const joined=localStorage.getItem('lion_cloud_joined');
-  for(const col of COLS){
-    shadow[col]=new Map();
+  // Per-collection init, extracted so ONE collection failing (e.g. a new collection not yet
+  // covered by Firestore security rules) can't abort the whole sync. Before this was inline and a
+  // single getDocs() throw left window.__cloudPush undefined → the device silently stopped pushing
+  // EVERY collection (Form Log included), showing a stuck "Syncing…". Now each is isolated.
+  async function initCol(col){
+    shadow[col]=shadow[col]||new Map();
     const ref=fx.collection(db,col);
     const snap=await fx.getDocs(ref);
     const localArr=app.get[col]();
@@ -2447,16 +2451,36 @@ async function startSync(){
     }
     fx.onSnapshot(ref,s=>mergeSnap(col,s),()=>{});
   }
+  const failed=[];
+  for(const col of COLS){
+    try{await initCol(col);}
+    catch(e){failed.push(col);shadow[col]=shadow[col]||new Map();console.warn('cloud init failed for "'+col+'" — other collections keep syncing:',(e&&e.code)||e);}
+  }
   localStorage.setItem('lion_cloud_joined','1');
+  // ALWAYS define the pusher, even if some collections failed to init — otherwise this device
+  // can't push anything at all (the exact bug that stranded a device's newest Form Log entry).
   window.__cloudPush=col=>{
     // stamp changed records at SAVE time (not push time) so LWW favours the truly newer edit
     const sh=shadow[col];
     if(sh){const now=Date.now();window.__app.get[col]().forEach(r=>{if(sh.get(r.id)!==cmpStr(r)&&(!r.u||r.u<now))r.u=now;});}
     clearTimeout(debounces[col]);debounces[col]=setTimeout(()=>pushCol(col),800);
   };
-  COLS.forEach(c=>window.__cloudPush(c)); // push offline edits made before sign-in
+  COLS.forEach(c=>window.__cloudPush(c)); // push offline edits made before sign-in (incl. anything stranded earlier)
   app.rerender();
-  chip('☁ Synced','#16a34a');
+  if(!failed.length){chip('☁ Synced','#16a34a');return;}
+  // Some collections couldn't init (usually a new collection missing from Firestore rules).
+  // Everything else is fully live; retry the stragglers so they recover once access is granted.
+  chip('☁ Synced · retrying '+failed.join(', '),'#d97706');
+  let tries=0;
+  const retry=async()=>{
+    const still=[];
+    for(const col of failed){try{await initCol(col);window.__cloudPush(col);}catch(e){still.push(col);}}
+    failed.length=0;failed.push(...still);
+    if(!failed.length){chip('☁ Synced','#16a34a');return;}
+    if(++tries<20)setTimeout(retry,30000);
+    else chip('☁ '+failed.join(', ')+' blocked — check rules','#dc2626');
+  };
+  setTimeout(retry,8000);
 }
 
 (async()=>{
