@@ -2398,7 +2398,13 @@ async function startSync(){
   async function initCol(col){
     shadow[col]=shadow[col]||new Map();
     const ref=fx.collection(db,col);
-    const snap=await fx.getDocs(ref);
+    // Read the startup snapshot from the LOCAL CACHE, not the server — on a reload the cache already
+    // holds every record, so this costs 0 server reads. The onSnapshot listener below still delivers
+    // any changes made elsewhere since (deltas only). Fall back to a server read when the cache is
+    // empty (first-ever load, cache miss, or persistence unavailable) so the reconcile stays correct.
+    let snap;
+    try{snap=await fx.getDocsFromCache(ref);if(snap.empty)snap=await fx.getDocs(ref);}
+    catch(e){snap=await fx.getDocs(ref);}
     const localArr=app.get[col]();
     if(!joined){
       if(snap.empty&&localArr.length){
@@ -2507,8 +2513,11 @@ async function startSync(){
     fx={...authM,...fsM};
     const fbApp=appM.initializeApp(JSON.parse(cfgRaw));
     auth=fx.getAuth(fbApp);
-    try{db=fsM.initializeFirestore(fbApp,{localCache:fsM.persistentLocalCache()});}
-    catch(e){db=fsM.getFirestore(fbApp);}
+    // Multi-tab IndexedDB cache: without the multi-tab manager, a 2nd open tab fails to get exclusive
+    // access to persistence and silently falls back to memory (no cache) → every load re-reads the whole
+    // DB from the server, burning Firestore's daily quota. Multi-tab lets all tabs share one cache.
+    try{db=fsM.initializeFirestore(fbApp,{localCache:fsM.persistentLocalCache({tabManager:fsM.persistentMultipleTabManager()})});}
+    catch(e){try{db=fsM.initializeFirestore(fbApp,{localCache:fsM.persistentLocalCache()});}catch(e2){db=fsM.getFirestore(fbApp);}}
     fx.onAuthStateChanged(auth,user=>{
       if(user){
         document.getElementById('cf_user').textContent=user.email;
