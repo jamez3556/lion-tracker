@@ -1953,6 +1953,35 @@ function exportPayments(){
 // Standard rates below are the defaults; each customer can override them (customer.apRates).
 // Line names MUST match a Product/Service item in QuickBooks (Zapier maps by name).
 const AP_STD_RATES={'Form Filling':30,'Processing Charges':151.25,'Clearance KG':0.50,'Dhoni Charges':0.50};
+// QuickBooks Online Product/Service ids (Sales → Products & Services). Most charges exist twice —
+// an "(Air)" item under Air Clearance and a "(Sea)" one under Sea Clearance — so revenue lands in the
+// right account. AP (and every non-MP type) bills at Air; MP (sea freight) bills at Sea.
+// Keys are the invoice line labels, matched case-insensitively. An unknown label sends no itemId,
+// so adding a brand-new line still invoices fine (QuickBooks just uses its default item).
+const QB_ITEMS={
+  'form filling':{air:11,sea:12},
+  'processing charges':{air:13,sea:14},
+  'clearance kg':{air:15,sea:15},        // air-only item
+  'dhoni charges':{air:9,sea:10},
+  'delivery order fee':{air:19,sea:20},
+  'customs duty':{air:17,sea:18},
+  'transport':{air:23,sea:24},           // billed as Lorry Charges
+  'lorry charges':{air:23,sea:24},
+  'clearance box':{air:21,sea:21},
+  'clearance bag':{air:22,sea:22},
+  'mpl charge':{air:31,sea:31},
+  'mpl clearance':{air:27,sea:27},
+  'storage charge':{air:37,sea:37},
+  'freight charge':{air:30,sea:30},
+  'stamp':{air:25,sea:25},
+  'caf':{air:48,sea:48},
+  'export charges (island aviation)':{air:26,sea:26}
+};
+const QB_TAX_TAXABLE=2, QB_TAX_EXEMPT=3; // QuickBooks tax codes: 2 = "Tax 8%", 3 = "Non - Tax"
+function qbItemId(name,type){
+  const m=QB_ITEMS[(name||'').trim().toLowerCase()];
+  return m?(type==='MP'?m.sea:m.air):'';
+}
 function invMoney(n){return Math.round((Number(n)||0)*100)/100;}
 function invFmt(n){return Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function invLineRow(o){
@@ -2023,7 +2052,10 @@ function sendInvoice(){
     const amt=invMoney(qty*rate);
     const taxed=tr.querySelector('.invtax').checked;
     if(item&&amt>0){
-      lines.push({item:item,description:item,qty:qty,rate:rate,amount:amt,taxable:taxed,taxCode:taxed?'GST 8%':'Exempt'});
+      lines.push({item:item,description:item,qty:qty,rate:rate,amount:amt,taxable:taxed,
+        taxCode:taxed?'GST 8%':'Exempt',
+        itemId:qbItemId(item,e.type),                            // QuickBooks Product/Service id (Air vs Sea)
+        taxCodeId:taxed?QB_TAX_TAXABLE:QB_TAX_EXEMPT});          // 2 = Tax 8%, 3 = Non - Tax
       if(taxed)taxable+=amt;else nontax+=amt;
     }
   });
