@@ -629,7 +629,7 @@
       <div class="payhdr" id="pay_info"></div>
       <div class="grid3">
         <div class="field"><label>DUTY (MVR)</label><input id="pay_duty" type="number" step="any" min="0"></div>
-        <div class="field"><label>MACL (MVR)</label><input id="pay_macl" type="number" step="any" min="0"></div>
+        <div class="field"><label>MACL / DELIVERY ORDER (actual, incl GST)</label><input id="pay_macl" type="number" step="any" min="0"></div>
         <div class="field"><label>MPL (MVR)</label><input id="pay_mpl" type="number" step="any" min="0"></div>
       </div>
       <div class="grid3">
@@ -1708,7 +1708,7 @@ const PAY_START='2026-07-22';
 // "Webhooks by Zapier → Catch Hook". Paste your catch-hook URL below to turn it
 // on. Empty string = disabled (the call is a harmless no-op). A failed webhook
 // is caught and logged — it never blocks a shipment from saving.
-const ZAPIER_HOOK_URL='https://hooks.zapier.com/hooks/catch/15397558/44imkl7/';
+const ZAPIER_HOOK_URL='https://hooks.zapier.com/hooks/catch/15397558/44ki5mz/';
 // Low-level sender. `event` tags what happened so ONE Zap can catch both (filter/branch on it):
 //   'shipment_created' — a new Form Log entry (duty not yet known)
 //   'payment_saved'    — Payment tab saved, carrying the real duty/MACL/MPL/balance
@@ -1996,7 +1996,7 @@ function openInvoiceForm(entryId){
   const box=document.getElementById('inv_lines');box.innerHTML='';
   // Standard AP lines — weight-driven quantities auto-fill from the shipment's gross weight;
   // pass-throughs pre-fill from the Payment tab (DO Fee ← MACL, Customs Duty ← Duty) and are editable.
-  box.appendChild(invLineRow({name:'Form Filling',qty:1,rate:rate('Form Filling'),tax:8}));
+  box.appendChild(invLineRow({name:'Form Filling',qty:8,rate:rate('Form Filling'),tax:8}));
   box.appendChild(invLineRow({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8}));
   box.appendChild(invLineRow({name:'Clearance KG',qty:wt,rate:rate('Clearance KG'),tax:8}));
   box.appendChild(invLineRow({name:'Dhoni Charges',qty:wt,rate:rate('Dhoni Charges'),tax:8}));
