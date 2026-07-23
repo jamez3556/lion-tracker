@@ -440,7 +440,7 @@
   </div>
   <div class="tablewrap m-cards">
     <div class="scroll">
-      <table style="min-width:1300px">
+      <table style="min-width:1420px">
         <thead><tr id="pay_head">
           <th class="nosort actcol"></th>
           <th data-k="no" class="num">NO <span class="arrow">▲▼</span></th>
@@ -457,6 +457,7 @@
           <th data-k="balance" class="num">BALANCE <span class="arrow">▲▼</span></th>
           <th data-k="remark">REMARKS <span class="arrow">▲▼</span></th>
           <th data-k="bill">BILL <span class="arrow">▲▼</span></th>
+          <th class="nosort">INVOICE</th>
         </tr></thead>
         <tbody id="pay_tbody"></tbody>
       </table>
@@ -480,11 +481,12 @@
   </div>
   <div class="tablewrap m-cards">
     <div class="scroll">
-      <table style="min-width:680px">
+      <table style="min-width:780px">
         <thead><tr id="u_head">
           <th data-k="cno">C NUMBER <span class="arrow">▲▼</span></th>
           <th data-k="name">CUSTOMER NAME <span class="arrow">▲▼</span></th>
           <th data-k="contact">CONTACT <span class="arrow">▲▼</span></th>
+          <th class="nosort">CLR/KG</th>
           <th class="nosort">JOBS IN LOG</th>
           <th class="nosort actcol"></th>
         </tr></thead>
@@ -644,6 +646,49 @@
   </div>
 </div>
 
+<div class="overlay" id="overlay-invoice">
+  <div class="modal" style="max-width:840px">
+    <h2>🧾 Create QuickBooks Invoice</h2>
+    <input type="hidden" id="inv_entryId">
+    <div class="payhdr" id="inv_info"></div>
+    <div style="font-size:12px;color:var(--muted);margin:2px 0 6px">Each row is an invoice line: <b>Qty × Rate = Amount</b>. Tick GST for lines taxed at 8%; untick for pass-throughs (Delivery Order Fee, Customs Duty). Blank / zero lines are skipped.</div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:560px">
+        <thead><tr style="text-align:left;color:var(--muted);font-size:10.5px;letter-spacing:.03em">
+          <th style="padding:4px 6px">ACTIVITY</th>
+          <th style="padding:4px 6px;width:72px;text-align:right">QTY</th>
+          <th style="padding:4px 6px;width:96px;text-align:right">RATE</th>
+          <th style="padding:4px 6px;width:52px;text-align:center">GST</th>
+          <th style="padding:4px 6px;width:104px;text-align:right">AMOUNT</th>
+          <th style="width:34px"></th>
+        </tr></thead>
+        <tbody id="inv_lines"></tbody>
+      </table>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0 6px">
+      <span style="font-size:12px;color:var(--muted)">Add line:</span>
+      <button type="button" class="ghost" onclick="invAddLine({name:'Transport',tax:8})">＋ Transport</button>
+      <button type="button" class="ghost" onclick="invAddLine({name:'Handling',tax:8})">＋ Handling</button>
+      <button type="button" class="ghost" onclick="invAddLine({name:'',tax:8})">＋ Custom (GST)</button>
+      <button type="button" class="ghost" onclick="invAddLine({name:'',tax:0})">＋ Custom (non-tax)</button>
+    </div>
+    <div class="grid3">
+      <div class="field"><label>SUBTOTAL</label><input id="inv_subtotal" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:600"></div>
+      <div class="field"><label>GST 8% (taxable lines)</label><input id="inv_gst" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:600"></div>
+      <div class="field"><label>TOTAL</label><input id="inv_total" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:800"></div>
+    </div>
+    <div class="grid3">
+      <div class="field"><label>ADVANCE PAID (MVR) — recorded as a payment</label><input id="inv_advance" type="number" step="any" min="0" oninput="invCalc()"></div>
+      <div class="field"><label>BALANCE DUE (total − advance)</label><input id="inv_balance" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:800"></div>
+      <div class="field"><label>MEMO / REFERENCE</label><input id="inv_memo" placeholder="LION Ref L26/…"></div>
+    </div>
+    <div class="actions">
+      <button type="button" class="ghost" onclick="closeModal('overlay-invoice')">Cancel</button>
+      <button type="button" class="primary" onclick="sendInvoice()">Send to QuickBooks →</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="overlay-cloud">
   <div class="modal">
     <h2>☁ Team Cloud Sync</h2>
@@ -700,6 +745,16 @@ service cloud.firestore {
       <div class="field"><label>C NUMBER</label><input id="u_cno" required></div>
       <div class="field"><label>CUSTOMER NAME</label><input id="u_name" required></div>
       <div class="field"><label>CONTACT (phone / mobile)</label><input id="u_contact" type="text" placeholder="e.g. 7712345"></div>
+      <div style="border-top:1px solid var(--line);margin:10px 0 4px;padding-top:10px">
+        <div style="font-weight:700;font-size:12.5px;color:var(--ink)">AP Billing Rates — this customer</div>
+        <div style="font-size:11.5px;color:var(--muted);margin:2px 0 8px">Per-customer rates used to pre-fill the QuickBooks invoice. Leave blank to use the standard rate shown.</div>
+        <div class="grid2">
+          <div class="field"><label>FORM FILLING (per form)</label><input id="u_rate_ff" type="number" step="any" min="0" placeholder="std 30"></div>
+          <div class="field"><label>PROCESSING CHARGES (flat)</label><input id="u_rate_pc" type="number" step="any" min="0" placeholder="std 151.25"></div>
+          <div class="field"><label>CLEARANCE (per KG)</label><input id="u_rate_cl" type="number" step="any" min="0" placeholder="std 0.50"></div>
+          <div class="field"><label>DHONI CHARGES (per KG)</label><input id="u_rate_dh" type="number" step="any" min="0" placeholder="std 0.50"></div>
+        </div>
+      </div>
       <div class="actions">
         <button type="button" class="ghost" onclick="closeModal('overlay-cust')">Cancel</button>
         <button type="submit" class="primary">Save</button>
@@ -992,6 +1047,7 @@ function renderEntries(){
     <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
     <td class="actcol"><div class="rowact">
+      ${r.type==='AP'?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
       <button class="iconbtn" onclick="openEntryForm('${r.id}')" title="Edit">✏️</button>
       <button class="iconbtn del" onclick="delEntry('${r.id}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
@@ -1081,6 +1137,7 @@ function saveEntry(e){
     time:e_time.value,status:e_status.value,
     containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
   if(prevEntry&&prevEntry.mpRemark)rec.mpRemark=prevEntry.mpRemark; // MP-tab remark isn't on this form — keep it
+  if(prevEntry&&prevEntry.qbInvoiced){rec.qbInvoiced=prevEntry.qbInvoiced;rec.qbInvoicedAt=prevEntry.qbInvoicedAt;} // QuickBooks "sent" flag isn't on this form — keep it
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
   // invoice (AWB unchanged) is never blocked, even if a pre-existing duplicate exists elsewhere. When a
   // new/changed AWB matches another entry, warn and let the user confirm (intentional repeats are allowed).
@@ -1786,6 +1843,12 @@ function renderPayments(){
     const has=payHasMoney(r);const bal=payBalance(r);
     const balCell=!has?'—':`<span class="${bal>0?'bal-due':'bal-ok'}">${fmtNum(bal)}</span>`;
     const bill=r.billNo?`<span class="billbadge bill-done" title="Invoice ${esc(r.billNo)}">✓ Bill Done</span>`:'<span class="billbadge bill-pending">Pending</span>';
+    // per-row "Send to QuickBooks" button — only once charges exist; shows ✅ once invoiced (re-sendable)
+    const inv=!has
+      ? '<span style="color:#94a3b8">—</span>'
+      : (r.invoicedAt
+          ? `<button class="iconbtn" style="color:#16a34a;font-weight:700" onclick="sendInvoice('${jatt(r.id)}')" title="Invoiced ${fmtDate(r.invoicedAt)} — click to re-send">✅ Sent</button>`
+          : `<button class="iconbtn" style="background:#e8730f;color:#fff;padding:3px 11px;border-radius:6px;font-weight:700" onclick="sendInvoice('${jatt(r.id)}')" title="Create a QuickBooks invoice and email it to the customer">📤 Send</button>`);
     return `<tr id="payrow-${r.id}">
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="openPayForm('${jatt(r.id)}')" title="Enter / edit payment">✏️</button>
@@ -1803,7 +1866,8 @@ function renderPayments(){
       <td class="num" data-l="Advance">${fmtNum(r.advance)}</td>
       <td class="num" data-l="Balance">${balCell}</td>
       <td data-l="Remarks">${esc(r.remark)||'—'}</td>
-      <td data-l="Bill">${bill}</td></tr>`;
+      <td data-l="Bill">${bill}</td>
+      <td class="actcol" data-l="Invoice">${inv}</td></tr>`;
   }).join('');
   pagerHTML(document.getElementById('pay_pager'),payState,rows.length,'payments');
 }
@@ -1840,10 +1904,147 @@ function savePay(e){
   toast('Payment saved');
   return false;
 }
+// "Send" button on a Payment row → fire a create_invoice event to Zapier (→ QuickBooks: create invoice + email
+// the customer). Customer email is looked up from the creds collection (REGISTERED EMAIL) by C-No. Marks the
+// row ✅ Sent (invoicedAt) — syncs to the team so nobody double-invoices; re-sendable with a second confirm.
+function sendInvoice(id){
+  const p=payments.find(x=>x.id===id);if(!p)return;
+  if(!payHasMoney(p)){toast('Enter the charges first');return;}
+  if(!ZAPIER_HOOK_URL){toast('Zapier webhook not set up yet');return;}
+  const cust=creds.find(c=>(c.cno||'').toUpperCase()===(p.cno||'').toUpperCase());
+  const email=(cust&&cust.email)||'';
+  const resend=!!p.invoicedAt;
+  const msg=(resend?'RE-SEND invoice to ':'Create & send invoice to ')+(p.name||p.cno||'this customer')
+    +'\n\nTotal '+fmtNum(payTotal(p))+'   ·   Balance '+fmtNum(payBalance(p))
+    +'\n'+(email?('Email: '+email):'⚠ No email on file for '+(p.cno||'this C-No')+' — QuickBooks will use its own customer record if it has one.')
+    +'\n\nProceed?';
+  if(!confirm(msg))return;
+  zapierPost({
+    event:'create_invoice',
+    customerName:p.name||'',
+    cNumber:p.cno||'',
+    customerEmail:email,
+    shipmentRNumber:p.rNo||'',
+    awbBl:p.blNo||'',
+    duty:Number(p.duty)||0,
+    macl:Number(p.macl)||0,
+    mpl:Number(p.mpl)||0,
+    total:payTotal(p),
+    advance:Number(p.advance)||0,
+    balance:payBalance(p),
+    remark:p.remark||'',
+    billNo:p.billNo||'',
+    date:p.date||'',
+    no:p.no,
+    invoiceRef:'R'+(p.rNo||'')+'-'+(p.no||'')
+  });
+  p.invoicedAt=isoLocal(new Date());
+  savePayments();renderPayments();
+  toast('📤 Invoice sent to Zapier'+(resend?' (re-sent)':'')+' — QuickBooks will create & email it');
+}
 function exportPayments(){
   xlsExport('lion-payments',
     ['NO','DATE','C NO','CUSTOMER','R NO','AWB / BL NO','DUTY','MACL','MPL','TOTAL','ADVANCE','BALANCE','REMARKS','BILL NO','BILL STATUS'],
     filteredPayments().map(r=>[r.no,r.date,r.cno,r.name,r.rNo,r.blNo,r.duty,r.macl,r.mpl,payHasMoney(r)?payTotal(r):null,r.advance,payHasMoney(r)?payBalance(r):null,r.remark,r.billNo,r.billNo?'Bill Done':'Pending']));
+}
+
+/* ============ QuickBooks invoice (AP) ============ */
+// AP invoice = activity lines (Qty × Rate) with 8% GST on taxable lines only.
+// Standard rates below are the defaults; each customer can override them (customer.apRates).
+// Line names MUST match a Product/Service item in QuickBooks (Zapier maps by name).
+const AP_STD_RATES={'Form Filling':30,'Processing Charges':151.25,'Clearance KG':0.50,'Dhoni Charges':0.50};
+function invMoney(n){return Math.round((Number(n)||0)*100)/100;}
+function invFmt(n){return Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function invLineRow(o){
+  o=o||{};
+  const tr=document.createElement('tr');tr.className='invline';
+  const taxed=!(o.tax===0||o.tax===false);
+  const inp='padding:7px 8px;border:1px solid var(--line);border-radius:8px;font-size:13px;outline:none;width:100%';
+  tr.innerHTML=
+    `<td style="padding:3px 4px"><input class="invname" value="${esc(o.name||'')}" placeholder="Activity (matches a QuickBooks item)" style="${inp};min-width:120px"></td>
+     <td style="padding:3px 4px"><input class="invqty" type="number" step="any" min="0" value="${o.qty==null||o.qty===''?'':o.qty}" oninput="invCalc()" style="${inp};text-align:right"></td>
+     <td style="padding:3px 4px"><input class="invrate" type="number" step="any" min="0" value="${o.rate==null||o.rate===''?'':o.rate}" oninput="invCalc()" style="${inp};text-align:right"></td>
+     <td style="padding:3px 4px;text-align:center"><input type="checkbox" class="invtax" ${taxed?'checked':''} onchange="invCalc()" title="GST 8% applies to this line"></td>
+     <td class="invamt" style="padding:3px 8px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">0.00</td>
+     <td style="padding:3px 2px;text-align:center"><button type="button" class="iconbtn del" title="Remove line" onclick="this.closest('tr').remove();invCalc()">🗑️</button></td>`;
+  return tr;
+}
+function invAddLine(o){document.getElementById('inv_lines').appendChild(invLineRow(o||{name:'',tax:8}));invCalc();}
+function invCalc(){
+  let taxable=0,nontax=0;
+  document.querySelectorAll('#inv_lines .invline').forEach(tr=>{
+    const qty=Number(tr.querySelector('.invqty').value)||0;
+    const rate=Number(tr.querySelector('.invrate').value)||0;
+    const amt=invMoney(qty*rate);
+    tr.querySelector('.invamt').textContent=invFmt(amt);
+    if(tr.querySelector('.invtax').checked)taxable+=amt;else nontax+=amt;
+  });
+  const gst=invMoney(taxable*0.08), subtotal=invMoney(taxable+nontax), total=invMoney(subtotal+gst);
+  const adv=Number(document.getElementById('inv_advance').value)||0;
+  document.getElementById('inv_subtotal').value=invFmt(subtotal);
+  document.getElementById('inv_gst').value=invFmt(gst);
+  document.getElementById('inv_total').value=invFmt(total);
+  document.getElementById('inv_balance').value=invFmt(invMoney(total-adv));
+}
+function openInvoiceForm(entryId){
+  const e=entries.find(x=>x.id===entryId);if(!e)return;
+  const cust=lookupCustomer(e.cno);
+  const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
+  const rate=(name)=>{const v=(cust&&cust.apRates)?cust.apRates[name]:null;return v==null?AP_STD_RATES[name]:v;};
+  const wt=e.grsWt!=null?e.grsWt:'';
+  document.getElementById('inv_entryId').value=e.id;
+  const box=document.getElementById('inv_lines');box.innerHTML='';
+  // Standard AP lines — weight-driven quantities auto-fill from the shipment's gross weight;
+  // pass-throughs pre-fill from the Payment tab (DO Fee ← MACL, Customs Duty ← Duty) and are editable.
+  box.appendChild(invLineRow({name:'Form Filling',qty:1,rate:rate('Form Filling'),tax:8}));
+  box.appendChild(invLineRow({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8}));
+  box.appendChild(invLineRow({name:'Clearance KG',qty:wt,rate:rate('Clearance KG'),tax:8}));
+  box.appendChild(invLineRow({name:'Dhoni Charges',qty:wt,rate:rate('Dhoni Charges'),tax:8}));
+  box.appendChild(invLineRow({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:''),tax:0}));
+  box.appendChild(invLineRow({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0}));
+  document.getElementById('inv_advance').value=(pay&&pay.advance!=null)?pay.advance:'';
+  document.getElementById('inv_memo').value=e.billNo?('LION Ref '+e.billNo):'';
+  const warn=e.qbInvoiced?`<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ Already sent to QuickBooks${e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):''} — sending again makes a duplicate invoice.</div>`:'';
+  const noRates=!(cust&&cust.apRates&&Object.keys(cust.apRates).length)?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard rates — set this customer's own rates in the Customers tab.</div>`:'';
+  document.getElementById('inv_info').innerHTML=
+    `<div><span class="k">Customer</span><b>${esc(e.customer)||'—'}</b> <span style="color:#94a3b8">(${esc(e.cno)||'—'})</span></div>
+     <div><span class="k">R No</span><b>${esc(e.rNo)||'—'}</b> &nbsp; <span class="k">AWB</span><b>${esc(e.awbBl)||'—'}</b> &nbsp; <span class="k">Grs Wt</span><b>${fmtNum(e.grsWt)}</b></div>
+     <div><span class="k">Date</span>${fmtDate(e.date)} &nbsp; <span class="k">Bill No</span><b>${esc(e.billNo)||'—'}</b></div>${noRates}${warn}`;
+  invCalc();
+  showModal('overlay-invoice');
+}
+function sendInvoice(){
+  const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
+  const lines=[];let taxable=0,nontax=0;
+  document.querySelectorAll('#inv_lines .invline').forEach(tr=>{
+    const item=tr.querySelector('.invname').value.trim();
+    const qty=Number(tr.querySelector('.invqty').value)||0;
+    const rate=Number(tr.querySelector('.invrate').value)||0;
+    const amt=invMoney(qty*rate);
+    const taxed=tr.querySelector('.invtax').checked;
+    if(item&&amt>0){
+      lines.push({item:item,description:item,qty:qty,rate:rate,amount:amt,taxable:taxed,taxCode:taxed?'GST 8%':'Exempt'});
+      if(taxed)taxable+=amt;else nontax+=amt;
+    }
+  });
+  if(!lines.length){toast('Add at least one line with a quantity and rate');return;}
+  if(e.qbInvoiced&&!confirm('This shipment was already sent to QuickBooks. Send again and create a duplicate invoice?'))return;
+  const gst=invMoney(taxable*0.08), subtotal=invMoney(taxable+nontax), total=invMoney(subtotal+gst);
+  const advance=Number(document.getElementById('inv_advance').value)||0;
+  zapierPost({
+    event:'invoice_ready',
+    customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
+    shipmentType:e.type||'',date:e.date||'',billNo:e.billNo||'',
+    memo:document.getElementById('inv_memo').value.trim(),
+    lines:lines,                                   // [{item, description, qty, rate, amount, taxable, taxCode}]
+    taxableSubtotal:invMoney(taxable),nonTaxSubtotal:invMoney(nontax),
+    subtotal:subtotal,gst:gst,total:total,
+    advance:advance,balance:invMoney(total-advance),  // Zap records advance as a separate Receive-Payment
+    no:e.no
+  });
+  e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());
+  saveEntries();renderEntries();closeModal('overlay-invoice');
+  toast('Sent to QuickBooks ✓ — invoice will appear shortly');
 }
 
 /* ============ CUSTOMERS ============ */
@@ -1878,6 +2079,7 @@ function renderCusts(){
       <td class="cno" data-l="C Number">${esc(r.cno)}</td>
       <td class="name" style="max-width:none" data-l="Name" title="${esc(r.name)}">${esc(r.name)}</td>
       <td data-l="Contact">${r.contact?esc(r.contact)+`<button class="copybtn" onclick="copyCustContact('${r.id}')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}</td>
+      <td data-l="Clr/kg">${(r.apRates&&r.apRates['Clearance KG']!=null)?fmtNum(r.apRates['Clearance KG']):'<span class="d-none">—</span>'}</td>
       <td data-l="Jobs">${jc?`<span class="daysbadge d-ok">${jc} job${jc>1?'s':''}</span>`:'<span class="d-none">—</span>'}</td>
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="openCustForm('${r.id}')" title="Edit">✏️</button>
@@ -1891,18 +2093,26 @@ function openCustForm(id){
   if(id){
     const r=customers.find(x=>x.id===id);t.textContent='Edit Customer';
     u_id.value=r.id;u_cno.value=r.cno;u_name.value=r.name;u_contact.value=r.contact||'';
-  }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';u_contact.value='';}
+    var ar=r.apRates||{};
+    u_rate_ff.value=ar['Form Filling']??'';u_rate_pc.value=ar['Processing Charges']??'';
+    u_rate_cl.value=ar['Clearance KG']??'';u_rate_dh.value=ar['Dhoni Charges']??'';
+  }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';u_contact.value='';
+    u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';}
   showModal('overlay-cust');setTimeout(()=>u_cno.focus(),50);
 }
 function saveCust(e){
   e.preventDefault();
   const cno=u_cno.value.trim(),name=u_name.value.trim(),contact=u_contact.value.trim();
+  const apRates={};
+  const setR=(k,el)=>{if(el.value!=='')apRates[k]=Number(el.value);};
+  setR('Form Filling',u_rate_ff);setR('Processing Charges',u_rate_pc);
+  setR('Clearance KG',u_rate_cl);setR('Dhoni Charges',u_rate_dh);
   if(!u_id.value){
     const ex=lookupCustomer(cno);
     if(ex){toast('C number already in list: '+ex.name);return false;}
-    customers.push({id:uid(),cno,name,contact});toast('Customer added');
+    customers.push({id:uid(),cno,name,contact,apRates});toast('Customer added');
   }else{
-    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;toast('Customer updated');
+    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;r.apRates=apRates;delete r.apFee;toast('Customer updated');
   }
   saveCustomers();renderCusts();updateCounts();closeModal('overlay-cust');
   return false;
@@ -1913,7 +2123,8 @@ function delCust(id){
   customers=customers.filter(x=>x.id!==id);saveCustomers();renderCusts();updateCounts();toast('Customer deleted');
 }
 function exportCusts(){
-  xlsExport('lion-customers',['C NUMBER','CUSTOMER NAME','CONTACT'],filteredCusts().map(r=>[r.cno,r.name,r.contact]));
+  xlsExport('lion-customers',['C NUMBER','CUSTOMER NAME','CONTACT','FORM FILLING','PROCESSING','CLEARANCE/KG','DHONI/KG'],
+    filteredCusts().map(r=>{const a=r.apRates||{};return [r.cno,r.name,r.contact,a['Form Filling'],a['Processing Charges'],a['Clearance KG'],a['Dhoni Charges']];}));
 }
 
 /* ============ CREDENTIALS ============ */
