@@ -759,6 +759,9 @@ service cloud.firestore {
         <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);margin-top:4px;cursor:pointer">
           <input type="checkbox" id="u_no_dhoni" style="width:auto"> No Dhoni Charges line for this customer
         </label>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);margin-top:4px;cursor:pointer">
+          <input type="checkbox" id="u_no_proc" style="width:auto"> No Processing Charges line for this customer
+        </label>
       </div>
       <div class="actions">
         <button type="button" class="ghost" onclick="closeModal('overlay-cust')">Cancel</button>
@@ -2033,7 +2036,8 @@ function openInvoiceForm(entryId){
   // Per-customer billing profile (Customers tab): Form Filling qty, KG vs Box clearance, Dhoni on/off.
   const prof=(cust&&cust.apProfile)||{};
   box.appendChild(invLineRow({name:'Form Filling',qty:prof.ffQty!=null?prof.ffQty:8,rate:rate('Form Filling'),tax:8}));
-  box.appendChild(invLineRow({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8}));
+  if(!prof.noProc)
+    box.appendChild(invLineRow({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8}));
   if(prof.clearMode==='Box')
     box.appendChild(invLineRow({name:'Clearance Box',qty:e.pkgs!=null?e.pkgs:'',rate:rate('Clearance Box'),tax:8}));
   else
@@ -2160,10 +2164,10 @@ function openCustForm(id){
     // one clearance-rate box — it holds the per-kg OR per-box rate depending on the mode
     u_rate_cl.value=(pf.clearMode==='Box'?ar['Clearance Box']:ar['Clearance KG'])??'';
     u_rate_dh.value=ar['Dhoni Charges']??'';
-    u_ff_qty.value=pf.ffQty??'';u_no_dhoni.checked=!!pf.noDhoni;
+    u_ff_qty.value=pf.ffQty??'';u_no_dhoni.checked=!!pf.noDhoni;u_no_proc.checked=!!pf.noProc;
   }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';u_contact.value='';
     u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';
-    u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;}
+    u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;u_no_proc.checked=false;}
   showModal('overlay-cust');setTimeout(()=>u_cno.focus(),50);
 }
 function saveCust(e){
@@ -2179,6 +2183,7 @@ function saveCust(e){
   if(u_ff_qty.value!=='')apProfile.ffQty=Number(u_ff_qty.value);
   if(u_clear_mode.value==='Box')apProfile.clearMode='Box';
   if(u_no_dhoni.checked)apProfile.noDhoni=true;
+  if(u_no_proc.checked)apProfile.noProc=true;
   if(!u_id.value){
     const ex=lookupCustomer(cno);
     if(ex){toast('C number already in list: '+ex.name);return false;}
@@ -2596,6 +2601,15 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
   seed('A.M.S',c=>{c.apProfile={ffQty:7,clearMode:'Box'};});
   seed('SIMER',c=>{c.apProfile={noDhoni:true};c.apRates=Object.assign({},c.apRates,{'Clearance KG':1.5});});
   localStorage.setItem('lion_profile_seed_v1','1');
+  if(n){saveCustomers();toast(n+' customer billing profile'+(n>1?'s':'')+' set from recent invoices');}
+})();
+(()=>{ // seed v2 — White Mina (invoice L26/1272: Form Filling + Clearance KG only, no Processing / no Dhoni)
+  if(localStorage.getItem('lion_profile_seed_v2'))return;
+  let n=0;
+  const seed=(match,fn)=>{const c=customers.find(x=>(x.name||'').toUpperCase().includes(match));
+    if(c&&(!c.apProfile||!Object.keys(c.apProfile).length)){fn(c);n++;}};
+  seed('WHITE MINA',c=>{c.apProfile={noProc:true,noDhoni:true};});
+  localStorage.setItem('lion_profile_seed_v2','1');
   if(n){saveCustomers();toast(n+' customer billing profile'+(n>1?'s':'')+' set from recent invoices');}
 })();
 buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();updateCounts();
