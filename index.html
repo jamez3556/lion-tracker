@@ -2147,7 +2147,7 @@ function sendInvoice(){
     event:'invoice_ready',
     customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
     shipmentType:e.type||'',date:e.date||'',billNo:bn,
-    autoNumber:bn?'false':'true',                  // → Zapier "Auto Generate Invoice Number"
+    autoNumber:bn?false:true,                      // → Zapier "Auto Generate Invoice Number" (real boolean — the string 'true' was ignored by QuickBooks)
     memo:document.getElementById('inv_memo').value.trim(),
     lines:lines,                                   // [{item, description, qty, rate, amount, taxable, taxCode}]
     taxableSubtotal:invMoney(taxable),nonTaxSubtotal:invMoney(nontax),
