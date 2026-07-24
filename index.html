@@ -750,10 +750,15 @@ service cloud.firestore {
         <div style="font-size:11.5px;color:var(--muted);margin:2px 0 8px">Per-customer rates used to pre-fill the QuickBooks invoice. Leave blank to use the standard rate shown.</div>
         <div class="grid2">
           <div class="field"><label>FORM FILLING (per form)</label><input id="u_rate_ff" type="number" step="any" min="0" placeholder="std 30"></div>
-          <div class="field"><label>PROCESSING CHARGES (flat)</label><input id="u_rate_pc" type="number" step="any" min="0" placeholder="std 151.25"></div>
-          <div class="field"><label>CLEARANCE (per KG)</label><input id="u_rate_cl" type="number" step="any" min="0" placeholder="std 0.50"></div>
+          <div class="field"><label>FORM FILLING QTY (forms)</label><input id="u_ff_qty" type="number" step="1" min="0" placeholder="std 8"></div>
+          <div class="field"><label>PROCESSING CHARGES (flat)</label><input id="u_rate_pc" type="number" step="any" min="0" placeholder="std 150"></div>
+          <div class="field"><label>CLEARANCE BY</label><select id="u_clear_mode"><option value="KG">KG — per kg (gross weight)</option><option value="Box">Box — per package (PKGS)</option></select></div>
+          <div class="field"><label>CLEARANCE RATE (per KG / per box)</label><input id="u_rate_cl" type="number" step="any" min="0" placeholder="std 0.50 kg / 5.00 box"></div>
           <div class="field"><label>DHONI CHARGES (per KG)</label><input id="u_rate_dh" type="number" step="any" min="0" placeholder="std 0.50"></div>
         </div>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);margin-top:4px;cursor:pointer">
+          <input type="checkbox" id="u_no_dhoni" style="width:auto"> No Dhoni Charges line for this customer
+        </label>
       </div>
       <div class="actions">
         <button type="button" class="ghost" onclick="closeModal('overlay-cust')">Cancel</button>
@@ -1952,7 +1957,7 @@ function exportPayments(){
 // AP invoice = activity lines (Qty × Rate) with 8% GST on taxable lines only.
 // Standard rates below are the defaults; each customer can override them (customer.apRates).
 // Line names MUST match a Product/Service item in QuickBooks (Zapier maps by name).
-const AP_STD_RATES={'Form Filling':30,'Processing Charges':151.25,'Clearance KG':0.50,'Dhoni Charges':0.50};
+const AP_STD_RATES={'Form Filling':30,'Processing Charges':150,'Clearance KG':0.50,'Clearance Box':5,'Dhoni Charges':0.50};
 // QuickBooks Online Product/Service ids (Sales → Products & Services). Most charges exist twice —
 // an "(Air)" item under Air Clearance and a "(Sea)" one under Sea Clearance — so revenue lands in the
 // right account. AP (and every non-MP type) bills at Air; MP (sea freight) bills at Sea.
@@ -2025,10 +2030,16 @@ function openInvoiceForm(entryId){
   const box=document.getElementById('inv_lines');box.innerHTML='';
   // Standard AP lines — weight-driven quantities auto-fill from the shipment's gross weight;
   // pass-throughs pre-fill from the Payment tab (DO Fee ← MACL, Customs Duty ← Duty) and are editable.
-  box.appendChild(invLineRow({name:'Form Filling',qty:8,rate:rate('Form Filling'),tax:8}));
+  // Per-customer billing profile (Customers tab): Form Filling qty, KG vs Box clearance, Dhoni on/off.
+  const prof=(cust&&cust.apProfile)||{};
+  box.appendChild(invLineRow({name:'Form Filling',qty:prof.ffQty!=null?prof.ffQty:8,rate:rate('Form Filling'),tax:8}));
   box.appendChild(invLineRow({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8}));
-  box.appendChild(invLineRow({name:'Clearance KG',qty:wt,rate:rate('Clearance KG'),tax:8}));
-  box.appendChild(invLineRow({name:'Dhoni Charges',qty:wt,rate:rate('Dhoni Charges'),tax:8}));
+  if(prof.clearMode==='Box')
+    box.appendChild(invLineRow({name:'Clearance Box',qty:e.pkgs!=null?e.pkgs:'',rate:rate('Clearance Box'),tax:8}));
+  else
+    box.appendChild(invLineRow({name:'Clearance KG',qty:wt,rate:rate('Clearance KG'),tax:8}));
+  if(!prof.noDhoni)
+    box.appendChild(invLineRow({name:'Dhoni Charges',qty:wt,rate:rate('Dhoni Charges'),tax:8}));
   box.appendChild(invLineRow({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:''),tax:0}));
   box.appendChild(invLineRow({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0}));
   document.getElementById('inv_advance').value=(pay&&pay.advance!=null)?pay.advance:'';
@@ -2143,11 +2154,16 @@ function openCustForm(id){
   if(id){
     const r=customers.find(x=>x.id===id);t.textContent='Edit Customer';
     u_id.value=r.id;u_cno.value=r.cno;u_name.value=r.name;u_contact.value=r.contact||'';
-    var ar=r.apRates||{};
+    var ar=r.apRates||{},pf=r.apProfile||{};
     u_rate_ff.value=ar['Form Filling']??'';u_rate_pc.value=ar['Processing Charges']??'';
-    u_rate_cl.value=ar['Clearance KG']??'';u_rate_dh.value=ar['Dhoni Charges']??'';
+    u_clear_mode.value=pf.clearMode==='Box'?'Box':'KG';
+    // one clearance-rate box — it holds the per-kg OR per-box rate depending on the mode
+    u_rate_cl.value=(pf.clearMode==='Box'?ar['Clearance Box']:ar['Clearance KG'])??'';
+    u_rate_dh.value=ar['Dhoni Charges']??'';
+    u_ff_qty.value=pf.ffQty??'';u_no_dhoni.checked=!!pf.noDhoni;
   }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';u_contact.value='';
-    u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';}
+    u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';
+    u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;}
   showModal('overlay-cust');setTimeout(()=>u_cno.focus(),50);
 }
 function saveCust(e){
@@ -2156,13 +2172,19 @@ function saveCust(e){
   const apRates={};
   const setR=(k,el)=>{if(el.value!=='')apRates[k]=Number(el.value);};
   setR('Form Filling',u_rate_ff);setR('Processing Charges',u_rate_pc);
-  setR('Clearance KG',u_rate_cl);setR('Dhoni Charges',u_rate_dh);
+  // clearance rate is stored under the key matching the mode (Clearance KG / Clearance Box)
+  setR(u_clear_mode.value==='Box'?'Clearance Box':'Clearance KG',u_rate_cl);
+  setR('Dhoni Charges',u_rate_dh);
+  const apProfile={};
+  if(u_ff_qty.value!=='')apProfile.ffQty=Number(u_ff_qty.value);
+  if(u_clear_mode.value==='Box')apProfile.clearMode='Box';
+  if(u_no_dhoni.checked)apProfile.noDhoni=true;
   if(!u_id.value){
     const ex=lookupCustomer(cno);
     if(ex){toast('C number already in list: '+ex.name);return false;}
-    customers.push({id:uid(),cno,name,contact,apRates});toast('Customer added');
+    customers.push({id:uid(),cno,name,contact,apRates,apProfile});toast('Customer added');
   }else{
-    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;r.apRates=apRates;delete r.apFee;toast('Customer updated');
+    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;r.apRates=apRates;r.apProfile=apProfile;delete r.apFee;toast('Customer updated');
   }
   saveCustomers();renderCusts();updateCounts();closeModal('overlay-cust');
   return false;
@@ -2563,6 +2585,19 @@ document.querySelectorAll('.scroll').forEach(sc=>{
   });
 });
 syncPayments(true); // ensure every entry has a payment row (backfills existing data, prunes orphans)
+// One-time seed of known billing profiles (from real invoices, 24 Jul 2026). Only fills customers that
+// have no profile yet — anything set by hand in the Customers tab is never overwritten.
+(()=>{
+  if(localStorage.getItem('lion_profile_seed_v1'))return;
+  let n=0;
+  const seed=(match,fn)=>{const c=customers.find(x=>(x.name||'').toUpperCase().includes(match));
+    if(c&&(!c.apProfile||!Object.keys(c.apProfile).length)){fn(c);n++;}};
+  seed('RUMMAN',c=>{c.apProfile={ffQty:6};});
+  seed('A.M.S',c=>{c.apProfile={ffQty:7,clearMode:'Box'};});
+  seed('SIMER',c=>{c.apProfile={noDhoni:true};c.apRates=Object.assign({},c.apRates,{'Clearance KG':1.5});});
+  localStorage.setItem('lion_profile_seed_v1','1');
+  if(n){saveCustomers();toast(n+' customer billing profile'+(n>1?'s':'')+' set from recent invoices');}
+})();
 buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();updateCounts();
 fitTables();setTimeout(fitTables,300);
 
