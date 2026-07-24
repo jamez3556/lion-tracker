@@ -682,7 +682,10 @@
       <div class="field"><label>BALANCE DUE (total − advance)</label><input id="inv_balance" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:800"></div>
       <div class="field"><label>INVOICE NO (saved as Bill No)</label><input id="inv_billNo" placeholder="L26/…" oninput="invBillNoChanged()"></div>
     </div>
-    <div class="field"><label>MEMO / REFERENCE</label><input id="inv_memo" placeholder="LION Ref L26/…"></div>
+    <div class="grid2">
+      <div class="field"><label>MEMO / REFERENCE</label><input id="inv_memo" placeholder="LION Ref L26/…"></div>
+      <div class="field"><label>EMAIL INVOICE TO (blank = only to you)</label><input id="inv_email" type="email" placeholder="customer@… — Cc always jaamiz25@gmail.com"></div>
+    </div>
     <div class="actions">
       <button type="button" class="ghost" onclick="closeModal('overlay-invoice')">Cancel</button>
       <button type="button" class="primary" onclick="sendInvoice()">Send to QuickBooks →</button>
@@ -2077,6 +2080,9 @@ function openInvoiceForm(entryId){
   bnEl.value=e.billNo||'';
   bnEl.placeholder=e.billNo?'L26/…':('blank = QuickBooks assigns (next ≈ '+(nextBillNo()||'L…')+')');
   document.getElementById('inv_memo').value=e.billNo?('LION Ref '+e.billNo):(e.rNo?('LION R '+e.rNo):'');
+  // customer email: pre-fill from MPL & Custom Logins (REGISTERED EMAIL) by C-No — editable per invoice
+  const cred=creds.find(c=>(c.cno||'').toUpperCase()===(e.cno||'').toUpperCase());
+  document.getElementById('inv_email').value=(cred&&cred.email)||'';
   const warn=e.qbInvoiced?`<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ Already sent to QuickBooks${e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):''} — sending again makes a duplicate invoice.</div>`:'';
   const noRates=!(cust&&cust.apRates&&Object.keys(cust.apRates).length)?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard rates — set this customer's own rates in the Customers tab.</div>`:'';
   document.getElementById('inv_info').innerHTML=
@@ -2124,6 +2130,7 @@ function sendInvoice(){
     'SEND THIS INVOICE TO QUICKBOOKS?\n\n'+
     (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
     'Invoice '+(bn||'(QuickBooks will assign the next number)')+'    AWB '+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
+    'Email to: '+(document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com (no customer email)')+'\n'+
     '------------------------------------------\n'+
     summary+'\n'+
     '------------------------------------------\n'+
@@ -2148,6 +2155,8 @@ function sendInvoice(){
     customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
     shipmentType:e.type||'',date:e.date||'',billNo:bn,
     autoNumber:bn?false:true,                      // → Zapier "Auto Generate Invoice Number" (real boolean — the string 'true' was ignored by QuickBooks)
+    // invoice To address: typed/looked-up customer email, else your own — so the send step ALWAYS emails someone
+    customerEmail:document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com',
     memo:document.getElementById('inv_memo').value.trim(),
     lines:lines,                                   // [{item, description, qty, rate, amount, taxable, taxCode}]
     taxableSubtotal:invMoney(taxable),nonTaxSubtotal:invMoney(nontax),
