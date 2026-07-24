@@ -1961,6 +1961,13 @@ function exportPayments(){
 // Standard rates below are the defaults; each customer can override them (customer.apRates).
 // Line names MUST match a Product/Service item in QuickBooks (Zapier maps by name).
 const AP_STD_RATES={'Form Filling':30,'Processing Charges':150,'Clearance KG':0.50,'Clearance Box':5,'Dhoni Charges':0.50};
+// MACL airport charges (= our Delivery Order Fee, a GST-inclusive pass-through). Reverse-engineered from
+// real MACL tax invoices and exact on 6 LION invoices: total = 3.726/kg + 43.20 fixed
+// (≈ 3.45/kg handling+storage + 40.00 system admin fee, ×1.08 GST). Used as a PRE-FILL estimate when no
+// actual MACL amount has been entered in the Payment tab — the receipt's actual always wins, and the
+// builder line stays editable. Airport tariff — AP (air) shipments only.
+const MACL_DO_PER_KG=3.726, MACL_DO_FIXED=43.20;
+function maclEstimate(kg){kg=Number(kg)||0;return kg?invMoney(kg*MACL_DO_PER_KG+MACL_DO_FIXED):'';}
 // QuickBooks Online Product/Service ids (Sales → Products & Services). Most charges exist twice —
 // an "(Air)" item under Air Clearance and a "(Sea)" one under Sea Clearance — so revenue lands in the
 // right account. AP (and every non-MP type) bills at Air; MP (sea freight) bills at Sea.
@@ -2044,7 +2051,8 @@ function openInvoiceForm(entryId){
     box.appendChild(invLineRow({name:'Clearance KG',qty:wt,rate:rate('Clearance KG'),tax:8}));
   if(!prof.noDhoni)
     box.appendChild(invLineRow({name:'Dhoni Charges',qty:wt,rate:rate('Dhoni Charges'),tax:8}));
-  box.appendChild(invLineRow({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:''),tax:0}));
+  // DO Fee: actual MACL amount from the Payment tab wins; otherwise auto-estimate from the KG (AP only)
+  box.appendChild(invLineRow({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:(e.type==='AP'?maclEstimate(wt):'')),tax:0}));
   box.appendChild(invLineRow({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0}));
   document.getElementById('inv_advance').value=(pay&&pay.advance!=null)?pay.advance:'';
   document.getElementById('inv_memo').value=e.billNo?('LION Ref '+e.billNo):'';
