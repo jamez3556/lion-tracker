@@ -680,8 +680,9 @@
     <div class="grid3">
       <div class="field"><label>ADVANCE PAID (MVR) — recorded as a payment</label><input id="inv_advance" type="number" step="any" min="0" oninput="invCalc()"></div>
       <div class="field"><label>BALANCE DUE (total − advance)</label><input id="inv_balance" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:800"></div>
-      <div class="field"><label>MEMO / REFERENCE</label><input id="inv_memo" placeholder="LION Ref L26/…"></div>
+      <div class="field"><label>INVOICE NO (saved as Bill No)</label><input id="inv_billNo" placeholder="L26/…" oninput="invBillNoChanged()"></div>
     </div>
+    <div class="field"><label>MEMO / REFERENCE</label><input id="inv_memo" placeholder="LION Ref L26/…"></div>
     <div class="actions">
       <button type="button" class="ghost" onclick="closeModal('overlay-invoice')">Cancel</button>
       <button type="button" class="primary" onclick="sendInvoice()">Send to QuickBooks →</button>
@@ -1968,6 +1969,20 @@ const AP_STD_RATES={'Form Filling':30,'Processing Charges':150,'Clearance KG':0.
 // builder line stays editable. Airport tariff — AP (air) shipments only.
 const MACL_DO_PER_KG=3.726, MACL_DO_FIXED=43.20;
 function maclEstimate(kg){kg=Number(kg)||0;return kg?invMoney(kg*MACL_DO_PER_KG+MACL_DO_FIXED):'';}
+// Next free invoice number in this year's LION sequence (L26/1364 → L26/1365), scanned from every
+// entry's BILL NO. Assumes all invoices are logged in the tracker (they are — the Bill No column).
+function nextBillNo(){
+  const yy=String(new Date().getFullYear()).slice(2);
+  let max=0;
+  const re=new RegExp('^L'+yy+'\\s*/\\s*(\\d+)$','i');
+  entries.forEach(x=>{const m=re.exec((x.billNo||'').trim());if(m){const n=Number(m[1]);if(n>max)max=n;}});
+  return max?('L'+yy+'/'+(max+1)):'';
+}
+// keep the memo in step while the auto-suggested invoice number is edited (only if the memo is still auto)
+function invBillNoChanged(){
+  const m=document.getElementById('inv_memo');
+  if(m.value===''||/^LION Ref /.test(m.value))m.value='LION Ref '+document.getElementById('inv_billNo').value.trim();
+}
 // QuickBooks Online Product/Service ids (Sales → Products & Services). Most charges exist twice —
 // an "(Air)" item under Air Clearance and a "(Sea)" one under Sea Clearance — so revenue lands in the
 // right account. AP (and every non-MP type) bills at Air; MP (sea freight) bills at Sea.
@@ -2055,7 +2070,10 @@ function openInvoiceForm(entryId){
   box.appendChild(invLineRow({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:(e.type==='AP'?maclEstimate(wt):'')),tax:0}));
   box.appendChild(invLineRow({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0}));
   document.getElementById('inv_advance').value=(pay&&pay.advance!=null)?pay.advance:'';
-  document.getElementById('inv_memo').value=e.billNo?('LION Ref '+e.billNo):'';
+  // Invoice number: the entry's Bill No if it has one, else the next free number in this year's sequence
+  const suggestedBn=e.billNo||nextBillNo();
+  document.getElementById('inv_billNo').value=suggestedBn;
+  document.getElementById('inv_memo').value=suggestedBn?('LION Ref '+suggestedBn):'';
   const warn=e.qbInvoiced?`<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ Already sent to QuickBooks${e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):''} — sending again makes a duplicate invoice.</div>`:'';
   const noRates=!(cust&&cust.apRates&&Object.keys(cust.apRates).length)?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard rates — set this customer's own rates in the Customers tab.</div>`:'';
   document.getElementById('inv_info').innerHTML=
@@ -2083,6 +2101,12 @@ function sendInvoice(){
     }
   });
   if(!lines.length){toast('Add at least one line with a quantity and rate');return;}
+  const bn=document.getElementById('inv_billNo').value.trim();
+  if(!bn){toast('Enter the invoice number');document.getElementById('inv_billNo').focus();return;}
+  // the invoice number must be unique across the Form Log (QuickBooks rejects duplicates too)
+  const bnKey=bn.replace(/\s+/g,'').toUpperCase();
+  const bnDup=entries.find(x=>x.id!==e.id&&(x.billNo||'').replace(/\s+/g,'').toUpperCase()===bnKey);
+  if(bnDup){toast('⚠ Invoice no '+bn+' already used — NO '+(bnDup.no??'—')+' ('+(bnDup.customer||'—')+')');document.getElementById('inv_billNo').focus();return;}
   if(e.qbInvoiced&&!confirm('This shipment was already sent to QuickBooks. Send again and create a duplicate invoice?'))return;
   const gst=invMoney(taxable*0.08), subtotal=invMoney(taxable+nontax), total=invMoney(subtotal+gst);
   const advance=Number(document.getElementById('inv_advance').value)||0;
@@ -2094,7 +2118,7 @@ function sendInvoice(){
   if(!confirm(
     'SEND THIS INVOICE TO QUICKBOOKS?\n\n'+
     (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
-    'Bill '+(e.billNo||'—')+'    AWB '+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
+    'Invoice '+bn+'    AWB '+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
     '------------------------------------------\n'+
     summary+'\n'+
     '------------------------------------------\n'+
@@ -2104,10 +2128,18 @@ function sendInvoice(){
     (advance?('Advance    '+fmtNum(advance)+'\nBALANCE    '+fmtNum(invMoney(total-advance))+'\n'):'')+
     '\nPress OK to create this invoice in QuickBooks.'
   ))return;
+  // Write the invoice number back onto the entry as its BILL NO — same effect as typing it in the
+  // Form Log: status → Delivered, Payment tab shows Bill Done, MP list drops it, container follows.
+  if(bn!==(e.billNo||'')){
+    const before={...e};
+    e.billNo=bn;e.status='Delivered';
+    if(syncPaymentFromEntry(e))savePayments();
+    syncContFromEntry(e,before,null);
+  }
   zapierPost({
     event:'invoice_ready',
     customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
-    shipmentType:e.type||'',date:e.date||'',billNo:e.billNo||'',
+    shipmentType:e.type||'',date:e.date||'',billNo:bn,
     memo:document.getElementById('inv_memo').value.trim(),
     lines:lines,                                   // [{item, description, qty, rate, amount, taxable, taxCode}]
     taxableSubtotal:invMoney(taxable),nonTaxSubtotal:invMoney(nontax),
@@ -2116,8 +2148,8 @@ function sendInvoice(){
     no:e.no
   });
   e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());
-  saveEntries();renderEntries();closeModal('overlay-invoice');
-  toast('Sent to QuickBooks ✓ — invoice will appear shortly');
+  saveEntries();renderEntries();renderMP();renderPayments();updateCounts();closeModal('overlay-invoice');
+  toast('Sent to QuickBooks ✓ — invoice '+bn+' will appear shortly');
 }
 
 /* ============ CUSTOMERS ============ */
