@@ -2070,10 +2070,13 @@ function openInvoiceForm(entryId){
   box.appendChild(invLineRow({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:(e.type==='AP'?maclEstimate(wt):'')),tax:0}));
   box.appendChild(invLineRow({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0}));
   document.getElementById('inv_advance').value=(pay&&pay.advance!=null)?pay.advance:'';
-  // Invoice number: the entry's Bill No if it has one, else the next free number in this year's sequence
-  const suggestedBn=e.billNo||nextBillNo();
-  document.getElementById('inv_billNo').value=suggestedBn;
-  document.getElementById('inv_memo').value=suggestedBn?('LION Ref '+suggestedBn):'';
+  // Invoice number: QuickBooks owns the sequence (manual billing happens there too, and its numbers
+  // include invoices with no tracker entry). Blank ⇒ QuickBooks assigns the next number automatically.
+  // Pre-fill only when the entry already HAS a Bill No; otherwise show the tracker's best guess as a hint.
+  const bnEl=document.getElementById('inv_billNo');
+  bnEl.value=e.billNo||'';
+  bnEl.placeholder=e.billNo?'L26/…':('blank = QuickBooks assigns (next ≈ '+(nextBillNo()||'L…')+')');
+  document.getElementById('inv_memo').value=e.billNo?('LION Ref '+e.billNo):(e.rNo?('LION R '+e.rNo):'');
   const warn=e.qbInvoiced?`<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ Already sent to QuickBooks${e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):''} — sending again makes a duplicate invoice.</div>`:'';
   const noRates=!(cust&&cust.apRates&&Object.keys(cust.apRates).length)?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard rates — set this customer's own rates in the Customers tab.</div>`:'';
   document.getElementById('inv_info').innerHTML=
@@ -2101,12 +2104,14 @@ function sendInvoice(){
     }
   });
   if(!lines.length){toast('Add at least one line with a quantity and rate');return;}
+  // Blank invoice no ⇒ QuickBooks assigns the next number in ITS sequence (covers manual billing too).
+  // A typed number is forced onto the invoice — must then be unique across the Form Log.
   const bn=document.getElementById('inv_billNo').value.trim();
-  if(!bn){toast('Enter the invoice number');document.getElementById('inv_billNo').focus();return;}
-  // the invoice number must be unique across the Form Log (QuickBooks rejects duplicates too)
-  const bnKey=bn.replace(/\s+/g,'').toUpperCase();
-  const bnDup=entries.find(x=>x.id!==e.id&&(x.billNo||'').replace(/\s+/g,'').toUpperCase()===bnKey);
-  if(bnDup){toast('⚠ Invoice no '+bn+' already used — NO '+(bnDup.no??'—')+' ('+(bnDup.customer||'—')+')');document.getElementById('inv_billNo').focus();return;}
+  if(bn){
+    const bnKey=bn.replace(/\s+/g,'').toUpperCase();
+    const bnDup=entries.find(x=>x.id!==e.id&&(x.billNo||'').replace(/\s+/g,'').toUpperCase()===bnKey);
+    if(bnDup){toast('⚠ Invoice no '+bn+' already used — NO '+(bnDup.no??'—')+' ('+(bnDup.customer||'—')+')');document.getElementById('inv_billNo').focus();return;}
+  }
   if(e.qbInvoiced&&!confirm('This shipment was already sent to QuickBooks. Send again and create a duplicate invoice?'))return;
   const gst=invMoney(taxable*0.08), subtotal=invMoney(taxable+nontax), total=invMoney(subtotal+gst);
   const advance=Number(document.getElementById('inv_advance').value)||0;
@@ -2118,7 +2123,7 @@ function sendInvoice(){
   if(!confirm(
     'SEND THIS INVOICE TO QUICKBOOKS?\n\n'+
     (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
-    'Invoice '+bn+'    AWB '+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
+    'Invoice '+(bn||'(QuickBooks will assign the next number)')+'    AWB '+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
     '------------------------------------------\n'+
     summary+'\n'+
     '------------------------------------------\n'+
@@ -2128,9 +2133,11 @@ function sendInvoice(){
     (advance?('Advance    '+fmtNum(advance)+'\nBALANCE    '+fmtNum(invMoney(total-advance))+'\n'):'')+
     '\nPress OK to create this invoice in QuickBooks.'
   ))return;
-  // Write the invoice number back onto the entry as its BILL NO — same effect as typing it in the
+  // A TYPED number is written back onto the entry as its BILL NO — same effect as typing it in the
   // Form Log: status → Delivered, Payment tab shows Bill Done, MP list drops it, container follows.
-  if(bn!==(e.billNo||'')){
+  // Blank ⇒ QuickBooks assigns the number; type it into the Form Log when the Cc email arrives
+  // (an existing Bill No is never cleared by leaving the field blank).
+  if(bn&&bn!==(e.billNo||'')){
     const before={...e};
     e.billNo=bn;e.status='Delivered';
     if(syncPaymentFromEntry(e))savePayments();
@@ -2140,6 +2147,7 @@ function sendInvoice(){
     event:'invoice_ready',
     customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
     shipmentType:e.type||'',date:e.date||'',billNo:bn,
+    autoNumber:bn?'false':'true',                  // → Zapier "Auto Generate Invoice Number"
     memo:document.getElementById('inv_memo').value.trim(),
     lines:lines,                                   // [{item, description, qty, rate, amount, taxable, taxCode}]
     taxableSubtotal:invMoney(taxable),nonTaxSubtotal:invMoney(nontax),
@@ -2149,7 +2157,8 @@ function sendInvoice(){
   });
   e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());
   saveEntries();renderEntries();renderMP();renderPayments();updateCounts();closeModal('overlay-invoice');
-  toast('Sent to QuickBooks ✓ — invoice '+bn+' will appear shortly');
+  toast(bn?('Sent to QuickBooks ✓ — invoice '+bn+' will appear shortly')
+          :'Sent ✓ — QuickBooks will assign the number (check the Cc email, then type it in the Form Log)');
 }
 
 /* ============ CUSTOMERS ============ */
