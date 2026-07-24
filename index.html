@@ -2063,6 +2063,24 @@ function sendInvoice(){
   if(e.qbInvoiced&&!confirm('This shipment was already sent to QuickBooks. Send again and create a duplicate invoice?'))return;
   const gst=invMoney(taxable*0.08), subtotal=invMoney(taxable+nontax), total=invMoney(subtotal+gst);
   const advance=Number(document.getElementById('inv_advance').value)||0;
+  // Final review gate — spell out every charge and the totals before anything leaves the app.
+  // Nothing is sent and the entry isn't flagged unless the user presses OK.
+  const summary=lines.map(l=>
+    '  • '+l.item+'   '+l.qty+' x '+l.rate+' = '+fmtNum(l.amount)+(l.taxable?'':'   (no GST)')
+  ).join('\n');
+  if(!confirm(
+    'SEND THIS INVOICE TO QUICKBOOKS?\n\n'+
+    (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
+    'Bill '+(e.billNo||'—')+'    AWB '+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
+    '------------------------------------------\n'+
+    summary+'\n'+
+    '------------------------------------------\n'+
+    'Subtotal   '+fmtNum(subtotal)+'\n'+
+    'GST 8%     '+fmtNum(gst)+'\n'+
+    'TOTAL      '+fmtNum(total)+'\n'+
+    (advance?('Advance    '+fmtNum(advance)+'\nBALANCE    '+fmtNum(invMoney(total-advance))+'\n'):'')+
+    '\nPress OK to create this invoice in QuickBooks.'
+  ))return;
   zapierPost({
     event:'invoice_ready',
     customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
