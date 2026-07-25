@@ -2921,7 +2921,8 @@ async function startSync(){
       s.docChanges().forEach(ch=>{
         if(ch.type==='removed')return;
         const d=ch.doc.data()||{};
-        const handled=d.entryId&&window.__applyQbBill&&window.__applyQbBill(d.entryId,String(d.billNo||''));
+        const eid=String(d.entryId||'').trim(); // tolerate stray spaces around the Zapier-mapped chips
+        const handled=eid&&window.__applyQbBill&&window.__applyQbBill(eid,String(d.billNo||'').trim());
         if(handled)fx.deleteDoc(ch.doc.ref).catch(()=>{});
       });
     },()=>{});
