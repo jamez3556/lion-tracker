@@ -2152,6 +2152,7 @@ function sendInvoice(){
   }
   zapierPost({
     event:'invoice_ready',
+    entryId:e.id,                                  // → Zapier writes the QuickBooks-assigned number back to this entry via Firestore
     customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
     shipmentType:e.type||'',date:e.date||'',billNo:bn,
     autoNumber:bn?false:true,                      // → Zapier "Auto Generate Invoice Number" (real boolean — the string 'true' was ignored by QuickBooks)
@@ -2167,7 +2168,23 @@ function sendInvoice(){
   e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());
   saveEntries();renderEntries();renderMP();renderPayments();updateCounts();closeModal('overlay-invoice');
   toast(bn?('Sent to QuickBooks ✓ — invoice '+bn+' will appear shortly')
-          :'Sent ✓ — QuickBooks will assign the number (check the Cc email, then type it in the Form Log)');
+          :'Sent ✓ — QuickBooks will assign the number and it will appear in BILL NO automatically');
+}
+// Called by the cloud module when Zapier reports the QuickBooks-assigned invoice number (qbinv doc).
+// Fills the entry's BILL NO exactly as if typed — but ONLY if it's still blank (never overwrites a
+// hand-entered number). Returns true when applied or already recorded, false when the entry is unknown.
+window.__applyQbBill=function(entryId,billNo){
+  const e=entries.find(x=>x.id===entryId);
+  if(!e)return false;
+  if((e.billNo||'').trim())return true; // already has a number — nothing to do (treat as handled)
+  if(!billNo)return false;
+  const before={...e};
+  e.billNo=String(billNo).trim();e.status='Delivered';
+  if(syncPaymentFromEntry(e))savePayments();
+  syncContFromEntry(e,before,null);
+  saveEntries();renderEntries();renderMP();renderPayments();updateCounts();
+  toast('☁ Invoice '+e.billNo+' recorded from QuickBooks → BILL NO');
+  return true;
 }
 
 /* ============ CUSTOMERS ============ */
@@ -2894,6 +2911,21 @@ async function startSync(){
   };
   COLS.forEach(c=>window.__cloudPush(c)); // push offline edits made before sign-in (incl. anything stranded earlier)
   app.rerender();
+  // QuickBooks invoice-number write-back: after creating an invoice, Zapier drops {entryId, billNo}
+  // into the 'qbinv' collection (REST create allowed by a secret-gated rule). Apply the number to the
+  // entry as if typed, then delete the doc. Only the device that HAS the entry (or sees it already
+  // billed) deletes — a device with a stale entries list leaves the doc for another device to handle.
+  // Fully guarded: if the rules don't allow qbinv yet, the rest of the sync is unaffected.
+  try{
+    fx.onSnapshot(fx.collection(db,'qbinv'),s=>{
+      s.docChanges().forEach(ch=>{
+        if(ch.type==='removed')return;
+        const d=ch.doc.data()||{};
+        const handled=d.entryId&&window.__applyQbBill&&window.__applyQbBill(d.entryId,String(d.billNo||''));
+        if(handled)fx.deleteDoc(ch.doc.ref).catch(()=>{});
+      });
+    },()=>{});
+  }catch(e){}
   if(!failed.length){chip('☁ Synced','#16a34a');return;}
   // Some collections couldn't init (usually a new collection missing from Firestore rules).
   // Everything else is fully live; retry the stragglers so they recover once access is granted.
