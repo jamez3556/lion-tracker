@@ -2067,6 +2067,16 @@ function openInvoiceForm(entryId){
   const box=document.getElementById('inv_lines');box.innerHTML='';
   // Standard AP lines — weight-driven quantities auto-fill from the shipment's gross weight;
   // pass-throughs pre-fill from the Payment tab (DO Fee ← MACL, Customs Duty ← Duty) and are editable.
+  if(e.qbLines&&e.qbLines.length){
+    // Already invoiced: show the lines AS LAST SENT to QuickBooks (saved at send/update time),
+    // so the builder matches the real invoice instead of regenerating the default draft.
+    e.qbLines.forEach(l=>box.appendChild(invLineRow({name:l.item,qty:l.qty,rate:l.rate,tax:l.tax})));
+    // keep the pass-through rows editable even when they were 0 (zero lines aren't stored)
+    if(!e.qbLines.some(l=>l.item==='Delivery Order Fee'))
+      box.appendChild(invLineRow({name:'Delivery Order Fee',qty:1,rate:'',tax:0}));
+    if(!e.qbLines.some(l=>l.item==='Customs Duty'))
+      box.appendChild(invLineRow({name:'Customs Duty',qty:1,rate:'',tax:0}));
+  }else{
   // Per-customer billing profile (Customers tab): Form Filling qty, KG vs Box clearance, Dhoni on/off.
   const prof=(cust&&cust.apProfile)||{};
   box.appendChild(invLineRow({name:'Form Filling',qty:prof.ffQty!=null?prof.ffQty:8,rate:rate('Form Filling'),tax:8}));
@@ -2081,6 +2091,7 @@ function openInvoiceForm(entryId){
   // DO Fee: actual MACL amount from the Payment tab wins; otherwise auto-estimate from the KG (AP only)
   box.appendChild(invLineRow({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:(e.type==='AP'?maclEstimate(wt):'')),tax:0}));
   box.appendChild(invLineRow({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0}));
+  }
   document.getElementById('inv_advance').value=(pay&&pay.advance!=null)?pay.advance:'';
   // Invoice number: QuickBooks owns the sequence (manual billing happens there too, and its numbers
   // include invoices with no tracker entry). Blank ⇒ QuickBooks assigns the next number automatically.
@@ -2192,6 +2203,8 @@ function sendInvoice(){
     no:e.no
   });
   e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());
+  // remember what was sent, so reopening the builder shows the REAL invoice lines (not the default draft)
+  e.qbLines=lines.map(l=>({item:l.item,qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
   saveEntries();renderEntries();renderMP();renderPayments();updateCounts();closeModal('overlay-invoice');
   toast(bn?('Sent to QuickBooks ✓ — invoice '+bn+' will appear shortly')
           :'Sent ✓ — QuickBooks will assign the number and it will appear in BILL NO automatically');
@@ -2233,6 +2246,9 @@ function updateInvoice(){
       advance:advance,balance:invMoney(inv.total-advance),no:e.no
     })}).catch(err=>console.warn('Update failed',err));
   }catch(err){console.warn('Update error',err);}
+  // the amended lines are now what's on the QuickBooks invoice — remember them for the next reopen
+  e.qbLines=inv.lines.map(l=>({item:l.item,qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
+  saveEntries();
   closeModal('overlay-invoice');
   toast('✏️ Amendment sent — invoice '+bn+' will be corrected in QuickBooks');
 }
