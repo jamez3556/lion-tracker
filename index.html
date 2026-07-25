@@ -1061,7 +1061,7 @@ function renderEntries(){
     <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
     <td class="actcol"><div class="rowact">
-      ${r.type==='AP'?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
+      ${(r.type==='AP'&&isAdmin())?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
       <button class="iconbtn" onclick="openEntryForm('${r.id}')" title="Edit">✏️</button>
       <button class="iconbtn del" onclick="delEntry('${r.id}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
@@ -2057,7 +2057,11 @@ function invCalc(){
   document.getElementById('inv_total').value=invFmt(total);
   document.getElementById('inv_balance').value=invFmt(invMoney(total-adv));
 }
+// Billing is admin-only: the 🧾 button is hidden and all invoice actions are blocked for other users.
+const ADMIN_EMAILS=['jaamiz25@gmail.com'];
+function isAdmin(){return ADMIN_EMAILS.includes((window.__userEmail||'').toLowerCase());}
 function openInvoiceForm(entryId){
+  if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===entryId);if(!e)return;
   const cust=lookupCustomer(e.cno);
   const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
@@ -2141,6 +2145,7 @@ function invSummaryText(lines){
   return lines.map(l=>'  • '+l.item+'   '+l.qty+' x '+l.rate+' = '+fmtNum(l.amount)+(l.taxable?'':'   (no GST)')).join('\n');
 }
 function sendInvoice(){
+  if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
   const inv=collectInvoiceLines(e);
   const lines=inv.lines;
@@ -2214,6 +2219,7 @@ function sendInvoice(){
 // The Zap replaces the invoice's lines with these, so what you see in the builder becomes the invoice.
 // Only safe while the customer hasn't paid — a paid/period-closed invoice should get a credit note.
 function updateInvoice(){
+  if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
   const bn=document.getElementById('inv_billNo').value.trim();
   if(!bn){toast('No invoice number — nothing to amend');document.getElementById('inv_billNo').focus();return;}
@@ -2256,6 +2262,7 @@ function updateInvoice(){
 // Zap (ZAPIER_RESEND_URL: Find Invoice by number → Send Invoice), so the main invoice Zap is untouched.
 // Use it to send the invoice again, or to a different address (type it in EMAIL INVOICE TO first).
 function resendInvoice(){
+  if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
   const bn=document.getElementById('inv_billNo').value.trim();
   if(!bn){toast('No invoice number yet — send it to QuickBooks first');document.getElementById('inv_billNo').focus();return;}
@@ -3081,10 +3088,14 @@ async function startSync(){
     fx.onAuthStateChanged(auth,user=>{
       if(user){
         document.getElementById('cf_user').textContent=user.email;
+        // expose the login for admin-only features (billing buttons), then redraw so they show/hide
+        window.__userEmail=user.email||'';
+        try{window.__app.rerender();}catch(e){}
         showSection('cloud-account');closeModal('overlay-cloud');
         revealApp();
         startSync().catch(e=>{chip('☁ Sync error');toast('Cloud sync error: '+e.message);});
       }else{
+        window.__userEmail='';
         chip('☁ Sign in','#d97706');showSection('cloud-login');
         lockApp();
         document.getElementById('g_foot').textContent='Enter the login your admin gave you';
