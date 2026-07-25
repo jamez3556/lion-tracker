@@ -2125,7 +2125,11 @@ function sendInvoice(){
     const bnDup=entries.find(x=>x.id!==e.id&&(x.billNo||'').replace(/\s+/g,'').toUpperCase()===bnKey);
     if(bnDup){toast('⚠ Invoice no '+bn+' already used — NO '+(bnDup.no??'—')+' ('+(bnDup.customer||'—')+')');document.getElementById('inv_billNo').focus();return;}
   }
-  if(e.qbInvoiced&&!confirm('This shipment was already sent to QuickBooks. Send again and create a duplicate invoice?'))return;
+  if(e.qbInvoiced&&!confirm(
+    'ALREADY INVOICED'+(e.billNo?' — '+e.billNo:'')+'\n\n'+
+    'To email this invoice again, press Cancel and use the 📧 Resend Email button instead.\n\n'+
+    'Continuing here tries to create a SECOND invoice. QuickBooks will reject it if the number is already used (you get an error email).\n\n'+
+    'Create another invoice anyway?'))return;
   const gst=invMoney(taxable*0.08), subtotal=invMoney(taxable+nontax), total=invMoney(subtotal+gst);
   const advance=Number(document.getElementById('inv_advance').value)||0;
   // Final review gate — spell out every charge and the totals before anything leaves the app.
