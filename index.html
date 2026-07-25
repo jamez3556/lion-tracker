@@ -688,6 +688,7 @@
     </div>
     <div class="actions">
       <button type="button" class="ghost" onclick="closeModal('overlay-invoice')">Cancel</button>
+      <button type="button" class="ghost" id="inv_updateBtn" onclick="updateInvoice()" title="Correct THIS invoice in QuickBooks (same number) — use after a mistake, only if unpaid">✏️ Update Invoice</button>
       <button type="button" class="ghost" id="inv_resendBtn" onclick="resendInvoice()" title="Email the existing invoice again — does NOT create a new one">📧 Resend Email</button>
       <button type="button" class="primary" onclick="sendInvoice()">Send to QuickBooks →</button>
     </div>
@@ -1726,6 +1727,9 @@ const ZAPIER_HOOK_URL='https://hooks.zapier.com/hooks/catch/15397558/44ki5mz/';
 // from the main hook so the working invoice Zap needs no filter/path changes: only resend events
 // arrive here. Blank = resend not configured yet (the button says so instead of failing silently).
 const ZAPIER_RESEND_URL='https://hooks.zapier.com/hooks/catch/15397558/44qbgjp/';
+// Third Catch Hook — AMEND an existing invoice (Find Invoice by number → Update Invoice with new lines).
+// Separate again so neither the create nor the resend Zap needs changing. Blank = not configured.
+const ZAPIER_UPDATE_URL='';
 // Low-level sender. `event` tags what happened so ONE Zap can catch both (filter/branch on it):
 //   'shipment_created' — a new Form Log entry (duty not yet known)
 //   'payment_saved'    — Payment tab saved, carrying the real duty/MACL/MPL/balance
@@ -2088,8 +2092,10 @@ function openInvoiceForm(entryId){
   // customer email: pre-fill from MPL & Custom Logins (REGISTERED EMAIL) by C-No — editable per invoice
   const cred=creds.find(c=>(c.cno||'').toUpperCase()===(e.cno||'').toUpperCase());
   document.getElementById('inv_email').value=(cred&&cred.email)||'';
-  // Resend only makes sense once the invoice exists in QuickBooks
-  document.getElementById('inv_resendBtn').style.display=(e.qbInvoiced||e.billNo)?'':'none';
+  // Resend / Update only make sense once the invoice exists in QuickBooks
+  const invoiced=(e.qbInvoiced||e.billNo)?'':'none';
+  document.getElementById('inv_resendBtn').style.display=invoiced;
+  document.getElementById('inv_updateBtn').style.display=invoiced;
   const warn=e.qbInvoiced?`<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ Already sent to QuickBooks${e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):''} — sending again makes a duplicate invoice.</div>`:'';
   const noRates=!(cust&&cust.apRates&&Object.keys(cust.apRates).length)?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard rates — set this customer's own rates in the Customers tab.</div>`:'';
   document.getElementById('inv_info').innerHTML=
@@ -2099,8 +2105,9 @@ function openInvoiceForm(entryId){
   invCalc();
   showModal('overlay-invoice');
 }
-function sendInvoice(){
-  const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
+// Read the builder's rows into QuickBooks-ready invoice lines + totals. Shared by sendInvoice (create)
+// and updateInvoice (amend) so both always produce identical figures.
+function collectInvoiceLines(e){
   const lines=[];let taxable=0,nontax=0;
   document.querySelectorAll('#inv_lines .invline').forEach(tr=>{
     const item=tr.querySelector('.invname').value.trim();
@@ -2116,6 +2123,16 @@ function sendInvoice(){
       if(taxed)taxable+=amt;else nontax+=amt;
     }
   });
+  const gst=invMoney(taxable*0.08), subtotal=invMoney(taxable+nontax), total=invMoney(subtotal+gst);
+  return {lines:lines,taxable:invMoney(taxable),nontax:invMoney(nontax),gst:gst,subtotal:subtotal,total:total};
+}
+function invSummaryText(lines){
+  return lines.map(l=>'  • '+l.item+'   '+l.qty+' x '+l.rate+' = '+fmtNum(l.amount)+(l.taxable?'':'   (no GST)')).join('\n');
+}
+function sendInvoice(){
+  const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
+  const inv=collectInvoiceLines(e);
+  const lines=inv.lines;
   if(!lines.length){toast('Add at least one line with a quantity and rate');return;}
   // Blank invoice no ⇒ QuickBooks assigns the next number in ITS sequence (covers manual billing too).
   // A typed number is forced onto the invoice — must then be unique across the Form Log.
@@ -2130,13 +2147,11 @@ function sendInvoice(){
     'To email this invoice again, press Cancel and use the 📧 Resend Email button instead.\n\n'+
     'Continuing here tries to create a SECOND invoice. QuickBooks will reject it if the number is already used (you get an error email).\n\n'+
     'Create another invoice anyway?'))return;
-  const gst=invMoney(taxable*0.08), subtotal=invMoney(taxable+nontax), total=invMoney(subtotal+gst);
+  const gst=inv.gst, subtotal=inv.subtotal, total=inv.total;
   const advance=Number(document.getElementById('inv_advance').value)||0;
   // Final review gate — spell out every charge and the totals before anything leaves the app.
   // Nothing is sent and the entry isn't flagged unless the user presses OK.
-  const summary=lines.map(l=>
-    '  • '+l.item+'   '+l.qty+' x '+l.rate+' = '+fmtNum(l.amount)+(l.taxable?'':'   (no GST)')
-  ).join('\n');
+  const summary=invSummaryText(lines);
   if(!confirm(
     'SEND THIS INVOICE TO QUICKBOOKS?\n\n'+
     (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
@@ -2171,7 +2186,7 @@ function sendInvoice(){
     customerEmail:document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com',
     memo:document.getElementById('inv_memo').value.trim(),
     lines:lines,                                   // [{item, description, qty, rate, amount, taxable, taxCode}]
-    taxableSubtotal:invMoney(taxable),nonTaxSubtotal:invMoney(nontax),
+    taxableSubtotal:inv.taxable,nonTaxSubtotal:inv.nontax,
     subtotal:subtotal,gst:gst,total:total,
     advance:advance,balance:invMoney(total-advance),  // Zap records advance as a separate Receive-Payment
     no:e.no
@@ -2180,6 +2195,46 @@ function sendInvoice(){
   saveEntries();renderEntries();renderMP();renderPayments();updateCounts();closeModal('overlay-invoice');
   toast(bn?('Sent to QuickBooks ✓ — invoice '+bn+' will appear shortly')
           :'Sent ✓ — QuickBooks will assign the number and it will appear in BILL NO automatically');
+}
+// AMEND an invoice that already exists in QuickBooks — corrects the SAME invoice (same number) instead
+// of creating another one. Use after a mistake (wrong KG, wrong duty): fix the lines here, then Update.
+// The Zap replaces the invoice's lines with these, so what you see in the builder becomes the invoice.
+// Only safe while the customer hasn't paid — a paid/period-closed invoice should get a credit note.
+function updateInvoice(){
+  const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
+  const bn=document.getElementById('inv_billNo').value.trim();
+  if(!bn){toast('No invoice number — nothing to amend');document.getElementById('inv_billNo').focus();return;}
+  if(!ZAPIER_UPDATE_URL){toast('Update not set up yet — the update webhook URL is missing');return;}
+  const inv=collectInvoiceLines(e);
+  if(!inv.lines.length){toast('Add at least one line with a quantity and rate');return;}
+  const advance=Number(document.getElementById('inv_advance').value)||0;
+  if(!confirm(
+    'AMEND INVOICE '+bn+' IN QUICKBOOKS?\n\n'+
+    (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
+    'The invoice keeps its number — its lines are REPLACED with:\n'+
+    '------------------------------------------\n'+
+    invSummaryText(inv.lines)+'\n'+
+    '------------------------------------------\n'+
+    'Subtotal   '+fmtNum(inv.subtotal)+'\n'+
+    'GST 8%     '+fmtNum(inv.gst)+'\n'+
+    'TOTAL      '+fmtNum(inv.total)+'\n\n'+
+    '⚠ Only amend an invoice the customer has NOT paid yet.\nIf it is already paid, issue a credit note in QuickBooks instead.\n\n'+
+    'Amend it?'
+  ))return;
+  try{
+    fetch(ZAPIER_UPDATE_URL,{method:'POST',body:JSON.stringify({
+      event:'invoice_update',billNo:bn,entryId:e.id,
+      customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
+      shipmentType:e.type||'',customerEmail:document.getElementById('inv_email').value.trim(),
+      memo:document.getElementById('inv_memo').value.trim(),
+      lines:inv.lines,
+      taxableSubtotal:inv.taxable,nonTaxSubtotal:inv.nontax,
+      subtotal:inv.subtotal,gst:inv.gst,total:inv.total,
+      advance:advance,balance:invMoney(inv.total-advance),no:e.no
+    })}).catch(err=>console.warn('Update failed',err));
+  }catch(err){console.warn('Update error',err);}
+  closeModal('overlay-invoice');
+  toast('✏️ Amendment sent — invoice '+bn+' will be corrected in QuickBooks');
 }
 // Re-email an invoice that ALREADY exists in QuickBooks — no new invoice is created. Goes to its own
 // Zap (ZAPIER_RESEND_URL: Find Invoice by number → Send Invoice), so the main invoice Zap is untouched.
