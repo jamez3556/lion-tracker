@@ -1725,7 +1725,7 @@ const ZAPIER_HOOK_URL='https://hooks.zapier.com/hooks/catch/15397558/44ki5mz/';
 // Second Catch Hook, for the RESEND-only Zap (Find Invoice by number → Send Invoice). Kept separate
 // from the main hook so the working invoice Zap needs no filter/path changes: only resend events
 // arrive here. Blank = resend not configured yet (the button says so instead of failing silently).
-const ZAPIER_RESEND_URL='';
+const ZAPIER_RESEND_URL='https://hooks.zapier.com/hooks/catch/15397558/44qbgjp/';
 // Low-level sender. `event` tags what happened so ONE Zap can catch both (filter/branch on it):
 //   'shipment_created' — a new Form Log entry (duty not yet known)
 //   'payment_saved'    — Payment tab saved, carrying the real duty/MACL/MPL/balance
