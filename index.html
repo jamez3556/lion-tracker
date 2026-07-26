@@ -3351,7 +3351,8 @@ async function startSync(){
     // Shipment documents live in Firebase Storage (attachments 📎). Guarded: if Storage isn't
     // enabled in the console yet, the rest of the app is unaffected and uploads say "not ready".
     try{
-      const fst=stM.getStorage(fbApp);
+      // bucket named explicitly — the saved Firebase config predates Storage and may lack/miswrite storageBucket
+      const fst=stM.getStorage(fbApp,'gs://lion-tracker-47830.firebasestorage.app');
       window.__att={
         upload:async(p,f)=>{const r=stM.ref(fst,p);await stM.uploadBytes(r,f);return await stM.getDownloadURL(r);},
         remove:async(p)=>{await stM.deleteObject(stM.ref(fst,p));}
