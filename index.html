@@ -2089,7 +2089,8 @@ function expectedLines(e){
 function invAuditHTML(e){
   if(!(e.qbLines&&e.qbLines.length))return '';
   const norm=n=>String(n||'').replace(/\s*\((Air|Sea)\)\s*$/i,'').trim().toLowerCase();
-  const exp=expectedLines(e).filter(l=>Number(l.qty)>0&&Number(l.rate)>0);
+  const expAll=expectedLines(e); // full list — pass-throughs with no amount yet still count as "expected"
+  const exp=expAll.filter(l=>Number(l.qty)>0&&Number(l.rate)>0);
   const act=e.qbLines;
   const probs=[];
   exp.forEach(x=>{
@@ -2098,7 +2099,7 @@ function invAuditHTML(e){
     if(Number(a.qty)!==Number(x.qty))probs.push(x.name+': qty '+a.qty+' — expected '+x.qty);
     if(!x.est&&Number(a.rate)!==Number(x.rate))probs.push(x.name+': rate '+a.rate+' — expected '+x.rate);
   });
-  act.forEach(a=>{if(!exp.find(x=>norm(x.name)===norm(a.item)))probs.push('extra line “'+a.item+'” ('+a.qty+' × '+a.rate+')');});
+  act.forEach(a=>{if(!expAll.find(x=>norm(x.name)===norm(a.item)))probs.push('extra line “'+a.item+'” ('+a.qty+' × '+a.rate+')');});
   const src=e.qbFetchedAt?'This is the REAL invoice (from QuickBooks '+fmtDate(e.qbFetchedAt)+')':'This is the invoice as sent from the app';
   return probs.length
     ?`<div style="color:#dc2626;font-weight:700;margin-top:4px">${src} — ⚠ differs from the customer's standard charges:<br>&nbsp;• ${probs.map(esc).join('<br>&nbsp;• ')}</div>`
@@ -2355,7 +2356,7 @@ window.__applyQbLines=function(entryId,d){
       qty:Number(qtys[i])||0,rate:Number(rates[i])||0,
       tax:(tc==='2'||tc.indexOf('TAX')===0)?8:0}); // taxCode 2 / "TAX…" = GST 8%; 3 / "NON…" = exempt
   });
-  if(!lines.length)return false;
+  if(!lines.length)return true; // entry is ours but the doc carries no lines (bad Zap run) — junk, delete it
   e.qbLines=lines;e.qbFetchedAt=isoLocal(new Date());
   saveEntries();
   const ov=document.getElementById('overlay-invoice');
