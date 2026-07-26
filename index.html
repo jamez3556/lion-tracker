@@ -247,7 +247,9 @@
     .daysbadge{padding:1px 4px!important;font-size:8.5px!important;white-space:normal!important}
     .name{max-width:110px!important}
     /* Container Status printout: C NO (3rd col) is internal — hide; LAST DATE (11th) + CLEARANCE (12th) are what the printout is FOR — emphasise */
-    #view-containers th:nth-child(3),#view-containers td:nth-child(3){display:none!important}
+    #view-containers th:nth-child(3),#view-containers td:nth-child(3),
+    #view-containers th:nth-child(8),#view-containers td:nth-child(8),   /* CTNS LEFT */
+    #view-containers th:nth-child(14),#view-containers td:nth-child(14){display:none!important} /* LOG NO */
     #view-containers th:nth-child(11),#view-containers td:nth-child(11),
     #view-containers th:nth-child(12),#view-containers td:nth-child(12){font-weight:700!important;font-size:11px!important}
     #view-containers td:nth-child(12){background:#f1f5f9!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
