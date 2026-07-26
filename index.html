@@ -688,6 +688,7 @@
     </div>
     <div class="actions">
       <button type="button" class="ghost" onclick="closeModal('overlay-invoice')">Cancel</button>
+      <button type="button" class="ghost" id="inv_fetchBtn" onclick="fetchInvoice()" title="Pull this invoice's REAL lines from QuickBooks and compare them against the expected charges — for auditing manual billing">⬇ Check in QuickBooks</button>
       <button type="button" class="ghost" id="inv_updateBtn" onclick="updateInvoice()" title="Correct THIS invoice in QuickBooks (same number) — use after a mistake, only if unpaid">✏️ Update Invoice</button>
       <button type="button" class="ghost" id="inv_resendBtn" onclick="resendInvoice()" title="Email the existing invoice again — does NOT create a new one">📧 Resend Email</button>
       <button type="button" class="primary" onclick="sendInvoice()">Send to QuickBooks →</button>
@@ -1730,6 +1731,9 @@ const ZAPIER_RESEND_URL='https://hooks.zapier.com/hooks/catch/15397558/44qbgjp/'
 // Third Catch Hook — AMEND an existing invoice (Find Invoice by number → Update Invoice with new lines).
 // Separate again so neither the create nor the resend Zap needs changing. Blank = not configured.
 const ZAPIER_UPDATE_URL='https://hooks.zapier.com/hooks/catch/15397558/44q4sdo/';
+// Audit fetch: pulls a manually-billed invoice's REAL lines from QuickBooks (by number) so the
+// builder can show them and flag differences from the customer's expected charges.
+const ZAPIER_FETCH_URL='https://hooks.zapier.com/hooks/catch/15397558/44l2h33/';
 // Low-level sender. `event` tags what happened so ONE Zap can catch both (filter/branch on it):
 //   'shipment_created' — a new Form Log entry (duty not yet known)
 //   'payment_saved'    — Payment tab saved, carrying the real duty/MACL/MPL/balance
@@ -2060,6 +2064,46 @@ function invCalc(){
 // Billing is admin-only: the 🧾 button is hidden and all invoice actions are blocked for other users.
 const ADMIN_EMAILS=['jaamiz25@gmail.com'];
 function isAdmin(){return ADMIN_EMAILS.includes((window.__userEmail||'').toLowerCase());}
+// What this shipment SHOULD be billed, per the customer's profile/rates (Customers tab).
+// est:true marks pass-through rates the app only estimates (no Payment-tab actual) — the audit
+// won't flag those on rate alone.
+function expectedLines(e){
+  const cust=lookupCustomer(e.cno);
+  const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
+  const rate=(name)=>{const v=(cust&&cust.apRates)?cust.apRates[name]:null;return v==null?AP_STD_RATES[name]:v;};
+  const wt=e.grsWt!=null?e.grsWt:'';
+  const prof=(cust&&cust.apProfile)||{};
+  const L=[];
+  L.push({name:'Form Filling',qty:prof.ffQty!=null?prof.ffQty:8,rate:rate('Form Filling'),tax:8});
+  if(!prof.noProc)L.push({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8});
+  if(prof.clearMode==='Box')L.push({name:'Clearance Box',qty:e.pkgs!=null?e.pkgs:'',rate:rate('Clearance Box'),tax:8});
+  else L.push({name:'Clearance KG',qty:wt,rate:rate('Clearance KG'),tax:8});
+  if(!prof.noDhoni)L.push({name:'Dhoni Charges',qty:wt,rate:rate('Dhoni Charges'),tax:8});
+  // DO Fee: actual MACL amount from the Payment tab wins; otherwise auto-estimate from the KG (AP only)
+  L.push({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:(e.type==='AP'?maclEstimate(wt):'')),tax:0,est:!(pay&&pay.macl!=null)});
+  L.push({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0,est:!(pay&&pay.duty!=null)});
+  return L;
+}
+// Audit verdict shown in the builder once the REAL QuickBooks lines are known (sent from the app,
+// or pulled with ⬇ Check in QuickBooks): compares them to expectedLines and lists every difference.
+function invAuditHTML(e){
+  if(!(e.qbLines&&e.qbLines.length))return '';
+  const norm=n=>String(n||'').replace(/\s*\((Air|Sea)\)\s*$/i,'').trim().toLowerCase();
+  const exp=expectedLines(e).filter(l=>Number(l.qty)>0&&Number(l.rate)>0);
+  const act=e.qbLines;
+  const probs=[];
+  exp.forEach(x=>{
+    const a=act.find(l=>norm(l.item)===norm(x.name));
+    if(!a){probs.push('missing “'+x.name+'” (expected '+x.qty+' × '+x.rate+')');return;}
+    if(Number(a.qty)!==Number(x.qty))probs.push(x.name+': qty '+a.qty+' — expected '+x.qty);
+    if(!x.est&&Number(a.rate)!==Number(x.rate))probs.push(x.name+': rate '+a.rate+' — expected '+x.rate);
+  });
+  act.forEach(a=>{if(!exp.find(x=>norm(x.name)===norm(a.item)))probs.push('extra line “'+a.item+'” ('+a.qty+' × '+a.rate+')');});
+  const src=e.qbFetchedAt?'This is the REAL invoice (from QuickBooks '+fmtDate(e.qbFetchedAt)+')':'This is the invoice as sent from the app';
+  return probs.length
+    ?`<div style="color:#dc2626;font-weight:700;margin-top:4px">${src} — ⚠ differs from the customer's standard charges:<br>&nbsp;• ${probs.map(esc).join('<br>&nbsp;• ')}</div>`
+    :`<div style="color:#16a34a;font-weight:700;margin-top:4px">${src} — ✔ matches the customer's standard charges.</div>`;
+}
 function openInvoiceForm(entryId){
   if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===entryId);if(!e)return;
@@ -2081,20 +2125,7 @@ function openInvoiceForm(entryId){
     if(!e.qbLines.some(l=>l.item==='Customs Duty'))
       box.appendChild(invLineRow({name:'Customs Duty',qty:1,rate:'',tax:0}));
   }else{
-  // Per-customer billing profile (Customers tab): Form Filling qty, KG vs Box clearance, Dhoni on/off.
-  const prof=(cust&&cust.apProfile)||{};
-  box.appendChild(invLineRow({name:'Form Filling',qty:prof.ffQty!=null?prof.ffQty:8,rate:rate('Form Filling'),tax:8}));
-  if(!prof.noProc)
-    box.appendChild(invLineRow({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8}));
-  if(prof.clearMode==='Box')
-    box.appendChild(invLineRow({name:'Clearance Box',qty:e.pkgs!=null?e.pkgs:'',rate:rate('Clearance Box'),tax:8}));
-  else
-    box.appendChild(invLineRow({name:'Clearance KG',qty:wt,rate:rate('Clearance KG'),tax:8}));
-  if(!prof.noDhoni)
-    box.appendChild(invLineRow({name:'Dhoni Charges',qty:wt,rate:rate('Dhoni Charges'),tax:8}));
-  // DO Fee: actual MACL amount from the Payment tab wins; otherwise auto-estimate from the KG (AP only)
-  box.appendChild(invLineRow({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:(e.type==='AP'?maclEstimate(wt):'')),tax:0}));
-  box.appendChild(invLineRow({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0}));
+    expectedLines(e).forEach(l=>box.appendChild(invLineRow(l)));
   }
   document.getElementById('inv_advance').value=(pay&&pay.advance!=null)?pay.advance:'';
   // Invoice number: QuickBooks owns the sequence (manual billing happens there too, and its numbers
@@ -2111,12 +2142,22 @@ function openInvoiceForm(entryId){
   const invoiced=(e.qbInvoiced||e.billNo)?'':'none';
   document.getElementById('inv_resendBtn').style.display=invoiced;
   document.getElementById('inv_updateBtn').style.display=invoiced;
+  document.getElementById('inv_fetchBtn').style.display=invoiced;
+  // Billed (possibly manually in QuickBooks) but the real lines aren't known yet: pull the invoice
+  // automatically so the builder shows what was ACTUALLY billed, not a regenerated draft.
+  const fetching=!!((e.billNo||'').trim()&&!(e.qbLines&&e.qbLines.length)&&ZAPIER_FETCH_URL);
+  if(fetching){
+    try{fetch(ZAPIER_FETCH_URL,{method:'POST',body:JSON.stringify({
+      event:'invoice_fetch',entryId:e.id,billNo:e.billNo.trim()
+    })}).catch(()=>{});}catch(err){}
+  }
+  const loading=fetching?`<div style="color:#0369a1;font-weight:700;margin-top:4px">⏳ Loading invoice ${esc(e.billNo)} from QuickBooks — the lines below are a draft until it appears (~15 s)…</div>`:'';
   const warn=e.qbInvoiced?`<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ Already sent to QuickBooks${e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):''} — sending again makes a duplicate invoice.</div>`:'';
   const noRates=!(cust&&cust.apRates&&Object.keys(cust.apRates).length)?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard rates — set this customer's own rates in the Customers tab.</div>`:'';
   document.getElementById('inv_info').innerHTML=
     `<div><span class="k">Customer</span><b>${esc(e.customer)||'—'}</b> <span style="color:#94a3b8">(${esc(e.cno)||'—'})</span></div>
      <div><span class="k">R No</span><b>${esc(e.rNo)||'—'}</b> &nbsp; <span class="k">AWB</span><b>${esc(e.awbBl)||'—'}</b> &nbsp; <span class="k">Grs Wt</span><b>${fmtNum(e.grsWt)}</b></div>
-     <div><span class="k">Date</span>${fmtDate(e.date)} &nbsp; <span class="k">Bill No</span><b>${esc(e.billNo)||'—'}</b></div>${noRates}${warn}`;
+     <div><span class="k">Date</span>${fmtDate(e.date)} &nbsp; <span class="k">Bill No</span><b>${esc(e.billNo)||'—'}</b></div>${noRates}${warn}${loading}${invAuditHTML(e)}`;
   invCalc();
   showModal('overlay-invoice');
 }
@@ -2282,6 +2323,46 @@ function resendInvoice(){
     })}).catch(err=>console.warn('Resend failed',err));
   }catch(err){console.warn('Resend error',err);}
   toast('📧 Resend requested — invoice '+bn+' will be emailed again');
+}
+// Audit: ask the fetch Zap for this invoice's REAL lines from QuickBooks (Find Invoice by number
+// → Firestore qbinv doc with kind:'lines'); __applyQbLines stores them and refreshes the builder.
+function fetchInvoice(){
+  if(!isAdmin()){toast('Billing is admin-only');return;}
+  const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
+  const bn=document.getElementById('inv_billNo').value.trim()||e.billNo;
+  if(!bn){toast('No invoice number — nothing to check');return;}
+  if(!ZAPIER_FETCH_URL){toast('Check not set up yet — the fetch webhook URL is missing');return;}
+  try{
+    fetch(ZAPIER_FETCH_URL,{method:'POST',body:JSON.stringify({
+      event:'invoice_fetch',entryId:e.id,billNo:bn
+    })}).catch(err=>console.warn('Fetch failed',err));
+  }catch(err){console.warn('Fetch error',err);}
+  toast('⬇ Checking QuickBooks — invoice '+bn+"'s real lines will appear here in ~15 s");
+}
+// Called by the cloud module when the fetch Zap drops a qbinv doc with kind:'lines' — the invoice's
+// REAL line items as comma-separated strings. Stores them on the entry (qbLines) so the builder shows
+// and audits the actual QuickBooks invoice; live-refreshes the builder if it's open on this entry.
+window.__applyQbLines=function(entryId,d){
+  const e=entries.find(x=>x.id===entryId);
+  if(!e)return false;
+  const split=v=>String(v==null?'':v).split(',').map(s=>s.trim());
+  const names=split(d.items),qtys=split(d.qtys),rates=split(d.rates),taxes=split(d.taxes);
+  const lines=[];
+  names.forEach((n,i)=>{
+    if(!n)return;
+    const tc=String(taxes[i]||'').toUpperCase();
+    lines.push({item:n.replace(/\s*\((Air|Sea)\)\s*$/i,''),
+      qty:Number(qtys[i])||0,rate:Number(rates[i])||0,
+      tax:(tc==='2'||tc.indexOf('TAX')===0)?8:0}); // taxCode 2 / "TAX…" = GST 8%; 3 / "NON…" = exempt
+  });
+  if(!lines.length)return false;
+  e.qbLines=lines;e.qbFetchedAt=isoLocal(new Date());
+  saveEntries();
+  const ov=document.getElementById('overlay-invoice');
+  if(ov.classList.contains('show')&&document.getElementById('inv_entryId').value===e.id)
+    openInvoiceForm(e.id);
+  toast('⬇ Invoice '+(e.billNo||'')+' pulled from QuickBooks — audit shown in the builder');
+  return true;
 }
 // Called by the cloud module when Zapier reports the QuickBooks-assigned invoice number (qbinv doc).
 // Fills the entry's BILL NO exactly as if typed — but ONLY if it's still blank (never overwrites a
@@ -3035,7 +3116,9 @@ async function startSync(){
         if(ch.type==='removed')return;
         const d=ch.doc.data()||{};
         const eid=String(d.entryId||'').trim(); // tolerate stray spaces around the Zapier-mapped chips
-        const handled=eid&&window.__applyQbBill&&window.__applyQbBill(eid,String(d.billNo||'').trim());
+        const handled=d.kind==='lines'
+          ?(eid&&window.__applyQbLines&&window.__applyQbLines(eid,d))          // audit fetch: real invoice lines
+          :(eid&&window.__applyQbBill&&window.__applyQbBill(eid,String(d.billNo||'').trim()));
         if(handled)fx.deleteDoc(ch.doc.ref).catch(()=>{});
       });
     },()=>{});
