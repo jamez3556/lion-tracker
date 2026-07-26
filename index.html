@@ -239,6 +239,11 @@
     table{min-width:0!important;font-size:10px}.status-pill{border:1px solid #999}
     .printtitle{display:block!important}
     .scroll{overflow:visible!important;max-height:none!important} /* print every row, not just the scrolled window */
+    /* Container Status printout: C NO (3rd col) is internal — hide; LAST DATE (11th) + CLEARANCE (12th) are what the printout is FOR — emphasise */
+    #view-containers th:nth-child(3),#view-containers td:nth-child(3){display:none!important}
+    #view-containers th:nth-child(11),#view-containers td:nth-child(11),
+    #view-containers th:nth-child(12),#view-containers td:nth-child(12){font-weight:700!important;font-size:11px!important}
+    #view-containers td:nth-child(12){background:#f1f5f9!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   }
   .printtitle{display:none;text-align:center;margin-bottom:10px}
   .printtitle h2{margin:0}.printtitle p{margin:4px 0 0;font-size:12px;color:#555}
