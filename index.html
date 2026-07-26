@@ -2411,15 +2411,31 @@ function resendInvoice(){
 // Shipment documents (all staff): files live in Firebase Storage (entries/<id>/…), the metadata list
 // syncs on the entry itself so every device sees the same attachments. Deleting an entry leaves the
 // files orphaned in Storage — harmless at this scale.
-let attRef=null; // {list:'entries'|'creds', id} — shipment documents vs customer documents
-function attRec(){if(!attRef)return null;return (attRef.list==='creds'?creds:entries).find(x=>x.id===attRef.id);}
-function attSave(){if(attRef.list==='creds'){saveCreds();renderCreds();}else{saveEntries();renderEntries();}}
+// Shipment documents live on the entry. CUSTOMER documents live on the customer record (keyed by
+// C number), so the Customers tab and MPL & Custom Logins always show the SAME files for the same
+// customer. A login without a C number keeps its own private list until the C number is filled.
+let attRef=null; // {list:'entries'|'creds'|'customers', id}
+function attRec(){if(!attRef)return null;return (attRef.list==='creds'?creds:attRef.list==='customers'?customers:entries).find(x=>x.id===attRef.id);}
+function attSave(){
+  if(attRef.list==='creds'){saveCreds();renderCreds();}
+  else if(attRef.list==='customers'){saveCustomers();renderCusts();renderCreds();}
+  else{saveEntries();renderEntries();}
+}
 function openAttach(id){if(!entries.find(x=>x.id===id))return;attRef={list:'entries',id:id};renderAttach();showModal('overlay-attach');}
-function openAttachCred(id){if(!creds.find(x=>x.id===id))return;attRef={list:'creds',id:id};renderAttach();showModal('overlay-attach');}
+function openAttachCust(id){if(!customers.find(x=>x.id===id))return;attRef={list:'customers',id:id};renderAttach();showModal('overlay-attach');}
+function openAttachCred(id){
+  const r=creds.find(x=>x.id===id);if(!r)return;
+  const cust=lookupCustomer(r.cno); // shared pool when the login has a C number
+  attRef=cust?{list:'customers',id:cust.id}:{list:'creds',id:id};
+  renderAttach();showModal('overlay-attach');
+}
+// creds row badge counts the SHARED pool when the login links to a customer
+function credAttCount(r){const c=lookupCustomer(r.cno);const l=(c?c.attachments:r.attachments)||[];return l.length;}
 function renderAttach(){
   const e=attRec();if(!e)return;
-  document.getElementById('att_info').innerHTML=attRef.list==='creds'
-    ?`<b>${esc(e.name)||'—'}</b> &nbsp;·&nbsp; ${esc(e.cno)||'no C number'} — customer documents`
+  document.getElementById('att_info').innerHTML=
+    attRef.list==='customers'?`<b>${esc(e.name)||'—'}</b> &nbsp;·&nbsp; ${esc(e.cno)||''} — customer documents (shared between Customers &amp; Logins tabs)`
+    :attRef.list==='creds'?`<b>${esc(e.name)||'—'}</b> — this login has no C number; add it to share documents with the Customers tab`
     :`<b>${esc(e.customer)||'—'}</b> — R ${esc(e.rNo)||'—'} &nbsp;·&nbsp; AWB/BL ${esc(e.awbBl)||'—'}`;
   const list=e.attachments||[];
   document.getElementById('att_list').innerHTML=list.length?list.map((a,i)=>
@@ -2599,6 +2615,7 @@ function renderCusts(){
       <td data-l="Clr/kg">${(r.apRates&&r.apRates['Clearance KG']!=null)?fmtNum(r.apRates['Clearance KG']):'<span class="d-none">—</span>'}</td>
       <td data-l="Jobs">${jc?`<span class="daysbadge d-ok">${jc} job${jc>1?'s':''}</span>`:'<span class="d-none">—</span>'}</td>
       <td class="actcol"><div class="rowact">
+        <button class="iconbtn" onclick="openAttachCust('${r.id}')" title="Customer documents (ID, licences, forms…) — shared with the Logins tab">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
         <button class="iconbtn" onclick="openCustForm('${r.id}')" title="Edit">✏️</button>
         <button class="iconbtn del" onclick="delCust('${r.id}')" title="Delete">🗑️</button>
       </div></td></tr>`;
@@ -2698,7 +2715,7 @@ function renderCreds(){
     <td data-l="Asycuda">${pwCell(r.id,'asycudaPass',r.asycudaPass)}</td>
     <td data-l="Email">${r.email?esc(r.email)+`<button class="copybtn" onclick="copyCred('${r.id}','email')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}</td>
     <td class="actcol"><div class="rowact">
-      <button class="iconbtn" onclick="openAttachCred('${r.id}')" title="Customer documents (ID, licences, forms…)">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
+      <button class="iconbtn" onclick="openAttachCred('${r.id}')" title="Customer documents (ID, licences, forms…) — shared with the Customers tab">📎${credAttCount(r)||''}</button>
       <button class="iconbtn" onclick="openCredForm('${r.id}')" title="Edit">✏️</button>
       <button class="iconbtn del" onclick="delCred('${r.id}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
@@ -3077,6 +3094,18 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
     if(m){r.cno=m;n++;}
   });
   if(n){saveCreds();console.log('Backfilled C numbers on '+n+' logins');}
+})();
+// One-time migration: documents that were attached to a LOGIN move to its customer's shared pool
+// (customer documents are keyed by C number and shared between the Customers and Logins tabs).
+(function moveCredDocsToCustomer(){
+  let moved=0;
+  creds.forEach(r=>{
+    if(!(r.attachments&&r.attachments.length))return;
+    const c=lookupCustomer(r.cno);if(!c)return;
+    (c.attachments=c.attachments||[]).push(...r.attachments);
+    delete r.attachments;moved++;
+  });
+  if(moved){saveCustomers();saveCreds();console.log('Moved documents from '+moved+' logins to their customers');}
 })();
 buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();updateCounts();
 fitTables();setTimeout(fitTables,300);
