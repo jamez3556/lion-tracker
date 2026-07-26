@@ -704,11 +704,31 @@
     </div>
     <div class="actions">
       <button type="button" class="ghost" onclick="closeModal('overlay-invoice')">Cancel</button>
+      <button type="button" class="ghost" id="inv_payBtn" onclick="openPayRec(document.getElementById('inv_entryId').value)" title="Record a payment received against this invoice in QuickBooks">💰 Payment Received</button>
       <button type="button" class="ghost" id="inv_fetchBtn" onclick="fetchInvoice()" title="Pull this invoice's REAL lines from QuickBooks and compare them against the expected charges — for auditing manual billing">⬇ Check in QuickBooks</button>
       <button type="button" class="ghost" id="inv_updateBtn" onclick="updateInvoice()" title="Correct THIS invoice in QuickBooks (same number) — use after a mistake, only if unpaid">✏️ Update Invoice</button>
       <button type="button" class="ghost" id="inv_resendBtn" onclick="resendInvoice()" title="Email the existing invoice again — does NOT create a new one">📧 Resend Email</button>
       <button type="button" class="primary" onclick="sendInvoice()">Send to QuickBooks →</button>
     </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay-payrec">
+  <div class="modal" style="max-width:440px">
+    <h2>💰 Payment Received</h2>
+    <form onsubmit="return sendPaymentReceived(event)">
+      <div id="pr_info" style="margin-bottom:12px;font-size:13.5px"></div>
+      <div class="field"><label>AMOUNT RECEIVED (MVR) — full balance pre-filled; change for a partial payment</label><input id="pr_amount" type="number" step="any" min="0.01" required></div>
+      <div class="grid2">
+        <div class="field"><label>DATE RECEIVED</label><input id="pr_date" type="date" required></div>
+        <div class="field"><label>METHOD</label><select id="pr_method"><option>Bank Transfer</option><option>Cash</option><option>CHQ</option></select></div>
+      </div>
+      <input type="hidden" id="pr_entryId">
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-payrec')">Cancel</button>
+        <button type="submit" class="primary">Record in QuickBooks →</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -1750,6 +1770,8 @@ const ZAPIER_UPDATE_URL='https://hooks.zapier.com/hooks/catch/15397558/44q4sdo/'
 // Audit fetch: pulls a manually-billed invoice's REAL lines from QuickBooks (by number) so the
 // builder can show them and flag differences from the customer's expected charges.
 const ZAPIER_FETCH_URL='https://hooks.zapier.com/hooks/catch/15397558/44l2h33/';
+// Payment received: records a customer payment against the invoice in QuickBooks (Receive Payment).
+const ZAPIER_PAYMENT_URL='https://hooks.zapier.com/hooks/catch/15397558/44lhph5/';
 // Low-level sender. `event` tags what happened so ONE Zap can catch both (filter/branch on it):
 //   'shipment_created' — a new Form Log entry (duty not yet known)
 //   'payment_saved'    — Payment tab saved, carrying the real duty/MACL/MPL/balance
@@ -1883,7 +1905,10 @@ function renderPayments(){
   document.getElementById('pay_tbody').innerHTML=slice.map(r=>{
     const has=payHasMoney(r);const bal=payBalance(r);
     const balCell=!has?'—':`<span class="${bal>0?'bal-due':'bal-ok'}">${fmtNum(bal)}</span>`;
-    const bill=r.billNo?`<span class="billbadge bill-done" title="Invoice ${esc(r.billNo)}">✓ Bill Done</span>`:'<span class="billbadge bill-pending">Pending</span>';
+    const bill=r.billNo
+      ?`<span class="billbadge bill-done" title="Invoice ${esc(r.billNo)}">✓ Bill Done</span>`+
+        (isAdmin()&&r.entryId?` <button class="iconbtn" onclick="openPayRec('${jatt(r.entryId)}')" title="Record a payment received against invoice ${esc(r.billNo)} in QuickBooks">💰</button>`:'')
+      :'<span class="billbadge bill-pending">Pending</span>';
     // per-row "Send to QuickBooks" button — only once charges exist; shows ✅ once invoiced (re-sendable)
     const inv=!has
       ? '<span style="color:#94a3b8">—</span>'
@@ -2160,6 +2185,7 @@ function openInvoiceForm(entryId){
   document.getElementById('inv_resendBtn').style.display=invoiced;
   document.getElementById('inv_updateBtn').style.display=invoiced;
   document.getElementById('inv_fetchBtn').style.display=invoiced;
+  document.getElementById('inv_payBtn').style.display=invoiced;
   // Billed (possibly manually in QuickBooks) but the real lines aren't known yet: pull the invoice
   // automatically so the builder shows what was ACTUALLY billed, not a regenerated draft.
   const fetching=!!((e.billNo||'').trim()&&!(e.qbLines&&e.qbLines.length)&&ZAPIER_FETCH_URL);
@@ -2341,6 +2367,54 @@ function resendInvoice(){
   }catch(err){console.warn('Resend error',err);}
   toast('📧 Resend requested — invoice '+bn+' will be emailed again');
 }
+// Payment received (admin-only): dialog → Zapier → QuickBooks Receive Payment against this invoice.
+function openPayRec(entryId){
+  if(!isAdmin()){toast('Recording payments is admin-only');return;}
+  const e=entries.find(x=>x.id===entryId);if(!e)return;
+  const bn=(e.billNo||'').trim();
+  if(!bn){toast('No invoice number yet — bill it first');return;}
+  const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
+  // best-guess balance: invoice total (from the known lines) minus advance and payments already recorded here
+  let bal='';
+  if(e.qbLines&&e.qbLines.length){
+    const t=e.qbLines.reduce((s,l)=>s+invMoney((Number(l.qty)||0)*(Number(l.rate)||0)*(l.tax?1.08:1)),0);
+    const adv=pay&&pay.advance?Number(pay.advance):0;
+    const rec=(e.qbPayRec||[]).reduce((s,p)=>s+(Number(p.amt)||0),0);
+    bal=invMoney(t-adv-rec);
+  }
+  document.getElementById('pr_entryId').value=e.id;
+  document.getElementById('pr_amount').value=bal>0?bal:'';
+  document.getElementById('pr_date').value=isoLocal(new Date());
+  const prev=(e.qbPayRec||[]).map(p=>'MVR '+invFmt(p.amt)+' ('+p.method+', '+fmtDate(p.date)+')').join(' · ');
+  document.getElementById('pr_info').innerHTML=
+    `Invoice <b>${esc(bn)}</b> — <b>${esc(e.customer)||''}</b>`+
+    (prev?`<div style="color:#0369a1;margin-top:4px">Already recorded: ${esc(prev)}</div>`:'');
+  showModal('overlay-payrec');
+}
+window.sendPaymentReceived=function(ev){
+  ev.preventDefault();
+  if(!isAdmin()){toast('Recording payments is admin-only');return false;}
+  const e=entries.find(x=>x.id===document.getElementById('pr_entryId').value);if(!e)return false;
+  const amt=Number(document.getElementById('pr_amount').value)||0;
+  const date=document.getElementById('pr_date').value;
+  const method=document.getElementById('pr_method').value;
+  if(amt<=0){toast('Enter the amount received');return false;}
+  if(!ZAPIER_PAYMENT_URL){toast('Not set up yet — the payment webhook URL is missing');return false;}
+  if(!confirm('RECORD PAYMENT in QuickBooks?\n\nInvoice '+e.billNo+' — '+(e.customer||'')+'\nAmount: MVR '+invFmt(amt)+'\nMethod: '+method+'  Date: '+fmtDate(date)+
+    '\n\nThis writes into the accounts. A mistaken payment must be deleted inside QuickBooks.'))return false;
+  try{
+    fetch(ZAPIER_PAYMENT_URL,{method:'POST',body:JSON.stringify({
+      event:'payment_received',entryId:e.id,billNo:e.billNo.trim(),
+      amount:amt,date:date,method:method,
+      customerName:e.customer||'',cNumber:e.cno||''
+    })}).catch(err=>console.warn('PayRec failed',err));
+  }catch(err){console.warn('PayRec error',err);}
+  (e.qbPayRec=e.qbPayRec||[]).push({amt:amt,date:date,method:method});
+  saveEntries();
+  closeModal('overlay-payrec');
+  toast('💰 Payment MVR '+invFmt(amt)+' sent to QuickBooks against invoice '+e.billNo);
+  return false;
+};
 // Audit: ask the fetch Zap for this invoice's REAL lines from QuickBooks (Find Invoice by number
 // → Firestore qbinv doc with kind:'lines'); __applyQbLines stores them and refreshes the builder.
 function fetchInvoice(){
