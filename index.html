@@ -2411,12 +2411,16 @@ function resendInvoice(){
 // Shipment documents (all staff): files live in Firebase Storage (entries/<id>/…), the metadata list
 // syncs on the entry itself so every device sees the same attachments. Deleting an entry leaves the
 // files orphaned in Storage — harmless at this scale.
-let attEntryId=null;
-function openAttach(id){const e=entries.find(x=>x.id===id);if(!e)return;attEntryId=id;renderAttach();showModal('overlay-attach');}
+let attRef=null; // {list:'entries'|'creds', id} — shipment documents vs customer documents
+function attRec(){if(!attRef)return null;return (attRef.list==='creds'?creds:entries).find(x=>x.id===attRef.id);}
+function attSave(){if(attRef.list==='creds'){saveCreds();renderCreds();}else{saveEntries();renderEntries();}}
+function openAttach(id){if(!entries.find(x=>x.id===id))return;attRef={list:'entries',id:id};renderAttach();showModal('overlay-attach');}
+function openAttachCred(id){if(!creds.find(x=>x.id===id))return;attRef={list:'creds',id:id};renderAttach();showModal('overlay-attach');}
 function renderAttach(){
-  const e=entries.find(x=>x.id===attEntryId);if(!e)return;
-  document.getElementById('att_info').innerHTML=
-    `<b>${esc(e.customer)||'—'}</b> — R ${esc(e.rNo)||'—'} &nbsp;·&nbsp; AWB/BL ${esc(e.awbBl)||'—'}`;
+  const e=attRec();if(!e)return;
+  document.getElementById('att_info').innerHTML=attRef.list==='creds'
+    ?`<b>${esc(e.name)||'—'}</b> &nbsp;·&nbsp; ${esc(e.cno)||'no C number'} — customer documents`
+    :`<b>${esc(e.customer)||'—'}</b> — R ${esc(e.rNo)||'—'} &nbsp;·&nbsp; AWB/BL ${esc(e.awbBl)||'—'}`;
   const list=e.attachments||[];
   document.getElementById('att_list').innerHTML=list.length?list.map((a,i)=>
     `<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:6px">
@@ -2427,29 +2431,29 @@ function renderAttach(){
     :'<div style="color:#94a3b8">No documents yet — add the AWB, duty receipt, photos…</div>';
 }
 window.attUpload=async function(files){
-  const e=entries.find(x=>x.id===attEntryId);if(!e||!files||!files.length)return;
+  const e=attRec();if(!e||!files||!files.length)return;
   if(!window.__att){toast('Storage not ready — needs internet and sign-in');return;}
   const st=document.getElementById('att_status');
   for(const f of Array.from(files)){
     if(f.size>25*1024*1024){toast(f.name+' is over 25 MB — skipped');continue;}
     st.textContent='Uploading '+f.name+'…';
     try{
-      const path='entries/'+e.id+'/'+Date.now()+'_'+f.name.replace(/[^\w.\- ]+/g,'_');
+      const path=attRef.list+'/'+e.id+'/'+Date.now()+'_'+f.name.replace(/[^\w.\- ]+/g,'_');
       const url=await window.__att.upload(path,f);
       (e.attachments=e.attachments||[]).push({name:f.name,path:path,url:url,size:f.size,ts:isoLocal(new Date())});
     }catch(err){toast('Upload failed: '+(err.code||err.message||err));}
   }
   st.textContent='';
   document.getElementById('att_file').value='';
-  saveEntries();renderAttach();renderEntries();
+  attSave();renderAttach();
 };
 window.attDelete=async function(i){
-  const e=entries.find(x=>x.id===attEntryId);if(!e||!(e.attachments&&e.attachments[i]))return;
+  const e=attRec();if(!e||!(e.attachments&&e.attachments[i]))return;
   const a=e.attachments[i];
   if(!confirm('Delete "'+a.name+'"?\n\nThe file is removed for the whole team.'))return;
   try{if(window.__att)await window.__att.remove(a.path);}catch(err){} // meta wins even if the file is already gone
   e.attachments.splice(i,1);
-  saveEntries();renderAttach();renderEntries();
+  attSave();renderAttach();
 };
 // Payment received (admin-only): dialog → Zapier → QuickBooks Receive Payment against this invoice.
 function openPayRec(entryId){
@@ -2694,6 +2698,7 @@ function renderCreds(){
     <td data-l="Asycuda">${pwCell(r.id,'asycudaPass',r.asycudaPass)}</td>
     <td data-l="Email">${r.email?esc(r.email)+`<button class="copybtn" onclick="copyCred('${r.id}','email')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}</td>
     <td class="actcol"><div class="rowact">
+      <button class="iconbtn" onclick="openAttachCred('${r.id}')" title="Customer documents (ID, licences, forms…)">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
       <button class="iconbtn" onclick="openCredForm('${r.id}')" title="Edit">✏️</button>
       <button class="iconbtn del" onclick="delCred('${r.id}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
@@ -3059,6 +3064,19 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
   seed('WHITE MINA',c=>{c.apProfile={noProc:true,noDhoni:true};});
   localStorage.setItem('lion_profile_seed_v2','1');
   if(n){saveCustomers();toast(n+' customer billing profile'+(n>1?'s':'')+' set from recent invoices');}
+})();
+// Backfill missing C numbers on saved logins (many sheet-imported logins had none): exact,
+// unambiguous name match against the Customers list. Runs each load; already-filled rows untouched.
+(function fillCredCnos(){
+  const byName={};
+  customers.forEach(c=>{const k=(c.name||'').trim().toUpperCase();if(!k||!c.cno)return;byName[k]=(k in byName&&byName[k]!==c.cno)?null:c.cno;}); // null = two customers share the name
+  let n=0;
+  creds.forEach(r=>{
+    if((r.cno||'').trim())return;
+    const m=byName[(r.name||'').trim().toUpperCase()];
+    if(m){r.cno=m;n++;}
+  });
+  if(n){saveCreds();console.log('Backfilled C numbers on '+n+' logins');}
 })();
 buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();updateCounts();
 fitTables();setTimeout(fitTables,300);
