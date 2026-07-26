@@ -713,6 +713,22 @@
   </div>
 </div>
 
+<div class="overlay" id="overlay-attach">
+  <div class="modal" style="max-width:540px">
+    <h2>📎 Documents</h2>
+    <div style="padding:16px 18px">
+      <div id="att_info" style="margin-bottom:10px;font-size:13.5px"></div>
+      <div id="att_list"></div>
+      <div style="margin-top:12px">
+        <input type="file" id="att_file" multiple style="display:none" onchange="attUpload(this.files)">
+        <button type="button" class="primary" onclick="document.getElementById('att_file').click()">＋ Add file</button>
+        <span id="att_status" style="margin-left:10px;color:#0369a1;font-weight:600"></span>
+      </div>
+      <div class="actions"><button type="button" class="ghost" onclick="closeModal('overlay-attach')">Close</button></div>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="overlay-payrec">
   <div class="modal" style="max-width:440px">
     <h2>💰 Payment Received</h2>
@@ -1099,6 +1115,7 @@ function renderEntries(){
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
     <td class="actcol"><div class="rowact">
       ${(r.type==='AP'&&isAdmin())?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
+      <button class="iconbtn" onclick="openAttach('${r.id}')" title="Documents (AWB, receipts, photos…)">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
       <button class="iconbtn" onclick="openEntryForm('${r.id}')" title="Edit">✏️</button>
       <button class="iconbtn del" onclick="delEntry('${r.id}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
@@ -2391,6 +2408,49 @@ function resendInvoice(){
   }catch(err){console.warn('Resend error',err);}
   toast('📧 Resend requested — invoice '+bn+' will be emailed again');
 }
+// Shipment documents (all staff): files live in Firebase Storage (entries/<id>/…), the metadata list
+// syncs on the entry itself so every device sees the same attachments. Deleting an entry leaves the
+// files orphaned in Storage — harmless at this scale.
+let attEntryId=null;
+function openAttach(id){const e=entries.find(x=>x.id===id);if(!e)return;attEntryId=id;renderAttach();showModal('overlay-attach');}
+function renderAttach(){
+  const e=entries.find(x=>x.id===attEntryId);if(!e)return;
+  document.getElementById('att_info').innerHTML=
+    `<b>${esc(e.customer)||'—'}</b> — R ${esc(e.rNo)||'—'} &nbsp;·&nbsp; AWB/BL ${esc(e.awbBl)||'—'}`;
+  const list=e.attachments||[];
+  document.getElementById('att_list').innerHTML=list.length?list.map((a,i)=>
+    `<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:6px">
+      <a href="${esc(a.url)}" target="_blank" rel="noopener" style="flex:1;font-weight:600;word-break:break-all">${esc(a.name)}</a>
+      <span style="color:#94a3b8;font-size:11.5px;white-space:nowrap">${fmtDate(a.ts)}${a.size?' · '+Math.max(1,Math.round(a.size/1024))+' KB':''}</span>
+      <button class="iconbtn del" onclick="attDelete(${i})" title="Delete for the whole team">🗑️</button>
+    </div>`).join('')
+    :'<div style="color:#94a3b8">No documents yet — add the AWB, duty receipt, photos…</div>';
+}
+window.attUpload=async function(files){
+  const e=entries.find(x=>x.id===attEntryId);if(!e||!files||!files.length)return;
+  if(!window.__att){toast('Storage not ready — needs internet and sign-in');return;}
+  const st=document.getElementById('att_status');
+  for(const f of Array.from(files)){
+    if(f.size>25*1024*1024){toast(f.name+' is over 25 MB — skipped');continue;}
+    st.textContent='Uploading '+f.name+'…';
+    try{
+      const path='entries/'+e.id+'/'+Date.now()+'_'+f.name.replace(/[^\w.\- ]+/g,'_');
+      const url=await window.__att.upload(path,f);
+      (e.attachments=e.attachments||[]).push({name:f.name,path:path,url:url,size:f.size,ts:isoLocal(new Date())});
+    }catch(err){toast('Upload failed: '+(err.code||err.message||err));}
+  }
+  st.textContent='';
+  document.getElementById('att_file').value='';
+  saveEntries();renderAttach();renderEntries();
+};
+window.attDelete=async function(i){
+  const e=entries.find(x=>x.id===attEntryId);if(!e||!(e.attachments&&e.attachments[i]))return;
+  const a=e.attachments[i];
+  if(!confirm('Delete "'+a.name+'"?\n\nThe file is removed for the whole team.'))return;
+  try{if(window.__att)await window.__att.remove(a.path);}catch(err){} // meta wins even if the file is already gone
+  e.attachments.splice(i,1);
+  saveEntries();renderAttach();renderEntries();
+};
 // Payment received (admin-only): dialog → Zapier → QuickBooks Receive Payment against this invoice.
 function openPayRec(entryId){
   if(!isAdmin()){toast('Recording payments is admin-only');return;}
@@ -3274,10 +3334,11 @@ async function startSync(){
   chip('☁ Connecting…');
   try{
     const V='10.12.5';
-    const [appM,authM,fsM]=await Promise.all([
+    const [appM,authM,fsM,stM]=await Promise.all([
       import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
       import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
-      import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`)
+      import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
+      import(`https://www.gstatic.com/firebasejs/${V}/firebase-storage.js`)
     ]);
     fx={...authM,...fsM};
     const fbApp=appM.initializeApp(JSON.parse(cfgRaw));
@@ -3287,6 +3348,15 @@ async function startSync(){
     // DB from the server, burning Firestore's daily quota. Multi-tab lets all tabs share one cache.
     try{db=fsM.initializeFirestore(fbApp,{localCache:fsM.persistentLocalCache({tabManager:fsM.persistentMultipleTabManager()})});}
     catch(e){try{db=fsM.initializeFirestore(fbApp,{localCache:fsM.persistentLocalCache()});}catch(e2){db=fsM.getFirestore(fbApp);}}
+    // Shipment documents live in Firebase Storage (attachments 📎). Guarded: if Storage isn't
+    // enabled in the console yet, the rest of the app is unaffected and uploads say "not ready".
+    try{
+      const fst=stM.getStorage(fbApp);
+      window.__att={
+        upload:async(p,f)=>{const r=stM.ref(fst,p);await stM.uploadBytes(r,f);return await stM.getDownloadURL(r);},
+        remove:async(p)=>{await stM.deleteObject(stM.ref(fst,p));}
+      };
+    }catch(e){console.warn('Storage unavailable',e);}
     fx.onAuthStateChanged(auth,user=>{
       if(user){
         document.getElementById('cf_user').textContent=user.email;
