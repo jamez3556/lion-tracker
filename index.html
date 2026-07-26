@@ -190,7 +190,7 @@
     box-shadow:0 8px 24px rgba(0,0,0,.3);transition:.3s;z-index:99;opacity:0}
   .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
 
-  @media(max-width:720px){
+  @media screen and (max-width:720px){ /* screen only — A4 portrait print (~718px) must NOT get the phone card layout */
     .wrap{padding:12px}
     .grid2,.grid3{grid-template-columns:1fr}
     header.app{padding:10px 14px 0}
@@ -234,10 +234,11 @@
     .m-cards .rowact{gap:10px}
   }
   @media print{
-    header.app,.toolbar,.stats,.rowact,.iconbtn,thead th.actcol,td.actcol,.pager,.secnote{display:none!important}
+    header.app,.toolbar,.stats,.rowact,.iconbtn,thead th.actcol,td.actcol,.pager,.secnote,.alertbar,nav.tabs{display:none!important}
     body{background:#fff}.tablewrap{box-shadow:none;border:none}
     table{min-width:0!important;font-size:10px}.status-pill{border:1px solid #999}
     .printtitle{display:block!important}
+    .scroll{overflow:visible!important;max-height:none!important} /* print every row, not just the scrolled window */
   }
   .printtitle{display:none;text-align:center;margin-bottom:10px}
   .printtitle h2{margin:0}.printtitle p{margin:4px 0 0;font-size:12px;color:#555}
