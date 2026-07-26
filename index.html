@@ -2623,7 +2623,31 @@ function renderCusts(){
   }).join('');
   pagerHTML(document.getElementById('u_pager'),uState,rows.length,'custs');
 }
+// documents picked while ADDING a customer wait here and upload right after Save creates the record
+let custPendingFiles=[];
+window.custPickDocs=function(files){
+  custPendingFiles=Array.from(files||[]);
+  const el=document.getElementById('u_docs_names');
+  if(el)el.textContent=custPendingFiles.length?custPendingFiles.map(f=>f.name).join(', '):'';
+};
+async function uploadPendingCustDocs(rec){
+  if(!custPendingFiles.length||!rec)return;
+  const files=custPendingFiles;custPendingFiles=[];
+  if(!window.__att){toast('Documents NOT uploaded — storage not ready. Use 📎 on the customer row.');return;}
+  let ok=0;
+  for(const f of files){
+    if(f.size>25*1024*1024){toast(f.name+' is over 25 MB — skipped');continue;}
+    try{
+      const path='customers/'+rec.id+'/'+Date.now()+'_'+f.name.replace(/[^\w.\- ]+/g,'_');
+      const url=await window.__att.upload(path,f);
+      (rec.attachments=rec.attachments||[]).push({name:f.name,path:path,url:url,size:f.size,ts:isoLocal(new Date())});
+      ok++;
+    }catch(err){toast('Upload failed: '+(err.code||err.message||err));}
+  }
+  if(ok){saveCustomers();renderCusts();renderCreds();toast('📎 '+ok+' document'+(ok>1?'s':'')+' attached to '+(rec.cno||rec.name));}
+}
 function openCustForm(id){
+  custPendingFiles=[];
   const t=document.getElementById('u_modalTitle');
   if(id){
     const r=customers.find(x=>x.id===id);t.textContent='Edit Customer';
@@ -2641,7 +2665,11 @@ function openCustForm(id){
   }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';u_contact.value='';
     u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';
     u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;u_no_proc.checked=false;
-    document.getElementById('u_docs').innerHTML='<span style="font-size:12px;color:#94a3b8">📎 Save the customer first, then attach documents (📎 button on the row).</span>';}
+    document.getElementById('u_docs').innerHTML=
+      `<input type="file" id="u_docs_file" multiple style="display:none" onchange="custPickDocs(this.files)">
+       <button type="button" class="ghost" onclick="document.getElementById('u_docs_file').click()">📎 Add documents</button>
+       <span id="u_docs_names" style="font-size:12px;color:#0369a1;margin-left:8px"></span>
+       <div style="font-size:12px;color:#94a3b8;margin-top:4px">Files upload when you press Save.</div>`;}
   showModal('overlay-cust');setTimeout(()=>u_cno.focus(),50);
 }
 function saveCust(e){
@@ -2661,7 +2689,9 @@ function saveCust(e){
   if(!u_id.value){
     const ex=lookupCustomer(cno);
     if(ex){toast('C number already in list: '+ex.name);return false;}
-    customers.push({id:uid(),cno,name,contact,apRates,apProfile});toast('Customer added');
+    const rec={id:uid(),cno,name,contact,apRates,apProfile};
+    customers.push(rec);toast('Customer added');
+    uploadPendingCustDocs(rec); // documents picked in the Add form upload now (async, non-blocking)
   }else{
     const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;r.apRates=apRates;r.apProfile=apProfile;delete r.apFee;toast('Customer updated');
   }
