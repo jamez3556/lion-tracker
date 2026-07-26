@@ -2351,7 +2351,7 @@ window.__applyQbLines=function(entryId,d){
   names.forEach((n,i)=>{
     if(!n)return;
     const tc=String(taxes[i]||'').toUpperCase();
-    lines.push({item:n.replace(/\s*\((Air|Sea)\)\s*$/i,''),
+    lines.push({item:n.replace(/^.*:/,'').replace(/\s*\((Air|Sea)\)\s*$/i,'').trim(), // "Air Clearance:Form Filling (Air)" → "Form Filling"
       qty:Number(qtys[i])||0,rate:Number(rates[i])||0,
       tax:(tc==='2'||tc.indexOf('TAX')===0)?8:0}); // taxCode 2 / "TAX…" = GST 8%; 3 / "NON…" = exempt
   });
