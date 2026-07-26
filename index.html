@@ -429,7 +429,8 @@
       <input id="pay_search" type="text" placeholder="Search customer, C-No, R-No, AWB/BL…">
     </div>
     <select class="filter" id="pay_billFilter">
-      <option value="">All bills</option><option value="done">✓ Bill Done</option><option value="pending">Bill Pending</option>
+      <!-- default = unbilled only: entering a Bill No moves the shipment off the worklist -->
+      <option value="pending" selected>Bill Pending</option><option value="done">✓ Bill Done</option><option value="">All bills</option>
     </select>
     <select class="filter" id="pay_balFilter">
       <option value="">All balances</option><option value="due">Balance due</option><option value="settled">Settled / paid</option>
