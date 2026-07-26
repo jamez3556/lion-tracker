@@ -822,6 +822,7 @@ service cloud.firestore {
           <input type="checkbox" id="u_no_proc" style="width:auto"> No Processing Charges line for this customer
         </label>
       </div>
+      <div id="u_docs" style="margin-top:12px"></div>
       <div class="actions">
         <button type="button" class="ghost" onclick="closeModal('overlay-cust')">Cancel</button>
         <button type="submit" class="primary">Save</button>
@@ -2634,9 +2635,13 @@ function openCustForm(id){
     u_rate_cl.value=(pf.clearMode==='Box'?ar['Clearance Box']:ar['Clearance KG'])??'';
     u_rate_dh.value=ar['Dhoni Charges']??'';
     u_ff_qty.value=pf.ffQty??'';u_no_dhoni.checked=!!pf.noDhoni;u_no_proc.checked=!!pf.noProc;
+    document.getElementById('u_docs').innerHTML=
+      `<button type="button" class="ghost" onclick="closeModal('overlay-cust');openAttachCust('${r.id}')">📎 Documents${r.attachments&&r.attachments.length?' ('+r.attachments.length+')':''}</button>
+       <span style="font-size:12px;color:#94a3b8;margin-left:8px">ID, licences, forms — shared with the Logins tab</span>`;
   }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';u_contact.value='';
     u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';
-    u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;u_no_proc.checked=false;}
+    u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;u_no_proc.checked=false;
+    document.getElementById('u_docs').innerHTML='<span style="font-size:12px;color:#94a3b8">📎 Save the customer first, then attach documents (📎 button on the row).</span>';}
   showModal('overlay-cust');setTimeout(()=>u_cno.focus(),50);
 }
 function saveCust(e){
