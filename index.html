@@ -2138,7 +2138,8 @@ function invAuditHTML(e){
     const a=act.find(l=>norm(l.item)===norm(x.name));
     if(!a){probs.push('missing “'+x.name+'” (expected '+x.qty+' × '+x.rate+')');return;}
     if(Number(a.qty)!==Number(x.qty))probs.push(x.name+': qty '+a.qty+' — expected '+x.qty);
-    if(!x.est&&Number(a.rate)!==Number(x.rate))probs.push(x.name+': rate '+a.rate+' — expected '+x.rate);
+    // staff round invoice totals by nudging a rate a few laari — only flag rate differences over MVR 1
+    if(!x.est&&Math.abs(Number(a.rate)-Number(x.rate))>1)probs.push(x.name+': rate '+a.rate+' — expected '+x.rate);
   });
   act.forEach(a=>{if(!expAll.find(x=>norm(x.name)===norm(a.item)))probs.push('extra line “'+a.item+'” ('+a.qty+' × '+a.rate+')');});
   const src=e.qbFetchedAt?'This is the REAL invoice (from QuickBooks '+fmtDate(e.qbFetchedAt)+')':'This is the invoice as sent from the app';
