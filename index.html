@@ -1905,8 +1905,14 @@ function renderPayments(){
   document.getElementById('pay_tbody').innerHTML=slice.map(r=>{
     const has=payHasMoney(r);const bal=payBalance(r);
     const balCell=!has?'—':`<span class="${bal>0?'bal-due':'bal-ok'}">${fmtNum(bal)}</span>`;
+    const ent=r.billNo&&r.entryId?entries.find(x=>x.id===r.entryId):null;
+    const paid=ent&&ent.qbBalance!=null
+      ?(Number(ent.qbBalance)<=0
+        ?' <span class="billbadge bill-done" title="Paid in full (from QuickBooks)">💰 PAID</span>'
+        :` <span class="billbadge bill-pending" title="Balance from QuickBooks">Due ${fmtNum(ent.qbBalance)}</span>`)
+      :'';
     const bill=r.billNo
-      ?`<span class="billbadge bill-done" title="Invoice ${esc(r.billNo)}">✓ Bill Done</span>`+
+      ?`<span class="billbadge bill-done" title="Invoice ${esc(r.billNo)}">✓ Bill Done</span>`+paid+
         (isAdmin()&&r.entryId?` <button class="iconbtn" onclick="openPayRec('${jatt(r.entryId)}')" title="Record a payment received against invoice ${esc(r.billNo)} in QuickBooks">💰</button>`:'')
       :'<span class="billbadge bill-pending">Pending</span>';
     // per-row "Send to QuickBooks" button — only once charges exist; shows ✅ once invoiced (re-sendable)
@@ -2125,6 +2131,21 @@ function expectedLines(e){
   L.push({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0,est:!(pay&&pay.duty!=null)});
   return L;
 }
+// Paid status straight from QuickBooks (qbBalance/qbTotal come with every invoice fetch) plus any
+// payments recorded through the tracker's 💰 button.
+function invPaidHTML(e){
+  if(!(e.billNo||'').trim())return '';
+  let s='';
+  if(e.qbBalance!=null){
+    const b=Number(e.qbBalance);
+    s=b<=0
+      ?`<div style="color:#16a34a;font-weight:800;margin-top:4px">💰 PAID IN FULL${e.qbTotal?' — MVR '+invFmt(e.qbTotal):''}</div>`
+      :`<div style="color:#b45309;font-weight:700;margin-top:4px">💰 Balance due MVR ${invFmt(b)}${e.qbTotal?' of '+invFmt(e.qbTotal):''}</div>`;
+  }
+  const rec=(e.qbPayRec||[]).map(p=>'MVR '+invFmt(p.amt)+' ('+p.method+', '+fmtDate(p.date)+')').join(' · ');
+  if(rec)s+=`<div style="color:#0369a1;margin-top:2px">Received via tracker: ${esc(rec)}</div>`;
+  return s;
+}
 // Audit verdict shown in the builder once the REAL QuickBooks lines are known (sent from the app,
 // or pulled with ⬇ Check in QuickBooks): compares them to expectedLines and lists every difference.
 function invAuditHTML(e){
@@ -2187,21 +2208,24 @@ function openInvoiceForm(entryId){
   document.getElementById('inv_updateBtn').style.display=invoiced;
   document.getElementById('inv_fetchBtn').style.display=invoiced;
   document.getElementById('inv_payBtn').style.display=invoiced;
-  // Billed (possibly manually in QuickBooks) but the real lines aren't known yet: pull the invoice
-  // automatically so the builder shows what was ACTUALLY billed, not a regenerated draft.
-  const fetching=!!((e.billNo||'').trim()&&!(e.qbLines&&e.qbLines.length)&&ZAPIER_FETCH_URL);
+  // Billed (possibly manually in QuickBooks) but the real lines aren't known yet — or the invoice is
+  // still unpaid: pull it from QuickBooks so the builder shows the ACTUAL invoice and a fresh balance.
+  // Once fully paid the record is final, so no more re-fetching (saves Zapier tasks).
+  const needLines=!(e.qbLines&&e.qbLines.length);
+  const unpaid=e.qbBalance==null||Number(e.qbBalance)>0;
+  const fetching=!!((e.billNo||'').trim()&&ZAPIER_FETCH_URL&&(needLines||unpaid));
   if(fetching){
     try{fetch(ZAPIER_FETCH_URL,{method:'POST',body:JSON.stringify({
       event:'invoice_fetch',entryId:e.id,billNo:e.billNo.trim()
     })}).catch(()=>{});}catch(err){}
   }
-  const loading=fetching?`<div style="color:#0369a1;font-weight:700;margin-top:4px">⏳ Loading invoice ${esc(e.billNo)} from QuickBooks — the lines below are a draft until it appears (~15 s)…</div>`:'';
+  const loading=(fetching&&needLines)?`<div style="color:#0369a1;font-weight:700;margin-top:4px">⏳ Loading invoice ${esc(e.billNo)} from QuickBooks — the lines below are a draft until it appears (~15 s)…</div>`:'';
   const warn=e.qbInvoiced?`<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ Already sent to QuickBooks${e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):''} — sending again makes a duplicate invoice.</div>`:'';
   const noRates=!(cust&&cust.apRates&&Object.keys(cust.apRates).length)?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard rates — set this customer's own rates in the Customers tab.</div>`:'';
   document.getElementById('inv_info').innerHTML=
     `<div><span class="k">Customer</span><b>${esc(e.customer)||'—'}</b> <span style="color:#94a3b8">(${esc(e.cno)||'—'})</span></div>
      <div><span class="k">R No</span><b>${esc(e.rNo)||'—'}</b> &nbsp; <span class="k">AWB</span><b>${esc(e.awbBl)||'—'}</b> &nbsp; <span class="k">Grs Wt</span><b>${fmtNum(e.grsWt)}</b></div>
-     <div><span class="k">Date</span>${fmtDate(e.date)} &nbsp; <span class="k">Bill No</span><b>${esc(e.billNo)||'—'}</b></div>${noRates}${warn}${loading}${invAuditHTML(e)}`;
+     <div><span class="k">Date</span>${fmtDate(e.date)} &nbsp; <span class="k">Bill No</span><b>${esc(e.billNo)||'—'}</b></div>${noRates}${warn}${loading}${invPaidHTML(e)}${invAuditHTML(e)}`;
   invCalc();
   showModal('overlay-invoice');
 }
@@ -2411,7 +2435,8 @@ window.sendPaymentReceived=function(ev){
     })}).catch(err=>console.warn('PayRec failed',err));
   }catch(err){console.warn('PayRec error',err);}
   (e.qbPayRec=e.qbPayRec||[]).push({amt:amt,date:date,method:method});
-  saveEntries();
+  if(e.qbBalance!=null)e.qbBalance=Math.max(0,invMoney(Number(e.qbBalance)-amt)); // optimistic; next fetch confirms from QuickBooks
+  saveEntries();renderPayments();
   closeModal('overlay-payrec');
   toast('💰 Payment MVR '+invFmt(amt)+' sent to QuickBooks against invoice '+e.billNo);
   return false;
@@ -2449,6 +2474,9 @@ window.__applyQbLines=function(entryId,d){
   });
   if(!lines.length)return true; // entry is ours but the doc carries no lines (bad Zap run) — junk, delete it
   e.qbLines=lines;e.qbFetchedAt=isoLocal(new Date());
+  // paid status straight from the QuickBooks invoice (covers payments booked directly in QB too)
+  if(d.balance!==undefined&&String(d.balance)!=='')e.qbBalance=Number(d.balance);
+  if(d.total!==undefined&&String(d.total)!=='')e.qbTotal=Number(d.total);
   saveEntries();
   const ov=document.getElementById('overlay-invoice');
   if(ov.classList.contains('show')&&document.getElementById('inv_entryId').value===e.id)
