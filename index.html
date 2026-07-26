@@ -705,7 +705,7 @@
     <div class="actions">
       <button type="button" class="ghost" onclick="closeModal('overlay-invoice')">Cancel</button>
       <button type="button" class="ghost" id="inv_payBtn" onclick="openPayRec(document.getElementById('inv_entryId').value)" title="Record a payment received against this invoice in QuickBooks">💰 Payment Received</button>
-      <button type="button" class="ghost" id="inv_fetchBtn" onclick="fetchInvoice()" title="Pull this invoice's REAL lines from QuickBooks and compare them against the expected charges — for auditing manual billing">⬇ Check in QuickBooks</button>
+      <button type="button" class="ghost" id="inv_fetchBtn" onclick="fetchInvoice()" title="Refresh from QuickBooks: the invoice's real lines + paid balance (uses 2 Zapier tasks)">⬇ Check in QuickBooks</button>
       <button type="button" class="ghost" id="inv_updateBtn" onclick="updateInvoice()" title="Correct THIS invoice in QuickBooks (same number) — use after a mistake, only if unpaid">✏️ Update Invoice</button>
       <button type="button" class="ghost" id="inv_resendBtn" onclick="resendInvoice()" title="Email the existing invoice again — does NOT create a new one">📧 Resend Email</button>
       <button type="button" class="primary" onclick="sendInvoice()">Send to QuickBooks →</button>
@@ -2208,12 +2208,11 @@ function openInvoiceForm(entryId){
   document.getElementById('inv_updateBtn').style.display=invoiced;
   document.getElementById('inv_fetchBtn').style.display=invoiced;
   document.getElementById('inv_payBtn').style.display=invoiced;
-  // Billed (possibly manually in QuickBooks) but the real lines aren't known yet — or the invoice is
-  // still unpaid: pull it from QuickBooks so the builder shows the ACTUAL invoice and a fresh balance.
-  // Once fully paid the record is final, so no more re-fetching (saves Zapier tasks).
+  // Billed (possibly manually in QuickBooks) but the real lines aren't known yet: auto-pull ONCE so
+  // the builder shows the ACTUAL invoice. After that, opening costs nothing — the ⬇ Check in
+  // QuickBooks button is the manual refresh for lines + paid balance (2 Zapier tasks per press).
   const needLines=!(e.qbLines&&e.qbLines.length);
-  const unpaid=e.qbBalance==null||Number(e.qbBalance)>0;
-  const fetching=!!((e.billNo||'').trim()&&ZAPIER_FETCH_URL&&(needLines||unpaid));
+  const fetching=!!((e.billNo||'').trim()&&ZAPIER_FETCH_URL&&needLines);
   if(fetching){
     try{fetch(ZAPIER_FETCH_URL,{method:'POST',body:JSON.stringify({
       event:'invoice_fetch',entryId:e.id,billNo:e.billNo.trim()
