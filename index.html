@@ -287,6 +287,7 @@
     <button data-view="containers">🚢 Container Status <span class="cnt" id="cnt-containers"></span></button>
     <button data-view="mp">🛳️ MP Shipments <span class="cnt" id="cnt-mp"></span></button>
     <button data-view="payments">💰 Payment <span class="cnt" id="cnt-payments"></span></button>
+    <button data-view="billing">🧾 Billing <span class="cnt" id="cnt-billing"></span></button>
     <button data-view="customers">👥 Customers <span class="cnt" id="cnt-customers"></span></button>
     <button data-view="creds">🔐 MPL &amp; Custom Logins <span class="cnt" id="cnt-creds"></span></button>
     <button data-view="expenses" id="tab-expenses" style="display:none">💵 Expenses <span class="cnt" id="cnt-expenses"></span></button>
@@ -314,7 +315,6 @@
     <select class="filter" id="e_typeFilter"><option value="">All types</option></select>
     <select class="filter" id="e_monthFilter"><option value="">All months</option></select>
     <button class="primary" onclick="openEntryForm()">＋ Add Entry</button>
-    <button class="ghost" onclick="openDoQueue()" title="DO photos snapped by airport staff (do.html) — bill them from here">📸 DO Queue <span class="cnt" id="cnt-dosnaps"></span></button>
     <button class="blue" onclick="window.open('https://portal.customs.gov.mv/','_blank')">🏛 customs.gov.mv</button>
     <button class="green" onclick="window.open('https://maclprdcosys.com:7002/COSYSAGENTWEB/','_blank')">✈ MACL</button>
     <button class="ghost" onclick="exportEntries()">⬇ Excel</button>
@@ -482,6 +482,67 @@
     </div>
     <div class="empty" id="pay_empty" style="display:none"><div class="big">💰</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No payments to track</div><div style="margin-top:4px">Shipments logged from <b id="pay_startLabel"></b> onward appear here automatically.</div></div>
     <div class="pager" id="pay_pager"></div>
+  </div>
+</section>
+
+<!-- ==================== BILLING VIEW (DO snaps + per-customer billing desks) ==================== -->
+<section class="view" id="view-billing">
+  <div class="stats" id="b_stats"></div>
+  <div class="toolbar">
+    <button id="bt_snaps" class="primary" onclick="setBTab('snaps')">📸 DO Snaps</button>
+    <button id="bt_stelco" class="ghost" onclick="setBTab('stelco')">⚡ STELCO</button>
+    <span style="flex:1"></span>
+    <button class="primary" id="b_snapBtn" onclick="bToggleCapture()" style="background:#e8730f">📸 Snap DO photo</button>
+  </div>
+
+  <div id="b_pane_snaps">
+    <div class="card" id="b_capture" style="display:none;max-width:760px;margin-bottom:14px;padding:16px 18px;border:2px solid #e8730f;border-radius:14px;background:#fff7ed">
+      <div style="font-weight:800;margin-bottom:10px">📸 New DO snap — clearance finished, bill it now</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        <input type="file" id="b_ph_do" accept="image/*" capture="environment" style="display:none" onchange="bPick('do')">
+        <input type="file" id="b_ph_macl" accept="image/*" capture="environment" style="display:none" onchange="bPick('macl')">
+        <input type="file" id="b_ph_dem" accept="image/*" capture="environment" style="display:none" onchange="bPick('dem')">
+        <button type="button" class="ghost" id="b_btn_do" style="border:2px dashed #e8730f;color:#e8730f;font-weight:700" onclick="document.getElementById('b_ph_do').click()">📄 DO / Pick Order photo *</button>
+        <button type="button" class="ghost" id="b_btn_macl" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_macl').click()">🧾 MACL bill photo</button>
+        <button type="button" class="ghost" id="b_btn_dem" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_dem').click()">⏳ Demurrage bill photo</button>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>AWB NO *</label><input id="b_awb" placeholder="e.g. 898-81050141"></div>
+        <div class="field"><label>WEIGHT (KG) *</label><input id="b_kg" type="number" step="any" min="0" inputmode="decimal"></div>
+        <div class="field"><label>CUSTOMER</label><input id="b_cust" placeholder="name on the DO"></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label>MACL BILL Rf (actual)</label><input id="b_macl" type="number" step="any" min="0" inputmode="decimal" placeholder="handling invoice total"></div>
+        <div class="field"><label>DEMURRAGE Rf (actual)</label><input id="b_dem" type="number" step="any" min="0" inputmode="decimal" placeholder="demurrage invoice total"></div>
+        <div class="field"><label>EXTRA CHARGES</label><div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button type="button" class="ghost" onclick="bExAdd('Lorry Charges')">＋ Lorry</button>
+          <button type="button" class="ghost" onclick="bExAdd('Storage Charge')">＋ Storage</button>
+          <button type="button" class="ghost" onclick="bExAdd('')">＋ Other</button>
+        </div></div>
+      </div>
+      <div id="b_exList" style="margin-bottom:8px"></div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button type="button" class="primary" id="b_saveBtn" onclick="bSnapSave()">Save snap ✓ (photos merge into one shipment)</button>
+        <button type="button" class="ghost" onclick="bToggleCapture()">Cancel</button>
+        <span id="b_capStatus" style="color:#0369a1;font-weight:600;font-size:12.5px"></span>
+      </div>
+    </div>
+    <div class="tablewrap" style="padding:14px 16px"><div id="dp_list"></div></div>
+  </div>
+
+  <div id="b_pane_stelco" style="display:none">
+    <div class="tablewrap m-cards">
+      <div class="scroll">
+        <table style="min-width:900px">
+          <thead><tr>
+            <th>DATE</th><th class="num">NO</th><th>R NO</th><th>AWB</th><th class="num">KG</th>
+            <th class="num">MACL</th><th class="num">DEMURRAGE</th><th>BILL NO</th><th>STATUS</th><th class="nosort actcol">BILL</th>
+          </tr></thead>
+          <tbody id="b_st_tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="b_st_empty" style="display:none"><div class="big">⚡</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No STELCO air shipments yet</div></div>
+    </div>
   </div>
 </section>
 
@@ -845,20 +906,6 @@
   </div>
 </div>
 
-<div class="overlay" id="overlay-dosnaps">
-  <div class="modal" style="max-width:760px">
-    <h2>📸 DO Queue — bill straight from the Delivery Order photo</h2>
-    <div style="padding:14px 18px">
-      <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">
-        Airport staff snap the DO on <b>do.html</b> the moment clearance finishes. Match each snap to its Form Log entry and bill it —
-        the photo is attached to the shipment, the weight and MACL amount pre-fill the invoice.
-      </div>
-      <div id="dp_list"></div>
-      <div class="actions"><button type="button" class="ghost" onclick="closeModal('overlay-dosnaps')">Close</button></div>
-    </div>
-  </div>
-</div>
-
 <div class="overlay" id="overlay-payrec">
   <div class="modal" style="max-width:440px">
     <h2>💰 Payment Received</h2>
@@ -1191,7 +1238,7 @@ function wireAutofill(cnoInput,nameInput,hintEl){
 }
 
 /* ============ nav ============ */
-const VIEWTITLES={entries:'Form Log',mp:'MP Shipments',containers:'Container Status',payments:'Payment',customers:'Customer List',creds:'MPL & Custom Logins',expenses:'Daily Expenses'};
+const VIEWTITLES={entries:'Form Log',mp:'MP Shipments',containers:'Container Status',payments:'Payment',billing:'Billing',customers:'Customer List',creds:'MPL & Custom Logins',expenses:'Daily Expenses'};
 document.querySelectorAll('#nav button').forEach(b=>{
   b.addEventListener('click',()=>{
     document.querySelectorAll('#nav button').forEach(x=>x.classList.remove('active'));
@@ -1210,6 +1257,8 @@ function updateCounts(){
   document.getElementById('cnt-customers').textContent=customers.length.toLocaleString();
   document.getElementById('cnt-creds').textContent=creds.length.toLocaleString();
   document.getElementById('cnt-expenses').textContent=expensesData.filter(r=>r.kind==='exp'&&!r.paid).length.toLocaleString();
+  const bp=dosnaps.filter(d=>d.status==='pending').length;
+  document.getElementById('cnt-billing').textContent=bp?bp.toLocaleString():'';
 }
 
 /* ============ FORM LOG ============ */
@@ -3604,13 +3653,30 @@ function dpMatch(dp){
   cand.sort((a,b)=>((a.billNo?1:0)-(b.billNo?1:0))||((b.date||'').localeCompare(a.date||'')));
   return cand[0];
 }
-function openDoQueue(){renderDoQueue();showModal('overlay-dosnaps');}
+let bTab='snaps';
+function openDoQueue(){setBTab('snaps');switchView('billing');}
+function setBTab(t){
+  bTab=t;
+  document.getElementById('bt_snaps').className=t==='snaps'?'primary':'ghost';
+  document.getElementById('bt_stelco').className=t==='stelco'?'primary':'ghost';
+  document.getElementById('b_pane_snaps').style.display=t==='snaps'?'':'none';
+  document.getElementById('b_pane_stelco').style.display=t==='stelco'?'':'none';
+  document.getElementById('b_snapBtn').style.display=t==='snaps'?'':'none';
+  renderDoQueue();
+}
 function renderDoQueue(){
-  const cnt=document.getElementById('cnt-dosnaps');
-  if(cnt)cnt.textContent=(dosnaps.filter(d=>d.status==='pending').length||'').toLocaleString();
+  renderStelcoDesk();
   const box=document.getElementById('dp_list');if(!box)return;
+  const pend=dosnaps.filter(d=>d.status==='pending').length;
+  const m=isoLocal(new Date()).slice(0,7);
+  const billedM=dosnaps.filter(d=>d.status==='billed'&&(d.billedAt||d.date||'').startsWith(m)).length;
+  const stats=document.getElementById('b_stats');
+  if(stats)stats.innerHTML=`
+    <div class="card ${pend?'c-danger':'c-info'}" style="cursor:pointer" onclick="setBTab('snaps')"><div class="n">${pend}</div><div class="l">📸 Waiting to Bill</div></div>
+    <div class="card c-info"><div class="n">${billedM}</div><div class="l">Snaps Billed · ${new Date().toLocaleDateString('en-GB',{month:'short'})}</div></div>
+    <div class="card c-purple" style="cursor:pointer" onclick="setBTab('stelco')"><div class="n">${stelcoPending().length}</div><div class="l">⚡ STELCO to Bill</div></div>`;
   const rows=dosnaps.slice().sort((a,b)=>((a.status==='pending'?0:1)-(b.status==='pending'?0:1))||((b.u||0)-(a.u||0))).slice(0,25);
-  if(!rows.length){box.innerHTML='<div style="color:#94a3b8;padding:14px 0">No DO photos yet — staff snap them on <b>do.html</b> (same login as the tracker).</div>';return;}
+  if(!rows.length){box.innerHTML='<div style="color:#94a3b8;padding:14px 0">No DO photos yet — press <b>📸 Snap DO photo</b> above (or staff use <b>do.html</b> on their phone, same login).</div>';return;}
   box.innerHTML=rows.map(dp=>{
     const ph=(dp.photos&&dp.photos[0])||null;
     const linked=dp.entryId?entries.find(x=>x.id===dp.entryId):null;
@@ -3668,7 +3734,6 @@ function dpBill(id){
   const e=(dp.entryId&&entries.find(x=>x.id===dp.entryId))||dpMatch(dp);
   if(!e){toast('No matching entry — use ＋ Create entry');return;}
   dpLink(dp,e);
-  closeModal('overlay-dosnaps');
   openInvoiceForm(e.id);
   // staff-reported extra charges become extra invoice lines (only on a fresh draft — never duplicate
   // onto an already-sent invoice; rename the line if it should hit a specific QuickBooks item)
@@ -3685,7 +3750,6 @@ function dpBill(id){
 }
 function dpNewEntry(id){
   const dp=dosnaps.find(d=>d.id===id);if(!dp)return;
-  closeModal('overlay-dosnaps');
   openEntryForm(null,'AP');
   document.getElementById('e_awbBl').value=dp.awb||'';
   document.getElementById('e_grsWt').value=dp.kg??'';
@@ -3709,6 +3773,123 @@ function dpDismiss(id){
   const dp=dosnaps.find(d=>d.id===id);if(!dp)return;
   if(!confirm('Delete the DO snap for AWB '+(dp.awb||'—')+'?\n\n(Photos already attached to a shipment stay there.)'))return;
   dosnaps=dosnaps.filter(d=>d.id!==id);saveDosnaps();renderDoQueue();renderEntries();
+}
+// ---- In-app DO snap capture (Billing tab): DO + MACL bill + demurrage bill photos merge into ONE snap ----
+let bExtras=[];
+function bToggleCapture(){
+  const c=document.getElementById('b_capture');
+  const opening=c.style.display==='none';
+  c.style.display=opening?'':'none';
+  if(opening){
+    ['b_ph_do','b_ph_macl','b_ph_dem','b_awb','b_kg','b_cust','b_macl','b_dem'].forEach(id=>{document.getElementById(id).value='';});
+    bExtras=[];bExList();['do','macl','dem'].forEach(bPickLabel);
+    document.getElementById('b_capStatus').textContent='';
+    setTimeout(()=>document.getElementById('b_awb').focus(),50);
+  }
+}
+function bPickLabel(slot){
+  const f=document.getElementById('b_ph_'+slot).files[0];
+  const b=document.getElementById('b_btn_'+slot);
+  const base={do:'📄 DO / Pick Order photo *',macl:'🧾 MACL bill photo',dem:'⏳ Demurrage bill photo'}[slot];
+  b.textContent=f?'✅ '+base.replace(' *',''):base;
+  b.style.background=f?'#f0fdf4':'';
+  b.style.borderColor=f?'#16a34a':(slot==='do'?'#e8730f':'');
+}
+function bPick(slot){bPickLabel(slot);}
+function bExAdd(name){
+  const item=name||prompt('Charge name:','');
+  if(item===null||!String(item).trim())return;
+  const amt=Number(prompt('Amount Rf for "'+item+'":',''));
+  if(!amt||amt<=0){toast('No amount — charge not added');return;}
+  bExtras.push({item:String(item).trim(),amount:amt});bExList();
+}
+function bExList(){
+  document.getElementById('b_exList').innerHTML=bExtras.map((x,i)=>
+    `<span style="display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:4px 10px;margin:0 6px 6px 0;font-size:12.5px;background:#fff"><b>${esc(x.item)}</b> Rf ${x.amount.toLocaleString()} <button class="iconbtn del" onclick="bExtras.splice(${i},1);bExList()" style="padding:0">✕</button></span>`).join('');
+}
+// canvas-compress a photo to max 1600px JPEG (~150-400 KB) before upload
+function bShrink(file){
+  return new Promise((res,rej)=>{
+    const url=URL.createObjectURL(file);
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=1600;let w=img.naturalWidth,h=img.naturalHeight;
+      const sc=Math.min(1,MAX/Math.max(w,h));w=Math.round(w*sc);h=Math.round(h*sc);
+      const c=document.createElement('canvas');c.width=w;c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url);
+      c.toBlob(b=>b?res(b):rej(new Error('compress failed')),'image/jpeg',0.8);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('not an image'));};
+    img.src=url;
+  });
+}
+async function bSnapSave(){
+  const awb=document.getElementById('b_awb').value.trim();
+  const kg=Number(document.getElementById('b_kg').value);
+  const fDo=document.getElementById('b_ph_do').files[0];
+  if(!fDo){toast('Take the DO / Pick Order photo first');return;}
+  if(!awb||!kg){toast('AWB and weight are required');return;}
+  if(!window.__att){toast('Cloud storage not ready — needs internet and sign-in');return;}
+  const btn=document.getElementById('b_saveBtn'),st=document.getElementById('b_capStatus');
+  btn.disabled=true;
+  try{
+    const id='dp'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+    const photos=[];
+    const put=async(file,name,path)=>{
+      const blob=await bShrink(file);
+      const url=await window.__att.upload(path,blob);
+      photos.push({name,path,url,size:blob.size,ts:isoLocal(new Date())});
+    };
+    st.textContent='Uploading DO photo…';
+    await put(fDo,'DO '+awb+'.jpg','dosnaps/'+id+'/do.jpg');
+    const fM=document.getElementById('b_ph_macl').files[0];
+    if(fM){st.textContent='Uploading MACL bill…';await put(fM,'MACL bill '+awb+'.jpg','dosnaps/'+id+'/macl.jpg');}
+    const fD=document.getElementById('b_ph_dem').files[0];
+    if(fD){st.textContent='Uploading demurrage bill…';await put(fD,'Demurrage bill '+awb+'.jpg','dosnaps/'+id+'/demurrage.jpg');}
+    dosnaps.push({id,awb,kg,
+      macl:Number(document.getElementById('b_macl').value)||null,
+      demur:Number(document.getElementById('b_dem').value)||null,
+      customer:document.getElementById('b_cust').value.trim(),
+      extras:bExtras.slice(),photos,
+      by:(window.__userEmail||'').split('@')[0],byEmail:(window.__userEmail||'').toLowerCase(),
+      date:isoLocal(new Date()),time:new Date().toTimeString().slice(0,5),status:'pending',u:Date.now()});
+    saveDosnaps();
+    bToggleCapture();
+    renderDoQueue();renderEntries();updateCounts();
+    toast('✅ Snap saved — all photos merged into one shipment, ready to bill');
+  }catch(e){toast('Upload failed: '+(e.code||e.message||e));st.textContent='';}
+  btn.disabled=false;
+}
+// ---- STELCO billing desk: every STELCO air shipment with its billing state, one tap to bill ----
+function stelcoCno(){const c=customers.find(x=>(x.name||'').toUpperCase().includes('STATE ELECTRIC'));return c?c.cno.toUpperCase():'C2873';}
+function stelcoRows(){const cno=stelcoCno();return entries.filter(e=>(e.cno||'').toUpperCase()===cno&&e.type==='AP');}
+function stelcoPending(){return stelcoRows().filter(e=>!e.billNo);}
+function renderStelcoDesk(){
+  const tb=document.getElementById('b_st_tbody');if(!tb)return;
+  const rows=stelcoRows().sort((a,b)=>(b.date||'').localeCompare(a.date||'')||((b.no||0)-(a.no||0))).slice(0,80);
+  document.getElementById('b_st_empty').style.display=rows.length?'none':'block';
+  tb.innerHTML=rows.map(e=>{
+    const dp=dosnaps.find(d=>d.entryId===e.id);
+    const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
+    const macl=(dp&&dp.macl)||(pay&&pay.macl)||null;
+    const dem=(dp&&dp.demur)||null;
+    const wt=Number(e.grsWt)||0;
+    const below=wt&&wt<=50;
+    return `<tr>
+      <td data-l="Date">${fmtDate(e.date)}</td>
+      <td class="num" data-l="No">${e.no??'—'}</td>
+      <td data-l="R No">${esc(e.rNo)||'—'}</td>
+      <td data-l="AWB">${esc(e.awbBl)||'—'}</td>
+      <td class="num" data-l="KG">${fmtNum(e.grsWt)}${below?' <span style="font-size:10px;color:#0369a1;font-weight:700">≤50 pass-through only</span>':''}</td>
+      <td class="num" data-l="MACL">${macl!=null?fmtNum(macl):'—'}</td>
+      <td class="num" data-l="Demurrage">${dem!=null?fmtNum(dem):'—'}</td>
+      <td data-l="Bill No">${esc(e.billNo)||'—'}</td>
+      <td data-l="Status">${e.billNo?'<span style="color:#16a34a;font-weight:800">✅ Billed</span>':'<span style="color:#dc2626;font-weight:800">⏳ To bill</span>'}</td>
+      <td class="actcol">${isAdmin()?(e.billNo
+        ?`<button class="iconbtn" onclick="openInvoiceForm('${e.id}')" title="Open the invoice">✅</button>`
+        :`<button class="iconbtn" style="background:#e8730f;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="${dp?`dpBill('${dp.id}')`:`openInvoiceForm('${e.id}')`}" title="Create the QuickBooks invoice">🧾 Bill</button>`):''}</td>
+    </tr>`;}).join('');
 }
 
 /* ============ CUSTOMERS ============ */
