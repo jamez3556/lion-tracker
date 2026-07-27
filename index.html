@@ -3922,10 +3922,11 @@ function renumberEntries(){
   if(migrated)saveContainers();
 })();
 // bring active records' stored LAST DATE onto the current rule (10d Fri-excluded / COAU 9d). Cleared ones don't matter.
+// NEVER touch hand-set last dates (lastManual) — the user's date wins until they clear it.
 (()=>{
   let fixed=0;
   containers.forEach(c=>{
-    if(isDone(c)||!c.discharge)return;
+    if(isDone(c)||!c.discharge||c.lastManual)return;
     const want=lastDateFor(c.discharge,c.blNo);
     if(want&&c.lastDate!==want){c.lastDate=want;fixed++;}
   });
