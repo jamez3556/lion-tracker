@@ -732,7 +732,7 @@
       <div id="c_ctnDetails" class="ctndetails"></div>
       <div class="grid3">
         <div class="field"><label>DISCHARGE DATE</label><input id="c_discharge" type="date"></div>
-        <div class="field"><label>LAST DATE (auto: 10d Fri-excl / COAU 9d)</label><input id="c_lastDate" type="date"></div>
+        <div class="field"><label>LAST DATE (auto from discharge — change it and YOUR date wins)</label><input id="c_lastDate" type="date"></div>
         <div class="field"><label>DO APPROVAL DATE</label><input id="c_doDate" type="date"></div>
       </div>
       <div class="grid3">
@@ -1017,6 +1017,8 @@ function ctnInfo(r,cn){const pi=r.portInfo||{};if(pi[cn])return pi[cn];const k=O
 // Per-container deadlines: every discharged, still-in-port container has its own last date (discharge + 10).
 // next = the soonest deadline still pending (drives the countdown); latest = the furthest (the DO must cover it).
 function effLast(r){
+  // hand-set LAST DATE wins over every auto rule, app-wide (warnings, sorting, DO checks)
+  if(r.lastManual&&r.lastDate)return {next:r.lastDate,latest:r.lastDate};
   const infos=contNoList(r).map(cn=>ctnInfo(r,cn));
   const hasInfo=infos.some(i=>i.discharge); // per-container data exists → it is the whole truth
   const dates=infos.filter(i=>i.discharge&&!i.out&&!i.clearance).map(i=>lastDateFor(i.discharge,r.blNo));
@@ -1709,12 +1711,14 @@ function openContForm(id){
     c_id.value=r.id;c_no.value=r.no??'';c_cno.value=r.cno||'';c_rNo.value=r.rNo||'';
     c_name.value=r.name||'';c_blNo.value=r.blNo||'';c_containerNo.value=r.containerNo||'';
     c_discharge.value=r.discharge||'';c_lastDate.value=r.lastDate||'';c_doDate.value=r.doDate||'';
+    c_lastDate.dataset.manual=r.lastManual?'1':'';
     c_clearance.value=r.clearance||'';c_status.value=r.status;c_remark.value=r.remark||'';
     c_ctnsLeft.value=r.ctnsLeft??'';
     c_ctnCount.value=contNoList(r).length||'';
     __edPI=JSON.parse(JSON.stringify(r.portInfo||{}));__edDirty={};
   }else{
     t.textContent='Add Container';f.reset();c_id.value='';
+    c_lastDate.dataset.manual='';
     c_no.value=containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
     c_status.value='Pending DO';
     __edPI={};__edDirty={};
@@ -1725,7 +1729,15 @@ function openContForm(id){
 document.getElementById('c_discharge').addEventListener('change',()=>{
   const v=document.getElementById('c_discharge').value;
   const ld=document.getElementById('c_lastDate');
-  if(v&&!ld.value)ld.value=lastDateFor(v,(document.getElementById('c_blNo')||{}).value||''); // apply the 10-day / COAU rule
+  // discharge picked → refresh the auto last date, unless the user has hand-set one
+  if(v&&ld.dataset.manual!=='1')ld.value=lastDateFor(v,(document.getElementById('c_blNo')||{}).value||'');
+});
+document.getElementById('c_lastDate').addEventListener('change',()=>{
+  const ld=document.getElementById('c_lastDate');
+  const disch=document.getElementById('c_discharge').value;
+  const auto=disch?lastDateFor(disch,(document.getElementById('c_blNo')||{}).value||''):'';
+  if(!ld.value){ld.dataset.manual='';if(auto)ld.value=auto;} // cleared → back to auto
+  else ld.dataset.manual=(ld.value===auto)?'':'1';          // typed something different → manual override
 });
 function saveCont(e){
   e.preventDefault();
@@ -1756,6 +1768,9 @@ function saveCont(e){
     const outN=cns.filter(cn=>ctnInfo(rec,cn).out).length; // "left in port" drops only when a container is taken OUT (📤), not when clearance is noted
     rec.ctnsLeft=cns.length-outN;
   }
+  // LAST DATE differs from the rule's value ⇒ the user hand-set it — that date then wins app-wide (effLast)
+  const autoLast=rec.discharge?lastDateFor(rec.discharge,rec.blNo):'';
+  rec.lastManual=(rec.lastDate&&rec.lastDate!==autoLast)?true:undefined;
   const le=rec.entryId?entries.find(x=>x.id===rec.entryId):null;
   if(le&&le.billNo){
     // invoice present ⇒ Delivered, always (locked; can't be downgraded by hand)
