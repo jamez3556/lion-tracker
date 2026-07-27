@@ -278,7 +278,7 @@ function renderDhoni(){
     <div class="card" style="text-align:center">
       <div class="muted" style="margin-bottom:8px;font-weight:700">TODAY — ${MAIN_ROUTE}</div>
       <div class="cnt">
-        <button onclick="trip('${MAIN_ROUTE}',-1)">−</button>
+        ${isAdm()?`<button onclick="trip('${MAIN_ROUTE}',-1)">−</button>`:''}
         <span class="n">${routes[MAIN_ROUTE]||0}</span>
         <button class="plus" onclick="trip('${MAIN_ROUTE}',1)">＋</button>
       </div>
@@ -343,6 +343,7 @@ window.delExp=id=>{
   del(id);
 };
 window.trip=(route,delta)=>{
+  if(delta<0&&!isAdm()){toast('Only admin can reduce trips — ask Jaamiz');return;}
   let t=kind('trip').find(x=>x.date===today());
   if(!t){
     if(delta<0)return;
