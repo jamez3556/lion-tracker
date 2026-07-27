@@ -89,9 +89,11 @@
   <div class="tabs">
     <button id="tb_exp" class="on" onclick="setTab('exp')">🧾 Expenses</button>
     <button id="tb_dhoni" onclick="setTab('dhoni')">🛥️ Dhoni</button>
+    <button id="tb_van" onclick="setTab('van')">🚐 Van</button>
   </div>
   <div id="pane_exp"></div>
   <div id="pane_dhoni" style="display:none"></div>
+  <div id="pane_van" style="display:none"></div>
 </main>
 
 <div class="addbar" id="addbar"><div class="inner"><button class="primary" onclick="openAdd()">＋ Add Expense</button></div></div>
@@ -108,6 +110,24 @@
       </div>
       <div class="actions">
         <button type="button" class="ghost" onclick="hide('ov_add')">Cancel</button>
+        <button type="submit" class="primary">Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="overlay" id="ov_van">
+  <div class="modal">
+    <h2>🚐 Add Van Charge</h2>
+    <form onsubmit="return saveVan(event)">
+      <div class="field"><label>VAN COMPANY (account)</label><select id="v_vendor" style="width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px"></select></div>
+      <div class="field"><label>NOTE (which van / shipment)</label><input id="v_note" placeholder="Simer van laari"></div>
+      <div class="grid2">
+        <div class="field"><label>AMOUNT (Rf)</label><input id="v_amount" type="number" min="1" inputmode="numeric" required></div>
+        <div class="field"><label>DATE</label><input id="v_date" type="date" required></div>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="hide('ov_van')">Cancel</button>
         <button type="submit" class="primary">Add</button>
       </div>
     </form>
@@ -160,7 +180,7 @@ async function upload(path,file){
 }
 
 /* ---------- state ---------- */
-const PRESETS=[{label:'Airport mehi',amount:360},{label:'Dhoni mehi',amount:660},{label:'Dhoni kappi',amount:400},{label:'Dhoni oil',amount:''},{label:'Other',amount:''}];
+const PRESETS=[{label:'Airport mehi',amount:360},{label:'Dhoni mehi',amount:660},{label:'Dhoni kappi',amount:400},{label:'Dhoni oil',amount:''},{label:'Labour',amount:''},{label:'Other',amount:''}];
 const MAIN_ROUTE='Airport–Malé';
 let data=[];        // live mirror of the 'expenses' collection
 let tab='exp';
@@ -232,13 +252,65 @@ authM.onAuthStateChanged(auth,user=>{
 /* ---------- render ---------- */
 window.setTab=t=>{tab=t;render();};
 function render(){
-  document.getElementById('tb_exp').classList.toggle('on',tab==='exp');
-  document.getElementById('tb_dhoni').classList.toggle('on',tab==='dhoni');
-  document.getElementById('pane_exp').style.display=tab==='exp'?'':'none';
-  document.getElementById('pane_dhoni').style.display=tab==='dhoni'?'':'none';
+  ['exp','dhoni','van'].forEach(s=>{
+    document.getElementById('tb_'+s).classList.toggle('on',tab===s);
+    document.getElementById('pane_'+s).style.display=tab===s?'':'none';
+  });
   document.getElementById('addbar').style.display=tab==='exp'?'':'none';
-  if(tab==='exp')renderExp();else renderDhoni();
+  if(tab==='exp')renderExp();else if(tab==='dhoni')renderDhoni();else renderVan();
 }
+function renderVan(){
+  const vendors=kind('vendor');
+  const vans=kind('van');
+  const unpaid=vans.filter(v=>!v.paid);
+  const pend=unpaid.reduce((s,v)=>s+v.amount,0);
+  document.getElementById('pane_van').innerHTML=`
+    <div class="bigrow">
+      <div class="stat warn"><div class="n">${rf(pend)}</div><div class="l">Van pending (${unpaid.length})</div></div>
+    </div>
+    <button class="primary" style="margin-bottom:12px" onclick="openVan()">＋ Add Van Charge</button>
+    ${vendors.length===0?'<div class="card" style="text-align:center;color:var(--muted)">No van accounts yet — ask Jaamiz to add them</div>':''}
+    ${vendors.map(vd=>{
+      const list=vans.filter(v=>v.vendor===vd.account);
+      const up=list.filter(v=>!v.paid).sort((a,b)=>a.date<b.date?-1:1);
+      const upT=up.reduce((s,v)=>s+v.amount,0);
+      const paidRecent=list.filter(v=>v.paid).sort((a,b)=>a.date<b.date?1:-1).slice(0,3);
+      return `<div class="card">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <b>${esc(vd.name||'Van account')}</b>
+          <span class="muted">${esc(vd.account)}</span>
+          <span style="margin-left:auto;font-weight:800;color:${upT?'#dc2626':'#16a34a'}">${upT?rf(upT):'✓ settled'}</span>
+        </div>
+        ${up.map(v=>`<div style="display:flex;gap:10px;font-size:13.5px;padding:5px 0;border-bottom:1px solid #f1f5f9">
+          <span>${fmtD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><b>${rf(v.amount)}</b>
+        </div>`).join('')}
+        ${paidRecent.map(v=>`<div style="display:flex;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid #f1f5f9;opacity:.6">
+          <span>${fmtD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><span>${rf(v.amount)}</span><span class="paid">PAID</span>
+        </div>`).join('')}
+      </div>`;}).join('')}`;
+}
+window.openVan=()=>{
+  const vendors=kind('vendor');
+  if(!vendors.length){toast('No van accounts yet — ask Jaamiz to add them');return;}
+  document.getElementById('v_vendor').innerHTML=vendors.map(v=>
+    `<option value="${esc(v.account)}">${esc(v.name||v.account)} — ${esc(v.account)}</option>`).join('');
+  document.getElementById('v_note').value='';
+  document.getElementById('v_amount').value='';
+  document.getElementById('v_date').value=today();
+  show('ov_van');
+};
+window.saveVan=ev=>{
+  ev.preventDefault();
+  const vendor=document.getElementById('v_vendor').value;
+  const note=document.getElementById('v_note').value.trim()||'van laari';
+  const amount=parseInt(document.getElementById('v_amount').value,10);
+  const date=document.getElementById('v_date').value;
+  if(!vendor||!amount||!date)return false;
+  put({id:uid(),kind:'van',date,vendor,note,amount,paid:false,paidAt:null,addedBy:me});
+  hide('ov_van');
+  toast('Added '+note+' · '+rf(amount));
+  return false;
+};
 function renderExp(){
   const exps=kind('exp');
   const unpaid=exps.filter(e=>!e.paid);
