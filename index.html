@@ -314,6 +314,7 @@
     <select class="filter" id="e_typeFilter"><option value="">All types</option></select>
     <select class="filter" id="e_monthFilter"><option value="">All months</option></select>
     <button class="primary" onclick="openEntryForm()">＋ Add Entry</button>
+    <button class="ghost" onclick="openDoQueue()" title="DO photos snapped by airport staff (do.html) — bill them from here">📸 DO Queue <span class="cnt" id="cnt-dosnaps"></span></button>
     <button class="blue" onclick="window.open('https://portal.customs.gov.mv/','_blank')">🏛 customs.gov.mv</button>
     <button class="green" onclick="window.open('https://maclprdcosys.com:7002/COSYSAGENTWEB/','_blank')">✈ MACL</button>
     <button class="ghost" onclick="exportEntries()">⬇ Excel</button>
@@ -843,6 +844,20 @@
   </div>
 </div>
 
+<div class="overlay" id="overlay-dosnaps">
+  <div class="modal" style="max-width:760px">
+    <h2>📸 DO Queue — bill straight from the Delivery Order photo</h2>
+    <div style="padding:14px 18px">
+      <div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">
+        Airport staff snap the DO on <b>do.html</b> the moment clearance finishes. Match each snap to its Form Log entry and bill it —
+        the photo is attached to the shipment, the weight and MACL amount pre-fill the invoice.
+      </div>
+      <div id="dp_list"></div>
+      <div class="actions"><button type="button" class="ghost" onclick="closeModal('overlay-dosnaps')">Close</button></div>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="overlay-payrec">
   <div class="modal" style="max-width:440px">
     <h2>💰 Payment Received</h2>
@@ -1132,6 +1147,7 @@ let payments=store('lion_payments_v1',(typeof SEED_PAYMENTS!=='undefined')?SEED_
 let team=store('lion_team_v1',[]);
 let expensesData=store('lion_expenses_v1',[]); // daily expenses / dhoni fuel (kind: exp|fill|trip) — shared with the standalone expenses page
 let salaryData=store('lion_salary_v1',[]);     // ADMIN-ONLY salary records (kind: staff|salpay) — separate collection, admin-locked rules
+let dosnaps=store('lion_dosnaps_v1',[]);       // DO photos snapped by airport staff (do.html) — the instant-billing queue
 const saveEntries=()=>{localStorage.setItem('lion_clearance_v2',JSON.stringify(entries));window.__cloudPush&&window.__cloudPush('entries');};
 const saveCustomers=()=>{localStorage.setItem('lion_customers_v1',JSON.stringify(customers));window.__cloudPush&&window.__cloudPush('customers');};
 const saveCreds=()=>{localStorage.setItem('lion_creds_v1',JSON.stringify(creds));window.__cloudPush&&window.__cloudPush('creds');};
@@ -1140,6 +1156,7 @@ const savePayments=()=>{localStorage.setItem('lion_payments_v1',JSON.stringify(p
 const saveTeam=()=>{localStorage.setItem('lion_team_v1',JSON.stringify(team));window.__cloudPush&&window.__cloudPush('team');};
 const saveExpensesData=()=>{localStorage.setItem('lion_expenses_v1',JSON.stringify(expensesData));window.__cloudPush&&window.__cloudPush('expenses');};
 const saveSalaryData=()=>{localStorage.setItem('lion_salary_v1',JSON.stringify(salaryData));window.__cloudPush&&window.__cloudPush('salary');};
+const saveDosnaps=()=>{localStorage.setItem('lion_dosnaps_v1',JSON.stringify(dosnaps));window.__cloudPush&&window.__cloudPush('dosnaps');};
 
 function lookupCustomer(cno){
   cno=(cno||'').trim().toUpperCase();
@@ -1225,7 +1242,9 @@ function renderEntries(){
   const dueSoon=activeC.filter(r=>!isNoted(r)&&(()=>{const d=daysLeft(effLast(r).next);return d!==null&&d>=0&&d<=3})()).length;
   const notedToday=activeC.filter(r=>r.clearance===todayIso).length;
   const notedTomorrow=activeC.filter(r=>r.clearance===tomorrowIso).length;
+  const dpPend=dosnaps.filter(d=>d.status==='pending').length;
   document.getElementById('e_stats').innerHTML=`
+    ${dpPend?`<div class="card c-danger" style="cursor:pointer" onclick="openDoQueue()" title="DO photos from the airport waiting to be billed — click to open the queue"><div class="n">${dpPend}</div><div class="l">📸 DO to Bill</div></div>`:''}
     <div class="card c-warn"><div class="n">${pending.toLocaleString()}</div><div class="l">Pending</div></div>
     <div class="card c-danger" style="cursor:pointer" onclick="showInvoicePending()" title="Entries with no BILL NO — click to list them"><div class="n">${invPending.toLocaleString()}</div><div class="l">🧾 Invoice Pending</div></div>
     <div class="card c-danger" style="cursor:pointer" onclick="goToContFilter('soon')" title="Containers due within 3 days — click to view"><div class="n">${dueSoon}</div><div class="l">Due ≤ 3 Days</div></div>
@@ -1302,6 +1321,7 @@ function updateFileHint(){
 }
 document.getElementById('e_file').addEventListener('change',updateFileHint);
 function openEntryForm(id,defaultType){
+  window.__dpAfterSave=null; // a fresh form open cancels any pending DO-snap link (set again by dpNewEntry)
   const t=document.getElementById('e_modalTitle');
   const f=document.querySelector('#overlay-entry form');
   document.getElementById('e_custHint').textContent='';
@@ -1408,6 +1428,15 @@ function saveEntry(e){
     saveContainers();renderConts(); // persist containerNo/logNo edits even when no status transition happened
   }
   buildEntryFilters();renderEntries();renderMP();updateCounts();closeModal('overlay-entry');
+  // entry was created from a DO snap (dpNewEntry): attach the photos/weight/MACL and go straight to billing
+  if(window.__dpAfterSave){
+    const dp=dosnaps.find(d=>d.id===window.__dpAfterSave);window.__dpAfterSave=null;
+    if(dp){
+      dpLink(dp,rec);renderDoQueue();renderEntries();
+      if(isAdmin())setTimeout(()=>dpBill(dp.id),60);
+      else toast('📎 DO photo attached to the new entry');
+    }
+  }
   if(newContId){
     // show the user the container that was just created
     document.getElementById('c_search').value='';
@@ -3283,6 +3312,10 @@ function sendInvoice(){
   e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());
   // remember what was sent, so reopening the builder shows the REAL invoice lines (not the default draft)
   e.qbLines=lines.map(l=>({item:l.item,qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
+  // DO snaps linked to this entry are done — the staff page flips to ✅ BILLED (number follows via qbinv if blank)
+  let dpDone=false;
+  dosnaps.forEach(d=>{if(d.entryId===e.id&&d.status!=='billed'){d.status='billed';if(bn)d.billNo=bn;d.billedAt=isoLocal(new Date());dpDone=true;}});
+  if(dpDone){saveDosnaps();renderDoQueue();}
   saveEntries();renderEntries();renderMP();renderPayments();updateCounts();closeModal('overlay-invoice');
   toast(bn?('Sent to QuickBooks ✓ — invoice '+bn+' will appear shortly')
           :'Sent ✓ — QuickBooks will assign the number and it will appear in BILL NO automatically');
@@ -3524,8 +3557,131 @@ window.__applyQbBill=function(entryId,billNo){
   if(syncPaymentFromEntry(e))savePayments();
   syncContFromEntry(e,before,null);
   saveEntries();renderEntries();renderMP();renderPayments();updateCounts();
+  // pass the QuickBooks-assigned number on to any DO snap linked to this entry (staff page shows it)
+  let dpT=false;dosnaps.forEach(d=>{if(d.entryId===e.id&&!d.billNo){d.billNo=e.billNo;dpT=true;}});
+  if(dpT){saveDosnaps();renderDoQueue();}
   toast('☁ Invoice '+e.billNo+' recorded from QuickBooks → BILL NO');
   return true;
+}
+
+/* ============ DO SNAP QUEUE (do.html → instant billing) ============ */
+// Airport staff photograph the Delivery Order on do.html the moment clearance is done; each snap is a
+// 'dosnaps' doc {awb, kg, macl, customer, extras, photos[Storage urls], by, status}. This queue matches
+// snaps to Form Log entries, attaches the photos to the shipment, pre-fills weight + MACL actual, and
+// hands over to the existing QuickBooks invoice builder. sendInvoice marks the snap billed.
+const dpDigits=s=>String(s||'').replace(/\D+/g,'');
+// AWB match: staff may type only the last digits, so match on exact digits OR one ending with the other
+function dpMatch(dp){
+  const k=dpDigits(dp.awb);
+  if(k.length<4)return null;
+  const cand=entries.filter(e=>{
+    const a=dpDigits(e.awbBl);
+    return a.length>=4&&(a===k||a.endsWith(k)||k.endsWith(a));
+  });
+  if(!cand.length)return null;
+  cand.sort((a,b)=>((a.billNo?1:0)-(b.billNo?1:0))||((b.date||'').localeCompare(a.date||'')));
+  return cand[0];
+}
+function openDoQueue(){renderDoQueue();showModal('overlay-dosnaps');}
+function renderDoQueue(){
+  const cnt=document.getElementById('cnt-dosnaps');
+  if(cnt)cnt.textContent=(dosnaps.filter(d=>d.status==='pending').length||'').toLocaleString();
+  const box=document.getElementById('dp_list');if(!box)return;
+  const rows=dosnaps.slice().sort((a,b)=>((a.status==='pending'?0:1)-(b.status==='pending'?0:1))||((b.u||0)-(a.u||0))).slice(0,25);
+  if(!rows.length){box.innerHTML='<div style="color:#94a3b8;padding:14px 0">No DO photos yet — staff snap them on <b>do.html</b> (same login as the tracker).</div>';return;}
+  box.innerHTML=rows.map(dp=>{
+    const ph=(dp.photos&&dp.photos[0])||null;
+    const linked=dp.entryId?entries.find(x=>x.id===dp.entryId):null;
+    const m=linked||dpMatch(dp);
+    const billed=dp.status==='billed';
+    const extras=(dp.extras||[]).map(x=>esc(x.item)+' Rf '+Number(x.amount).toLocaleString()).join(' · ');
+    const matchTxt=m
+      ?`<span style="color:${m.billNo?'#16a34a':'#0369a1'}">${linked?'📋 Linked':'≈ Matches'} NO ${m.no??'—'} — ${esc(m.customer)||'—'} (${esc(m.cno)||'—'})${m.billNo?' · '+esc(m.billNo):''}</span>`
+      :'<span style="color:#dc2626;font-weight:700">No Form Log entry with this AWB — create it from the photo</span>';
+    const btns=billed?'':
+      (m?(isAdmin()?`<button class="primary" style="padding:7px 14px" onclick="dpBill('${dp.id}')">🧾 Bill now</button>`
+                   :`<button class="ghost" onclick="dpAttach('${dp.id}')">📎 Attach to entry</button>`)
+        :`<button class="blue" style="padding:7px 14px" onclick="dpNewEntry('${dp.id}')">＋ Create entry${isAdmin()?' & bill':''}</button>`)+
+      ` <button class="iconbtn del" title="Delete this snap (photo stays in the shipment if already attached)" onclick="dpDismiss('${dp.id}')">🗑️</button>`;
+    return `<div style="display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;${billed?'opacity:.55':''}">
+      ${ph?`<a href="${esc(ph.url)}" target="_blank" rel="noopener" title="Open the DO photo"><img src="${esc(ph.url)}" alt="DO" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"></a>`:''}
+      <div style="flex:1;min-width:0;font-size:13px">
+        <div style="font-weight:800;font-size:14px">${esc(dp.awb)} · ${Number(dp.kg)||'—'} kg
+          ${billed?`<span style="color:#16a34a;font-size:11.5px;font-weight:800;margin-left:6px">✅ BILLED${dp.billNo?' · '+esc(dp.billNo):''}</span>`:''}</div>
+        <div style="color:var(--muted);margin:2px 0">${esc(dp.customer||'')}${dp.customer?' · ':''}${fmtDate(dp.date)} ${esc(dp.time||'')} · by ${esc(dp.by||'—')}${dp.macl?' · MACL <b>'+Number(dp.macl).toLocaleString()+'</b>':''}${(dp.photos||[]).length>1?' · 📎 '+dp.photos.length+' photos':''}</div>
+        ${extras?`<div style="color:#b45309;font-weight:600">＋ ${extras}</div>`:''}
+        <div style="margin-top:3px">${matchTxt}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;white-space:nowrap">${btns}</div>
+    </div>`;}).join('');
+}
+// Attach the snap to its entry: photos → shipment documents, weight fills a blank GRS WT,
+// MACL actual fills a blank Payment-tab MACL (the invoice's DO Fee then uses the REAL amount).
+function dpLink(dp,e){
+  let ch=false;
+  (dp.photos||[]).forEach(ph=>{
+    if(!(e.attachments||[]).some(a=>a.path===ph.path)){
+      (e.attachments=e.attachments||[]).push({name:ph.name,path:ph.path,url:ph.url,size:ph.size,ts:ph.ts||isoLocal(new Date())});
+      ch=true;
+    }
+  });
+  if(e.grsWt==null&&Number(dp.kg)){e.grsWt=Number(dp.kg);ch=true;}
+  if(ch)saveEntries();
+  if(Number(dp.macl)){
+    const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
+    if(pay&&pay.macl==null){pay.macl=Number(dp.macl);savePayments();renderPayments();}
+  }
+  if(dp.entryId!==e.id){dp.entryId=e.id;saveDosnaps();}
+}
+function dpAttach(id){
+  const dp=dosnaps.find(d=>d.id===id);if(!dp)return;
+  const e=(dp.entryId&&entries.find(x=>x.id===dp.entryId))||dpMatch(dp);
+  if(!e){toast('No matching entry — use ＋ Create entry');return;}
+  dpLink(dp,e);renderDoQueue();renderEntries();
+  toast('📎 Photos attached to NO '+(e.no??'—')+' — '+(e.customer||''));
+}
+function dpBill(id){
+  if(!isAdmin()){toast('Billing is admin-only');return;}
+  const dp=dosnaps.find(d=>d.id===id);if(!dp)return;
+  const e=(dp.entryId&&entries.find(x=>x.id===dp.entryId))||dpMatch(dp);
+  if(!e){toast('No matching entry — use ＋ Create entry');return;}
+  dpLink(dp,e);
+  closeModal('overlay-dosnaps');
+  openInvoiceForm(e.id);
+  // staff-reported extra charges become extra invoice lines (only on a fresh draft — never duplicate
+  // onto an already-sent invoice; rename the line if it should hit a specific QuickBooks item)
+  if(!e.qbInvoiced&&!(e.qbLines&&e.qbLines.length)){
+    // the MACL total read off the DO is the ACTUAL airport charge — it beats the formula estimate
+    if(Number(dp.macl))document.querySelectorAll('#inv_lines .invline').forEach(tr=>{
+      if(tr.querySelector('.invname').value==='Delivery Order Fee')tr.querySelector('.invrate').value=Number(dp.macl);
+    });
+    (dp.extras||[]).forEach(x=>invAddLine({name:x.item,qty:1,rate:x.amount,tax:8}));
+    invCalc();
+  }
+}
+function dpNewEntry(id){
+  const dp=dosnaps.find(d=>d.id===id);if(!dp)return;
+  closeModal('overlay-dosnaps');
+  openEntryForm(null,'AP');
+  document.getElementById('e_awbBl').value=dp.awb||'';
+  document.getElementById('e_grsWt').value=dp.kg??'';
+  if(dp.customer){
+    document.getElementById('e_customer').value=dp.customer;
+    // try to find the C number from the customer list by name
+    const nm=dp.customer.trim().toLowerCase();
+    // staff type the name freely ("CHAPS RESERVED" vs list "CHAPS") — match either direction, 4+ chars only
+    const c=customers.find(x=>(x.name||'').trim().toLowerCase()===nm)
+      ||customers.find(x=>{const n=(x.name||'').trim().toLowerCase();return n.length>=4&&nm.length>=4&&(n.includes(nm)||nm.includes(n));});
+    if(c){document.getElementById('e_cno').value=c.cno;document.getElementById('e_customer').value=c.name;
+      document.getElementById('e_custHint').textContent='✓ Found in customer list';}
+  }
+  window.__dpAfterSave=dp.id; // saveEntry links the snap (and opens the invoice builder for admin)
+  toast('Entry pre-filled from the DO photo — pick the C NO / FILE and save');
+}
+function dpDismiss(id){
+  const dp=dosnaps.find(d=>d.id===id);if(!dp)return;
+  if(!confirm('Delete the DO snap for AWB '+(dp.awb||'—')+'?\n\n(Photos already attached to a shipment stay there.)'))return;
+  dosnaps=dosnaps.filter(d=>d.id!==id);saveDosnaps();renderDoQueue();renderEntries();
 }
 
 /* ============ CUSTOMERS ============ */
@@ -4090,23 +4246,23 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
   });
   if(moved){saveCustomers();saveCreds();console.log('Moved documents from '+moved+' logins to their customers');}
 })();
-buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();updateCounts();
+buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();renderDoQueue();updateCounts();
 fitTables();setTimeout(fitTables,300);
 
 // Bridge for the cloud-sync module (module scripts can't reach these top-level lets directly)
 window.__app={
-  get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,payments:()=>payments,team:()=>team,expenses:()=>expensesData,salary:()=>salaryData},
-  set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},payments:v=>{payments=v},team:v=>{team=v},expenses:v=>{expensesData=v},salary:v=>{salaryData=v}},
-  rerender(){syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();applyAdminUI();renderExpenses();updateCounts();}
+  get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,payments:()=>payments,team:()=>team,expenses:()=>expensesData,salary:()=>salaryData,dosnaps:()=>dosnaps},
+  set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},payments:v=>{payments=v},team:v=>{team=v},expenses:v=>{expensesData=v},salary:v=>{salaryData=v},dosnaps:v=>{dosnaps=v}},
+  rerender(){syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();applyAdminUI();renderExpenses();renderDoQueue();updateCounts();}
 };
 </script>
 
 <script type="module">
 /* ============ Team Cloud Sync (Firebase) ============ */
-const COLS=['entries','customers','creds','containers','payments','team','expenses','salary'];
+const COLS=['entries','customers','creds','containers','payments','team','expenses','salary','dosnaps'];
 const KEYMAP={entries:'lion_clearance_v2',customers:'lion_customers_v1',creds:'lion_creds_v1',
   containers:'lion_containers_v1',payments:'lion_payments_v1',team:'lion_team_v1',
-  expenses:'lion_expenses_v1',salary:'lion_salary_v1'};
+  expenses:'lion_expenses_v1',salary:'lion_salary_v1',dosnaps:'lion_dosnaps_v1'};
 // deep stable serializer: sorts keys at EVERY level (a replacer array would silently drop
 // nested keys like portInfo's container numbers — that bug made per-container edits invisible to sync)
 const stable=o=>{
