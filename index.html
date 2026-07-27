@@ -1583,12 +1583,13 @@ function containerNoCell(r){
       // clearance noted = customs done, but the container is still physically in port until it's taken OUT (📤)
       badge=` <span class="daysbadge d-ok" title="Clearance noted ${fmtDate(info.clearance)} — still in port until taken out">noted ${fmtDate(info.clearance)} ✓</span>`+outBtn;
     }else if(info.discharge){
-      const ld=lastDateFor(info.discharge,r.blNo);
+      // hand-set record LAST DATE overrides the per-container rule date everywhere
+      const ld=(r.lastManual&&r.lastDate)?r.lastDate:lastDateFor(info.discharge,r.blNo);
       const dl=daysLeft(ld);
       const noted=isNoted(r);
       const cls=noted?'d-ok':(dl<=3?'d-danger':dl<=7?'d-warn':'d-ok');
       const txt=noted?'✓':(dl<0?Math.abs(dl)+'d over':dl+'d left');
-      badge=` <span class="daysbadge ${cls}" title="Discharged ${fmtDate(info.discharge)} — its last date is ${fmtDate(ld)}">${fmtDate(ld)} · ${txt}</span>`+outBtn;
+      badge=` <span class="daysbadge ${cls}" title="Discharged ${fmtDate(info.discharge)} — last date ${fmtDate(ld)}${r.lastManual?' (set by hand)':''}">${fmtDate(ld)} · ${txt}</span>`+outBtn;
     }else if(info.arrival){
       badge=` <span class="daysbadge d-warn" title="Arrived ${fmtDate(info.arrival)} — not discharged">arrived</span>`;
     }
@@ -1663,17 +1664,20 @@ function renderCtnDetails(){
   // multiple containers under one BL: pick a container, enter its details — all stays under this one record
   if(!list.some(cn=>cn.toUpperCase()===(__edSel||'').toUpperCase()))__edSel=list[0];
   const selIdx=list.findIndex(cn=>cn.toUpperCase()===__edSel.toUpperCase());
+  // a hand-set LAST DATE in the field below overrides the rule for every container shown here
+  const ldEl=document.getElementById('c_lastDate');
+  const manLd=(ldEl&&ldEl.dataset.manual==='1'&&ldEl.value)?ldEl.value:'';
   const chips=list.map((cn,idx)=>{
     const i=__edPI[ctnKey(cn)]||{};
     const [bg,fg]=ctnColor(idx);
     const sel=idx===selIdx;
-    const state=i.clearance?' ✓':(i.discharge?' · '+fmtDate(lastDateFor(i.discharge,bl)):'');
+    const state=i.clearance?' ✓':(i.discharge?' · '+fmtDate(manLd||lastDateFor(i.discharge,bl)):'');
     return `<span class="daysbadge" style="cursor:pointer;margin:0 5px 5px 0;background:${bg};color:${fg};${sel?'outline:2px solid var(--brand);':''}" onclick="selCtn('${jatt(cn)}')">${esc(cn)}${i.size?' · '+esc(i.size):''}${state}</span>`;
   }).join('');
   const cn=__edSel,i=__edPI[ctnKey(cn)]||{};
   const [bg,fg]=ctnColor(selIdx<0?0:selIdx);
-  const ld=i.discharge?lastDateFor(i.discharge,bl):'';
-  const ldNote=/^COAU/i.test((bl||'').trim())?'(COAU: 9 days incl. Fri)':'(10 days, Fri excl.)';
+  const ld=i.discharge?(manLd||lastDateFor(i.discharge,bl)):'';
+  const ldNote=manLd?'(set by hand)':(/^COAU/i.test((bl||'').trim())?'(COAU: 9 days incl. Fri)':'(10 days, Fri excl.)');
   wrap.innerHTML=`<div style="font-size:11.5px;color:var(--muted);margin:2px 0 6px"><strong>Click a container</strong>, then enter its details — each keeps its own colour:</div>
   <div>${chips}</div>
   <div class="cdrow" style="border-left:4px solid ${fg}"><div class="cdhead"><span style="background:${bg};color:${fg};padding:1px 8px;border-radius:6px">${esc(cn)}</span><span style="font-weight:600;font-size:11px;color:${i.clearance?'var(--ok)':'var(--muted)'}">${i.clearance?'cleared ✓':(ld?'last date '+fmtDate(ld)+' '+ldNote:'no discharge yet')}</span></div><div class="cdgrid">
@@ -1740,6 +1744,7 @@ document.getElementById('c_lastDate').addEventListener('change',()=>{
   const auto=disch?lastDateFor(disch,(document.getElementById('c_blNo')||{}).value||''):'';
   if(!ld.value){ld.dataset.manual='';if(auto)ld.value=auto;} // cleared → back to auto
   else ld.dataset.manual=(ld.value===auto)?'':'1';          // typed something different → manual override
+  renderCtnDetails(); // container chips + panel show the hand-set date immediately
 });
 function saveCont(e){
   e.preventDefault();
