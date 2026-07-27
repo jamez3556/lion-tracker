@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="robots" content="noindex">
+<title>LION DO Snap</title>
+<style>
+  :root{--brand:#e8730f;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+  header{background:#0f172a;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+  header h1{font-size:16px;font-weight:800}
+  header .who{margin-left:auto;font-size:11.5px;color:#94a3b8;text-align:right}
+  header .who a{color:#fbbf24;text-decoration:none;font-weight:600}
+  main{max-width:560px;margin:0 auto;padding:14px 12px 100px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .bigrow{display:flex;gap:10px;margin-bottom:12px}
+  .stat{flex:1;background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;text-align:center}
+  .stat .n{font-size:19px;font-weight:800}
+  .stat .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+  .stat.warn .n{color:#dc2626}
+  .stat.ok .n{color:#16a34a}
+  button.primary{background:var(--brand);color:#fff;border:none;border-radius:12px;padding:13px 18px;font-size:15px;font-weight:700;cursor:pointer;width:100%}
+  button.primary:disabled{opacity:.55}
+  button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;cursor:pointer}
+  .field{margin-bottom:11px}
+  .field label{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+  .field input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:8px}
+  .chips button{border:1px solid var(--line);background:#f8fafc;border-radius:999px;padding:8px 13px;font-size:13px;cursor:pointer}
+  .snapbtn{border:2px dashed var(--brand);background:#fff7ed;border-radius:14px;padding:18px;width:100%;font-size:16px;font-weight:800;color:var(--brand);cursor:pointer;text-align:center}
+  .snapbtn.got{border-style:solid;background:#f0fdf4;border-color:#16a34a;color:#166534}
+  .thumb{width:54px;height:54px;object-fit:cover;border-radius:9px;border:1px solid var(--line)}
+  .item{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:6px;font-size:13.5px}
+  .item .mid{flex:1;min-width:0}
+  .item .awb{font-weight:800}
+  .item .sub{color:var(--muted);font-size:11.5px;margin-top:1px}
+  .st{font-size:10.5px;font-weight:800;border-radius:999px;padding:3px 9px;white-space:nowrap}
+  .st.p{color:#b45309;border:1px solid #f59e0b}
+  .st.b{color:#16a34a;border:1px solid #16a34a}
+  .st.t{color:#0369a1;border:1px solid #0369a1}
+  .del{background:none;border:none;font-size:15px;cursor:pointer;opacity:.6}
+  .exrow{display:flex;gap:8px;align-items:center;font-size:13.5px;background:#f8fafc;border:1px solid var(--line);border-radius:9px;padding:7px 10px;margin-bottom:6px}
+  .exrow b{flex:1}
+  #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(90px);background:#0f172a;color:#fff;padding:10px 18px;border-radius:999px;font-size:13.5px;transition:.25s;z-index:30;max-width:92vw;text-align:center}
+  #toast.show{transform:translateX(-50%) translateY(0)}
+  #gate{position:fixed;inset:0;background:#0f172a;display:flex;align-items:center;justify-content:center;z-index:10;padding:20px}
+  #gate .box{background:#fff;border-radius:18px;padding:26px 22px;width:100%;max-width:360px}
+  #gate h1{font-size:19px;margin-bottom:4px}
+  #gate p{font-size:13px;color:var(--muted);margin-bottom:16px}
+  #gate .err{color:#dc2626;font-size:12.5px;min-height:16px;margin-top:8px}
+  .muted{color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="box">
+    <h1>📸 LION DO Snap</h1>
+    <p>Sign in with your LION Tracker login</p>
+    <form onsubmit="return doSignIn(event)">
+      <div class="field"><label>EMAIL</label><input id="g_email" type="email" required autocomplete="username"></div>
+      <div class="field"><label>PASSWORD</label><input id="g_pass" type="password" required autocomplete="current-password"></div>
+      <button class="primary" id="g_btn" type="submit">Sign in</button>
+      <div class="err" id="g_err"></div>
+    </form>
+  </div>
+</div>
+
+<header>
+  <h1>📸 LION DO Snap</h1>
+  <div class="who"><span id="who"></span><br><a href="javascript:void(0)" onclick="doSignOut()">sign out</a></div>
+</header>
+
+<main>
+  <div class="bigrow">
+    <div class="stat warn"><div class="n" id="st_pend">0</div><div class="l">Waiting for bill</div></div>
+    <div class="stat ok"><div class="n" id="st_month">0</div><div class="l">Billed this month</div></div>
+  </div>
+
+  <div class="card">
+    <div class="muted" style="font-weight:700;margin-bottom:10px">CLEARANCE DONE? Snap the Delivery Order — the office bills it straight away.</div>
+    <form onsubmit="return saveSnap(event)">
+      <input type="file" id="f_photo" accept="image/*" capture="environment" style="display:none" onchange="gotPhoto()">
+      <div class="field">
+        <button type="button" class="snapbtn" id="snapBtn" onclick="document.getElementById('f_photo').click()">📸 Take DO photo</button>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>AWB NO</label><input id="f_awb" placeholder="e.g. 926-1234 5675" required></div>
+        <div class="field"><label>WEIGHT (KG)</label><input id="f_kg" type="number" step="any" min="0" inputmode="decimal" required></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>CUSTOMER (optional)</label><input id="f_customer" placeholder="name on the DO"></div>
+        <div class="field"><label>MACL BILL Rf (optional)</label><input id="f_macl" type="number" step="any" min="0" inputmode="decimal" placeholder="airport charge total"></div>
+      </div>
+      <div class="field">
+        <label>EXTRA CHARGES (optional)</label>
+        <div class="chips">
+          <button type="button" onclick="exAdd('Lorry Charges')">＋ Lorry</button>
+          <button type="button" onclick="exAdd('Storage Charge')">＋ Storage</button>
+          <button type="button" onclick="exAdd('Stamp')">＋ Stamp</button>
+          <button type="button" onclick="exAdd('')">＋ Other</button>
+        </div>
+        <div id="exList"></div>
+      </div>
+      <div class="field">
+        <label>MORE PHOTOS — receipts / supporting documents (optional)</label>
+        <input type="file" id="f_more" accept="image/*" multiple>
+      </div>
+      <button class="primary" id="sendBtn" type="submit">Send to office →</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="muted" style="font-weight:700;margin-bottom:8px">RECENT SNAPS</div>
+    <div id="list"><div class="muted">Nothing yet</div></div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script type="module">
+const CFG={apiKey:"AIzaSyAkNK-8qXg6kHTqrpof90BwIM81vh5ER4o",
+  authDomain:"lion-tracker-47830.firebaseapp.com",projectId:"lion-tracker-47830",
+  storageBucket:"lion-tracker-47830.firebasestorage.app",
+  messagingSenderId:"1076678882929",appId:"1:1076678882929:web:bf0a470ec4b5e639b20dd0"};
+const V='10.12.5';
+const [appM,authM,fsM,stM]=await Promise.all([
+  import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
+  import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
+  import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
+  import(`https://www.gstatic.com/firebasejs/${V}/firebase-storage.js`)
+]);
+const app=appM.initializeApp(CFG);
+const auth=authM.getAuth(app);
+const db=fsM.initializeFirestore(app,{localCache:fsM.persistentLocalCache({tabManager:fsM.persistentMultipleTabManager()})});
+const fst=stM.getStorage(app,'gs://lion-tracker-47830.firebasestorage.app');
+
+let data=[];             // live mirror of 'dosnaps'
+let me='',myEmail='';
+let photoFile=null;
+let extras=[];
+const ADMIN='jaamiz25@gmail.com';
+const uid=()=>'dp'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+const iso=d=>{const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());};
+const today=()=>iso(new Date());
+const fmtD=s=>s?s.split('-').reverse().join('-'):'';
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let toastT;const toast=m=>{const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2600);};
+
+/* ---------- image compression: max 1600px JPEG — a DO photo lands ~150-400 KB ---------- */
+function shrink(file){
+  return new Promise((res,rej)=>{
+    const url=URL.createObjectURL(file);
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=1600;
+      let w=img.naturalWidth,h=img.naturalHeight;
+      const sc=Math.min(1,MAX/Math.max(w,h));
+      w=Math.round(w*sc);h=Math.round(h*sc);
+      const c=document.createElement('canvas');c.width=w;c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url);
+      c.toBlob(b=>b?res(b):rej(new Error('compress failed')),'image/jpeg',0.8);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('not an image'));};
+    img.src=url;
+  });
+}
+async function upload(path,blob){
+  const r=stM.ref(fst,path);
+  await stM.uploadBytes(r,blob,{contentType:'image/jpeg'});
+  return await stM.getDownloadURL(r);
+}
+
+/* ---------- auth ---------- */
+window.doSignIn=async ev=>{
+  ev.preventDefault();
+  const b=document.getElementById('g_btn'),err=document.getElementById('g_err');
+  b.disabled=true;b.textContent='Signing in…';err.textContent='';
+  try{await authM.signInWithEmailAndPassword(auth,document.getElementById('g_email').value.trim(),document.getElementById('g_pass').value);}
+  catch(e){err.textContent='Sign-in failed: '+(e.code||e.message).replace('auth/','').replace(/-/g,' ');}
+  b.disabled=false;b.textContent='Sign in';
+  return false;
+};
+window.doSignOut=async()=>{await authM.signOut(auth);location.reload();};
+authM.onAuthStateChanged(auth,user=>{
+  if(user){
+    myEmail=(user.email||'').toLowerCase();
+    me=myEmail.split('@')[0];
+    document.getElementById('who').textContent=user.email;
+    document.getElementById('gate').style.display='none';
+    fsM.onSnapshot(fsM.collection(db,'dosnaps'),s=>{
+      const byId=new Map(data.map(r=>[r.id,r]));
+      s.docChanges().forEach(ch=>{
+        if(ch.type==='removed')byId.delete(ch.doc.id);
+        else byId.set(ch.doc.id,ch.doc.data());
+      });
+      data=[...byId.values()];
+      render();
+    },e=>toast('Sync error: '+(e.code||e.message)));
+  }else{
+    document.getElementById('gate').style.display='flex';
+  }
+});
+
+/* ---------- form ---------- */
+window.gotPhoto=()=>{
+  const f=document.getElementById('f_photo').files[0];
+  photoFile=f||null;
+  const b=document.getElementById('snapBtn');
+  b.textContent=f?'✅ DO photo ready — tap to retake':'📸 Take DO photo';
+  b.classList.toggle('got',!!f);
+};
+window.exAdd=name=>{
+  const item=name||prompt('Charge name:','');
+  if(item===null||!String(item).trim())return;
+  const amt=Number(prompt('Amount Rf for "'+item+'":',''));
+  if(!amt||amt<=0){toast('No amount — charge not added');return;}
+  extras.push({item:String(item).trim(),amount:amt});
+  renderExtras();
+};
+window.exDel=i=>{extras.splice(i,1);renderExtras();};
+function renderExtras(){
+  document.getElementById('exList').innerHTML=extras.map((x,i)=>
+    `<div class="exrow"><b>${esc(x.item)}</b><span>Rf ${x.amount.toLocaleString()}</span><button type="button" class="del" onclick="exDel(${i})">🗑</button></div>`).join('');
+}
+window.saveSnap=async ev=>{
+  ev.preventDefault();
+  const awb=document.getElementById('f_awb').value.trim();
+  const kg=Number(document.getElementById('f_kg').value);
+  if(!photoFile){toast('Take the DO photo first');return false;}
+  if(!awb||!kg){toast('AWB and weight are required');return false;}
+  const btn=document.getElementById('sendBtn');
+  btn.disabled=true;btn.textContent='Uploading…';
+  try{
+    const id=uid();
+    const photos=[];
+    const main=await shrink(photoFile);
+    photos.push({name:'DO '+awb+'.jpg',path:'dosnaps/'+id+'/do.jpg',url:await upload('dosnaps/'+id+'/do.jpg',main),size:main.size,ts:today()});
+    const more=Array.from(document.getElementById('f_more').files||[]);
+    for(let i=0;i<more.length;i++){
+      btn.textContent='Uploading '+(i+2)+'/'+(more.length+1)+'…';
+      try{
+        const b=await shrink(more[i]);
+        const p='dosnaps/'+id+'/doc'+(i+1)+'.jpg';
+        photos.push({name:more[i].name||('doc'+(i+1)+'.jpg'),path:p,url:await upload(p,b),size:b.size,ts:today()});
+      }catch(e){toast('Skipped '+(more[i].name||'a file')+' — not an image');}
+    }
+    const macl=Number(document.getElementById('f_macl').value)||null;
+    const rec={id,awb,kg,macl,customer:document.getElementById('f_customer').value.trim(),
+      extras:extras.slice(),photos,by:me,byEmail:myEmail,
+      date:today(),time:new Date().toTimeString().slice(0,5),status:'pending',u:Date.now()};
+    await fsM.setDoc(fsM.doc(db,'dosnaps',id),JSON.parse(JSON.stringify(rec)));
+    photoFile=null;extras=[];renderExtras();
+    document.getElementById('f_photo').value='';document.getElementById('f_more').value='';
+    document.getElementById('f_awb').value='';document.getElementById('f_kg').value='';
+    document.getElementById('f_customer').value='';document.getElementById('f_macl').value='';
+    window.gotPhoto();
+    toast('✅ Sent — the office will bill it now');
+  }catch(e){toast('Upload failed: '+(e.code||e.message||e));}
+  btn.disabled=false;btn.textContent='Send to office →';
+  return false;
+};
+window.delSnap=async id=>{
+  const r=data.find(x=>x.id===id);if(!r)return;
+  if(r.status!=='pending'){toast('Already billed — cannot delete');return;}
+  if(r.byEmail!==myEmail&&myEmail!==ADMIN){toast('Only '+(r.by||'the sender')+' or admin can delete this');return;}
+  if(!confirm('Delete the snap for AWB '+r.awb+'?'))return;
+  try{await fsM.deleteDoc(fsM.doc(db,'dosnaps',id));toast('Deleted');}
+  catch(e){toast('Could not delete — check connection');}
+};
+
+/* ---------- list ---------- */
+function stHTML(r){
+  if(r.status==='billed')return '<span class="st b">✅ BILLED'+(r.billNo?' · '+esc(r.billNo):'')+'</span>';
+  if(r.entryId)return '<span class="st t">📋 IN TRACKER</span>';
+  return '<span class="st p">⏳ PENDING</span>';
+}
+function render(){
+  const pend=data.filter(r=>r.status==='pending');
+  const m=today().slice(0,7);
+  document.getElementById('st_pend').textContent=pend.length;
+  document.getElementById('st_month').textContent=data.filter(r=>r.status==='billed'&&(r.billedAt||r.date||'').startsWith(m)).length;
+  const rows=data.slice().sort((a,b)=>(b.u||0)-(a.u||0)).slice(0,30);
+  document.getElementById('list').innerHTML=rows.length?rows.map(r=>{
+    const ph=(r.photos&&r.photos[0])||null;
+    return `<div class="item">
+      ${ph?`<a href="${esc(ph.url)}" target="_blank" rel="noopener"><img class="thumb" src="${esc(ph.url)}" alt="DO"></a>`:''}
+      <div class="mid">
+        <div class="awb">${esc(r.awb)} · ${r.kg} kg</div>
+        <div class="sub">${esc(r.customer||'')}${r.customer?' · ':''}${fmtD(r.date)} ${esc(r.time||'')} · ${esc(r.by)}${r.macl?' · MACL '+r.macl:''}${(r.extras||[]).length?' · +'+r.extras.map(x=>esc(x.item)).join(', '):''}</div>
+      </div>
+      ${stHTML(r)}
+      ${r.status==='pending'?`<button class="del" onclick="delSnap('${r.id}')">🗑</button>`:''}
+    </div>`;}).join(''):'<div class="muted">Nothing yet</div>';
+}
+render();
+</script>
+</body>
+</html>
