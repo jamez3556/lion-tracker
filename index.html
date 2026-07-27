@@ -993,9 +993,21 @@ function esc(s){return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;
 // for user data inside onclick="fn('…')" handlers: escape for the JS string first, then for the attribute
 function jatt(s){return esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"));}
 function daysLeft(d){
+  // WORKING days until the date — Fridays don't count (Maldives weekend, port/customs closed).
+  // e.g. Mon 27-07 → Sat 01-08 = 4 days (Tue,Wed,Thu skip Fri,Sat), not 5 calendar days.
   if(!d)return null;
   const t=new Date();t.setHours(0,0,0,0);
-  return Math.round((new Date(d+'T00:00:00')-t)/86400000);
+  const target=new Date(d+'T00:00:00');
+  const cal=Math.round((target-t)/86400000);
+  if(cal===0)return 0;
+  if(Math.abs(cal)>3660)return cal; // absurd range → plain calendar diff (bad data guard)
+  const step=cal>0?1:-1;
+  let n=0;const cur=new Date(t);
+  for(let i=0;i<Math.abs(cal);i++){
+    cur.setDate(cur.getDate()+step);
+    if(cur.getDay()!==5)n+=step;
+  }
+  return n;
 }
 function fmtDate(s){
   if(!s)return '—';
