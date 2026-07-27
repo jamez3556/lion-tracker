@@ -248,11 +248,11 @@
     .name{max-width:110px!important}
     /* Container Status printout: C NO (3rd col) is internal — hide; LAST DATE (11th) + CLEARANCE (12th) are what the printout is FOR — emphasise */
     #view-containers th:nth-child(3),#view-containers td:nth-child(3),
-    #view-containers th:nth-child(8),#view-containers td:nth-child(8),   /* CTNS LEFT */
+    #view-containers th:nth-child(12),#view-containers td:nth-child(12),  /* CTNS LEFT (moved) */
     #view-containers th:nth-child(14),#view-containers td:nth-child(14){display:none!important} /* LOG NO */
     #view-containers th:nth-child(11),#view-containers td:nth-child(11),
-    #view-containers th:nth-child(12),#view-containers td:nth-child(12){font-weight:700!important;font-size:11px!important}
-    #view-containers td:nth-child(12){background:#f1f5f9!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    #view-containers th:nth-child(8),#view-containers td:nth-child(8){font-weight:700!important;font-size:11px!important}   /* LAST DATE + CLEARANCE (moved to col 8) */
+    #view-containers td:nth-child(8){background:#f1f5f9!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   }
   .printtitle{display:none;text-align:center;margin-bottom:10px}
   .printtitle h2{margin:0}.printtitle p{margin:4px 0 0;font-size:12px;color:#555}
@@ -402,7 +402,7 @@
       <option value="">All statuses</option><option>Pending DO</option><option>DO Not Approved</option><option>DO Approved</option><option>Cleared</option><option>Delivered</option>
     </select>
     <select class="filter" id="c_dueFilter">
-      <option value="">All deadlines</option><option value="doextend">⚠ Needs DO extension</option><option value="notedtoday">📌 Noted for today</option><option value="notedtomorrow">📌 Noted for tomorrow</option><option value="overdue">Overdue</option><option value="soon">Due ≤ 3 days</option><option value="week">Due ≤ 7 days</option>
+      <option value="">All deadlines</option><option value="doextend">⚠ Needs DO extension</option><option value="noted">✓ Clearance noted (all)</option><option value="notedtoday">📌 Noted for today</option><option value="notedtomorrow">📌 Noted for tomorrow</option><option value="overdue">Overdue</option><option value="soon">Due ≤ 3 days</option><option value="week">Due ≤ 7 days</option>
     </select>
     <button class="primary" onclick="openContForm()">＋ Add Container</button>
     <button class="ghost" onclick="window.open('https://my.port.mv/login','_blank')">🌐 my.port.mv</button>
@@ -421,11 +421,11 @@
           <th data-k="rNo">R NO <span class="arrow">▲▼</span></th>
           <th data-k="blNo">BL NO <span class="arrow">▲▼</span></th>
           <th data-k="containerNo">CONTAINER NO <span class="arrow">▲▼</span></th>
-          <th data-k="ctnsLeft" class="num">CTNS LEFT <span class="arrow">▲▼</span></th>
+          <th data-k="clearance">CLEARANCE <span class="arrow">▲▼</span></th>
           <th data-k="doDate">DO APPROVAL <span class="arrow">▲▼</span></th>
           <th data-k="discharge">DISCHARGE <span class="arrow">▲▼</span></th>
           <th data-k="lastDate">LAST DATE <span class="arrow">▲▼</span></th>
-          <th data-k="clearance">CLEARANCE <span class="arrow">▲▼</span></th>
+          <th data-k="ctnsLeft" class="num">CTNS LEFT <span class="arrow">▲▼</span></th>
           <th data-k="status">STATUS <span class="arrow">▲▼</span></th>
           <th data-k="logNo">LOG NO <span class="arrow">▲▼</span></th>
         </tr></thead>
@@ -1019,7 +1019,10 @@ service cloud.firestore {
 <div class="toast" id="toast"></div>
 
 <script id="seed">
-const SEED_DATA=[];const SEED_CUSTOMERS=[];const SEED_CREDS=[];const SEED_CONTAINERS=[];
+const SEED_DATA=[];
+const SEED_CUSTOMERS=[];
+const SEED_CREDS=[];
+const SEED_CONTAINERS=[];
 </script>
 <script>
 /* ============ shared helpers ============ */
@@ -1678,6 +1681,7 @@ function filteredConts(){
     if(sf&&r.status!==sf)return false;
     if(df){
       if(df==='doextend')return needsDOExtend(r);
+      if(df==='noted')return !isDone(r)&&!!r.clearance; // every container with a clearance date noted
       if(df==='notedtoday')return !isDone(r)&&r.clearance===isoLocal(new Date());
       if(df==='notedtomorrow')return !isDone(r)&&r.clearance===addDays(isoLocal(new Date()),1);
       const d=daysLeft(effLast(r).next);
@@ -1753,11 +1757,11 @@ function renderConts(){
       <td data-l="R No">${esc(r.rNo)||'—'}</td>
       <td data-l="BL No">${esc(r.blNo)||'—'}</td>
       <td data-l="Container">${containerNoCell(r)}</td>
-      <td class="num" data-l="Ctns Left">${ctnsLeftCell(r)}</td>
+      <td data-l="Clearance">${fmtDate(r.clearance)}</td>
       <td data-l="DO Approval">${fmtDate(r.doDate)}${needsDOExtend(r)?' <span class="daysbadge d-danger">⚠ Extend DO</span>':''}</td>
       <td data-l="Discharge">${fmtDate(r.discharge)}</td>
       <td data-l="Last Date">${badge}</td>
-      <td data-l="Clearance">${fmtDate(r.clearance)}</td>
+      <td class="num" data-l="Ctns Left">${ctnsLeftCell(r)}</td>
       <td data-l="Status"><button class="status-pill ${stCls}" onclick="cycleContStatus('${r.id}')">${r.status}</button></td>
       <td data-l="Log No">${r.logNo!=null&&r.logNo!==''?('Log '+esc(r.logNo)):(esc(r.remark)||'—')}</td></tr>`;
   }).join('');
