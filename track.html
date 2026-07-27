@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LION Logistics — Cargo Tracking</title>
+<style>
+  :root{--bg:#0f172a;--card:#1e293b;--line:#334155;--ink:#f1f5f9;--muted:#94a3b8;--gold:#f59e0b;--blue:#3b82f6;--green:#22c55e}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+  .top{background:linear-gradient(135deg,#1e293b,#0f172a);border-bottom:1px solid var(--line);padding:22px 20px;text-align:center}
+  .top h1{font-size:22px;letter-spacing:.5px}
+  .top h1 .lion{color:var(--gold)}
+  .top p{color:var(--muted);font-size:13px;margin-top:4px}
+  .wrap{max-width:820px;margin:0 auto;padding:26px 16px 60px}
+  .searchbox{display:flex;gap:10px;margin-bottom:10px}
+  .searchbox input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:12px;color:var(--ink);
+    padding:14px 18px;font-size:16px;outline:none}
+  .searchbox input:focus{border-color:var(--gold)}
+  .searchbox button{background:var(--gold);color:#111;border:none;border-radius:12px;padding:14px 26px;font-size:16px;
+    font-weight:700;cursor:pointer;white-space:nowrap}
+  .searchbox button:hover{filter:brightness(1.1)}
+  .hint{color:var(--muted);font-size:12.5px;margin-bottom:22px;line-height:1.6}
+  .hint b{color:#cbd5e1}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:16px}
+  .card h3{font-size:17px;margin-bottom:4px}
+  .card .sub{color:var(--muted);font-size:13.5px;margin-bottom:14px;line-height:1.5}
+  .card .sub b{color:#e2e8f0}
+  .btns{display:flex;flex-wrap:wrap;gap:9px}
+  .btn{display:inline-block;border:none;border-radius:10px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer;text-decoration:none}
+  .btn.main{background:var(--blue);color:#fff}
+  .btn.port{background:var(--green);color:#0b1e10}
+  .btn.alt{background:#0f172a;border:1px solid var(--line);color:#cbd5e1}
+  .btn:hover{filter:brightness(1.15)}
+  .minor{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+  .minor .lbl{font-size:12px;color:var(--muted);margin-bottom:8px}
+  .chip{background:#0f172a;border:1px solid var(--line);color:#cbd5e1;border-radius:999px;padding:6px 14px;font-size:12.5px;cursor:pointer}
+  .chip:hover{border-color:var(--gold);color:var(--gold)}
+  .apibox{border:1px dashed var(--line);border-radius:14px;padding:16px 20px;color:var(--muted);font-size:13px;line-height:1.7;margin-top:26px}
+  .apibox b{color:#cbd5e1}
+  .status{margin-top:14px}
+  .mile{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid rgba(51,65,85,.5);font-size:13.5px}
+  .mile .dt{color:var(--muted);min-width:130px}
+  .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);background:var(--gold);color:#111;
+    padding:10px 22px;border-radius:999px;font-weight:700;font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none}
+  .toast.show{opacity:1}
+  @media(max-width:560px){.searchbox{flex-direction:column}.mile .dt{min-width:100px}}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1><span class="lion">LION</span> LOGISTICS — Cargo Tracking</h1>
+  <p>Track any air shipment (AWB), sea container or Bill of Lading</p>
+</div>
+<div class="wrap">
+  <div class="searchbox">
+    <input id="q" type="text" placeholder="AWB 176-12345678 · Container MSKU1234567 · BL COAU1234567890" autofocus>
+    <button onclick="runTrack()">🔎 Track</button>
+  </div>
+  <div class="hint">
+    <b>AWB</b> — airline is detected from the 3-digit prefix &nbsp;·&nbsp;
+    <b>Container</b> — shipping line is detected from the 4-letter owner code &nbsp;·&nbsp;
+    <b>BL</b> — line detected from the BL prefix.
+    Where the carrier supports it the tracker opens with your number pre-filled; otherwise the number is copied — just paste it.
+  </div>
+  <div id="result"></div>
+  <div class="apibox" id="apibox">
+    ⚡ <b>Live in-page status (API)</b> — not connected yet. This page currently jumps to the carrier's own tracker.
+    Once a tracking API account (TrackingMore / ShipsGo) is connected, the status and milestones will appear right here
+    without leaving the page.
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* Set to your API proxy endpoint (e.g. a Supabase edge function) to enable live in-page status. */
+const API_PROXY='';
+
+/* ---------- carrier data ---------- */
+const AWB_AIR={
+ '001':{n:'American Airlines Cargo',u:'https://www.aacargo.com/learn/track.html'},
+ '006':{n:'Delta Cargo',u:'https://www.deltacargo.com/Cargo/'},
+ '014':{n:'Air Canada Cargo',u:'https://www.aircanada.com/cargo/'},
+ '016':{n:'United Cargo',u:'https://www.unitedcargo.com/en/us/track/index.html'},
+ '020':{n:'Lufthansa Cargo',u:'https://www.lufthansa-cargo.com/eservices/etracking'},
+ '023':{n:'FedEx',u:'https://www.fedex.com/fedextrack/?trknbr={num}'},
+ '027':{n:'Alaska Air Cargo',u:'https://www.alaskacargo.com/'},
+ '057':{n:'Air France Cargo',u:'https://www.afklcargo.com/mycargo/shipment/singlesearch/{num}'},
+ '065':{n:'Saudia Cargo',u:'https://saudiacargo.com/'},
+ '071':{n:'Ethiopian Cargo',u:'https://cargo.ethiopianairlines.com/'},
+ '072':{n:'Gulf Air Cargo',u:'https://www.gulfair.com/cargo'},
+ '074':{n:'KLM Cargo',u:'https://www.afklcargo.com/mycargo/shipment/singlesearch/{num}'},
+ '075':{n:'Iberia / IAG Cargo',u:'https://www.iagcargo.com/en/track'},
+ '077':{n:'Egyptair Cargo',u:'https://egyptair-cargo.com/'},
+ '081':{n:'Qantas Freight',u:'https://www.qantas.com/freight/track'},
+ '086':{n:'Air New Zealand Cargo',u:'https://www.airnewzealandcargo.com/'},
+ '098':{n:'Air India Cargo',u:'https://www.airindia.com/in/en/cargo.html'},
+ '105':{n:'Finnair Cargo',u:'https://cargo.finnair.com/en/track'},
+ '117':{n:'SAS Cargo',u:'https://www.sascargo.com/'},
+ '125':{n:'British Airways / IAG Cargo',u:'https://www.iagcargo.com/en/track'},
+ '126':{n:'Garuda Cargo',u:'https://cargo.garuda-indonesia.com/'},
+ '131':{n:'JAL Cargo',u:'https://www.jal.co.jp/en/jalcargo/'},
+ '141':{n:'flydubai Cargo',u:'https://cargo.flydubai.com/'},
+ '157':{n:'Qatar Airways Cargo',u:'https://www.qrcargo.com/s/track-your-shipment'},
+ '160':{n:'Cathay Cargo',u:'https://www.cathaycargo.com/en-us/track-and-trace.html'},
+ '172':{n:'Cargolux',u:'https://www.cargolux.com/'},
+ '176':{n:'Emirates SkyCargo',u:'https://www.skycargo.com/'},
+ '180':{n:'Korean Air Cargo',u:'https://cargo.koreanair.com/'},
+ '205':{n:'ANA Cargo',u:'https://www.anacargo.jp/en/int/'},
+ '214':{n:'PIA Cargo',u:'https://www.piac.com.pk/'},
+ '217':{n:'Thai Cargo',u:'https://www.thaicargo.com/'},
+ '229':{n:'Kuwait Airways Cargo',u:'https://www.kuwaitairways.com/en/cargo'},
+ '232':{n:'MASkargo (Malaysia Airlines)',u:'https://www.maskargo.com/'},
+ '235':{n:'Turkish Cargo',u:'https://www.turkishcargo.com/en/online-services/shipment-tracking'},
+ '250':{n:'Uzbekistan Airways Cargo',u:'https://www.uzairways.com/'},
+ '257':{n:'Austrian Cargo',u:'https://www.austriancargo.com/'},
+ '297':{n:'China Airlines Cargo',u:'https://cargo.china-airlines.com/'},
+ '312':{n:'IndiGo CarGo',u:'https://cargo.goindigo.in/'},
+ '465':{n:'Air Astana Cargo',u:'https://airastana.com/'},
+ '512':{n:'Royal Jordanian Cargo',u:'https://www.rj.com/en/cargo'},
+ '514':{n:'Air Arabia Cargo',u:'https://www.airarabia.com/en/cargo'},
+ '603':{n:'SriLankan Cargo',u:'https://www.srilankancargo.com/'},
+ '607':{n:'Etihad Cargo',u:'https://www.etihadcargo.com/'},
+ '618':{n:'Singapore Airlines Cargo',u:'https://www.siacargo.com/'},
+ '695':{n:'EVA Air Cargo',u:'https://www.evaair.com/en-global/cargo/'},
+ '706':{n:'Kenya Airways Cargo',u:'https://cargo.kenya-airways.com/'},
+ '724':{n:'Swiss WorldCargo',u:'https://www.swissworldcargo.com/'},
+ '738':{n:'Vietnam Airlines Cargo',u:'https://www.vietnamairlines.com/'},
+ '775':{n:'SpiceXpress (SpiceJet)',u:'https://www.spicexpress.com/'},
+ '781':{n:'China Eastern Cargo',u:'https://www.ceair.com/'},
+ '784':{n:'China Southern Cargo',u:'https://cargo.csair.com/'},
+ '910':{n:'Oman Air Cargo',u:'https://www.omanair.com/en/cargo'},
+ '932':{n:'Virgin Atlantic Cargo',u:'https://www.virginatlanticcargo.com/'},
+ '988':{n:'Asiana Cargo',u:'https://www.asianacargo.com/'},
+ '997':{n:'Biman Bangladesh Cargo',u:'https://www.biman-airlines.com/'},
+ '999':{n:'Air China Cargo',u:'https://www.airchinacargo.com/'}
+};
+const SEA_LINES={
+ maersk:{n:'Maersk',u:'https://www.maersk.com/tracking/{num}'},
+ msc:{n:'MSC',u:'https://www.msc.com/en/track-a-shipment?trackingNumber={num}'},
+ cma:{n:'CMA CGM',u:'https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=Container&Reference={num}'},
+ cosco:{n:'COSCO',u:'https://elines.coscoshipping.com/ebusiness/cargotracking?number={num}'},
+ hapag:{n:'Hapag-Lloyd',u:'https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={num}'},
+ one:{n:'ONE',u:'https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam={num}'},
+ evergreen:{n:'Evergreen',u:'https://ct.shipmentlink.com/servlet/TDB1_CargoTracking.do'},
+ oocl:{n:'OOCL',u:'https://www.oocl.com/eng/ourservices/eservices/cargotracking/'},
+ pil:{n:'PIL',u:'https://www.pilship.com/'},
+ wanhai:{n:'Wan Hai',u:'https://www.wanhai.com/'},
+ yangming:{n:'Yang Ming',u:'https://www.yangming.com/e-service/Track_Trace/track_trace_cargo_tracking.aspx'},
+ zim:{n:'ZIM',u:'https://www.zim.com/tools/track-a-shipment'},
+ hmm:{n:'HMM',u:'https://www.hmm21.com/e-service/general/trackNTrace/TrackNTrace.do'},
+ sitc:{n:'SITC',u:'https://api.sitcline.com/sitcline/query/cargoTrack'},
+ rcl:{n:'RCL',u:'https://www.rclgroup.com/'},
+ xpress:{n:'X-Press Feeders',u:'https://www.x-pressfeeders.com/'}
+};
+const BOX_OWNER={MAEU:'maersk',MSKU:'maersk',MRKU:'maersk',MRSU:'maersk',SEAU:'maersk',PONU:'maersk',SUDU:'maersk',
+ MSCU:'msc',MEDU:'msc',MSDU:'msc',CMAU:'cma',CGMU:'cma',APZU:'cma',ANNU:'cma',AMFU:'cma',
+ COSU:'cosco',CBHU:'cosco',CCLU:'cosco',CSNU:'cosco',HLXU:'hapag',HLCU:'hapag',HLBU:'hapag',UACU:'hapag',
+ ONEU:'one',NYKU:'one',MOLU:'one',MOAU:'one',KKFU:'one',KKTU:'one',
+ EGHU:'evergreen',EGSU:'evergreen',EISU:'evergreen',EMCU:'evergreen',IMTU:'evergreen',
+ OOLU:'oocl',OOCU:'oocl',PCIU:'pil',PILU:'pil',WHLU:'wanhai',WHSU:'wanhai',
+ YMLU:'yangming',YMMU:'yangming',ZIMU:'zim',ZCSU:'zim',HDMU:'hmm',SITU:'sitc',RCLU:'rcl',REGU:'rcl'};
+const BL_PFX={COSU:'cosco',COAU:'cosco',MAEU:'maersk',MEDU:'msc',HLCU:'hapag',ONEY:'one',EGLV:'evergreen',
+ CMDU:'cma',OOLU:'oocl',ZIMU:'zim',WHLC:'wanhai',YMLU:'yangming',HDMU:'hmm',SITG:'sitc'};
+
+/* ---------- helpers ---------- */
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+let toastT;
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
+function trGo(u,num){
+  if(u.includes('{num}')){window.open(u.replace('{num}',encodeURIComponent(num)),'_blank');}
+  else{try{navigator.clipboard.writeText(num);toast('Number copied — paste it on the site');}catch(e){}window.open(u,'_blank');}
+}
+function btn(u,num,label,cls){
+  const direct=u.includes('{num}');
+  return `<button class="btn ${cls||'main'}" onclick="trGo('${u}','${num}')">${direct?'↗':'📋'} ${esc(label)}</button>`;
+}
+function chips(num,except){
+  return Object.entries(SEA_LINES).filter(([k])=>k!==except)
+    .map(([k,l])=>`<button class="chip" onclick="trGo('${l.u}','${num}')">${esc(l.n)}</button>`).join(' ');
+}
+function card(icon,title,sub,btns,minor){
+  return `<div class="card"><h3>${icon} ${esc(title)}</h3><div class="sub">${sub}</div><div class="btns">${btns}</div>
+    ${minor?`<div class="minor"><div class="lbl">Not the right carrier? Try another line:</div><div class="btns">${minor}</div></div>`:''}
+    <div class="status" id="apistatus"></div></div>`;
+}
+
+/* ---------- main ---------- */
+function runTrack(){
+  const raw=document.getElementById('q').value.trim().toUpperCase().replace(/\s+/g,'');
+  const out=document.getElementById('result');
+  if(!raw){out.innerHTML='';return;}
+  let m=raw.match(/^(\d{3})-?(\d{8})$/);
+  if(m){
+    const awb=m[1]+'-'+m[2], a=AWB_AIR[m[1]];
+    if(a){out.innerHTML=card('✈️','Air cargo — '+a.n,'AWB <b>'+esc(awb)+'</b> · airline identified from prefix '+m[1],
+      btn(a.u,awb,'Track on '+a.n)+btn('https://www.track-trace.com/aircargo',awb,'track-trace (all airlines)','alt'));}
+    else{out.innerHTML=card('✈️','Air cargo — prefix '+m[1]+' not in the list','AWB <b>'+esc(awb)+'</b> — track-trace auto-detects 242 airlines',
+      btn('https://www.track-trace.com/aircargo',awb,'Track on track-trace'));}
+    apiStatus('air',awb);return;
+  }
+  if(/^[A-Z]{3}[UJZ]\d{7}$/.test(raw)){
+    const line=BOX_OWNER[raw.slice(0,4)], l=line&&SEA_LINES[line];
+    document.getElementById('result').innerHTML=card('🚢','Container '+raw,
+      l?'Owner code <b>'+raw.slice(0,4)+'</b> → <b>'+esc(l.n)+'</b>':'Owner code <b>'+raw.slice(0,4)+'</b> — leased/neutral box, pick the line from the BL',
+      (l?btn(l.u,raw,'Track on '+l.n):'')+btn('https://my.port.mv/',raw,'my.port.mv Container Search','port'),
+      chips(raw,line));
+    apiStatus('container',raw);return;
+  }
+  if(/^[A-Z]{4}[A-Z0-9]{4,}$/.test(raw)){
+    const line=BL_PFX[raw.slice(0,4)], l=line&&SEA_LINES[line];
+    out.innerHTML=card('📄','Bill of Lading '+raw,
+      l?'Prefix <b>'+raw.slice(0,4)+'</b> → <b>'+esc(l.n)+'</b>':'Line not recognised from the prefix — pick it below',
+      l?btn(l.u,raw,'Track on '+l.n):'',
+      chips(raw,line));
+    apiStatus('bl',raw);return;
+  }
+  out.innerHTML=card('❓','Number format not recognised',
+    'Expected AWB <b>123-12345678</b>, container <b>ABCU1234567</b> or a BL number starting with 4 letters',
+    btn('https://www.track-trace.com/aircargo',raw,'Try track-trace (air)','alt')+btn('https://my.port.mv/',raw,'Try my.port.mv (sea)','port'));
+}
+
+/* Live status via API proxy — activates when API_PROXY is configured */
+async function apiStatus(type,num){
+  if(!API_PROXY)return;
+  const box=document.getElementById('apistatus');
+  box.innerHTML='<div class="mile"><span>⏳ Fetching live status…</span></div>';
+  try{
+    const r=await fetch(API_PROXY+'?type='+type+'&num='+encodeURIComponent(num));
+    if(!r.ok)throw new Error(r.status);
+    const d=await r.json();
+    box.innerHTML=(d.milestones||[]).map(ms=>
+      `<div class="mile"><span class="dt">${esc(ms.date||'')}</span><span>${esc(ms.status||'')}${ms.location?' · '+esc(ms.location):''}</span></div>`
+    ).join('')||'<div class="mile"><span>No live events yet for this number.</span></div>';
+  }catch(e){box.innerHTML='<div class="mile"><span>⚠ Live status unavailable ('+esc(e.message)+') — use the carrier buttons above.</span></div>';}
+}
+
+document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')runTrack();});
+/* allow ?num=... in the URL for shareable links */
+const p=new URLSearchParams(location.search).get('num');
+if(p){document.getElementById('q').value=p;runTrack();}
+</script>
+</body>
+</html>
