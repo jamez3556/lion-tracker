@@ -2165,7 +2165,7 @@ function exportPayments(){
 const XP_PRESETS=[{label:'Airport mehi',amount:360},{label:'Dhoni mehi',amount:660},{label:'Dhoni kappi',amount:400},{label:'Dhoni oil',amount:''},{label:'Labour',amount:''},{label:'Other',amount:''}];
 const XP_SALTYPES=[{key:'salary',label:'Salary',field:'salary',yearly:false},{key:'house',label:'House + food',field:'house',yearly:false},{key:'visa',label:'Work visa fee',field:'visa',yearly:false},{key:'insurance',label:'Insurance',field:'insurance',yearly:true}];
 const XP_MAIN_ROUTE='Airport–Malé';
-const xpState={sub:'exp',month:'',sel:[],vsel:[],salMonth:isoLocal(new Date()).slice(0,7)};
+const xpState={sub:'exp',month:'',item:'',sel:[],vsel:[],salMonth:isoLocal(new Date()).slice(0,7)};
 const xpKind=k=>expensesData.filter(r=>r.kind===k);
 const salKind=k=>salaryData.filter(r=>r.kind===k);
 // one-time migration: salary records used to live inside 'expenses' — move them to the locked 'salary' store
@@ -2223,9 +2223,13 @@ function renderXpExp(){
     <div class="card c-info"><div class="n">${rf(mPaid)}</div><div class="l">Paid — ${xpMonthLabel(thisMonth)}</div></div>
     <div class="card c-purple"><div class="n">${rf(allPaid)}</div><div class="l">Paid — all time</div></div>`;
   const months=[...new Set(exps.map(e=>e.date.slice(0,7)))].sort().reverse();
+  const items=[...new Set(exps.map(e=>e.item))].sort();
   const sel=exps.filter(e=>xpState.sel.includes(e.id));
   const selTotal=sel.reduce((s,e)=>s+e.amount,0);
-  const list=xpState.month?exps.filter(e=>e.date.startsWith(xpState.month)):exps;
+  let list=xpState.month?exps.filter(e=>e.date.startsWith(xpState.month)):exps;
+  if(xpState.item)list=list.filter(e=>e.item===xpState.item);
+  const fUnpaid=list.filter(e=>!e.paid);
+  const fUnpaidT=fUnpaid.reduce((s,e)=>s+e.amount,0);
   const byDate={};
   list.forEach(e=>{(byDate[e.date]=byDate[e.date]||[]).push(e)});
   const days=Object.keys(byDate).sort().reverse();
@@ -2235,11 +2239,19 @@ function renderXpExp(){
         <option value="">All months</option>
         ${months.map(m=>`<option value="${m}" ${m===xpState.month?'selected':''}>${xpMonthLabel(m)}</option>`).join('')}
       </select>
+      <select class="filter" onchange="xpItemFilter(this.value)">
+        <option value="">All items</option>
+        ${items.map(i=>`<option value="${esc(i)}" ${i===xpState.item?'selected':''}>${esc(i)}</option>`).join('')}
+      </select>
       <button class="primary" onclick="openXpAdd()">＋ Add Expense</button>
       <button class="ghost" onclick="xpCopyReport()">📋 Copy month report</button>
       <button class="ghost" onclick="xpExcel()">⬇ Excel</button>
       ${exps.some(e=>String(e.id).startsWith('vb-'))?'':'<button class="ghost" onclick="xpImportViber()">⤵ Import Viber list (27-07)</button>'}
     </div>
+    ${xpState.item?`<div style="display:flex;align-items:center;gap:10px;background:#eff6ff;border:1px solid #93c5fd;border-radius:12px;padding:8px 14px;margin-bottom:12px;font-size:13px">
+      <b>${esc(xpState.item)}</b><span>${rf(fUnpaidT)} pending (${fUnpaid.length})</span>
+      ${fUnpaid.length?`<a href="javascript:void(0)" onclick="xpSelFiltered()" style="font-weight:700">select all pending</a>`:''}
+    </div>`:''}
     ${sel.length?`<div style="display:flex;align-items:center;gap:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:12px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap">
       <b>${sel.length} selected — ${rf(selTotal)}</b>
       <button class="primary" onclick="xpMarkPaid()">✓ Mark PAID + receipt</button>
@@ -2267,6 +2279,13 @@ function renderXpExp(){
       </div>`;}).join('')}`;
 }
 function xpMonth(v){xpState.month=v;renderExpenses();}
+function xpItemFilter(v){xpState.item=v;renderExpenses();}
+function xpSelFiltered(){
+  let list=xpState.month?xpKind('exp').filter(e=>e.date.startsWith(xpState.month)):xpKind('exp');
+  if(xpState.item)list=list.filter(e=>e.item===xpState.item);
+  xpState.sel=[...new Set([...xpState.sel,...list.filter(e=>!e.paid).map(e=>e.id)])];
+  renderExpenses();
+}
 function xpToggleSel(id){
   const i=xpState.sel.indexOf(id);
   if(i>=0)xpState.sel.splice(i,1);else xpState.sel.push(id);
