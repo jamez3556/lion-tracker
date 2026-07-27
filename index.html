@@ -1092,7 +1092,8 @@ let creds=store('lion_creds_v1',SEED_CREDS);
 let containers=store('lion_containers_v1',SEED_CONTAINERS);
 let payments=store('lion_payments_v1',(typeof SEED_PAYMENTS!=='undefined')?SEED_PAYMENTS:[]);
 let team=store('lion_team_v1',[]);
-let expensesData=store('lion_expenses_v1',[]); // admin-only: daily expenses / dhoni fuel / salary (kind: exp|fill|trip|staff|salpay)
+let expensesData=store('lion_expenses_v1',[]); // daily expenses / dhoni fuel (kind: exp|fill|trip) — shared with the standalone expenses page
+let salaryData=store('lion_salary_v1',[]);     // ADMIN-ONLY salary records (kind: staff|salpay) — separate collection, admin-locked rules
 const saveEntries=()=>{localStorage.setItem('lion_clearance_v2',JSON.stringify(entries));window.__cloudPush&&window.__cloudPush('entries');};
 const saveCustomers=()=>{localStorage.setItem('lion_customers_v1',JSON.stringify(customers));window.__cloudPush&&window.__cloudPush('customers');};
 const saveCreds=()=>{localStorage.setItem('lion_creds_v1',JSON.stringify(creds));window.__cloudPush&&window.__cloudPush('creds');};
@@ -1100,6 +1101,7 @@ const saveContainers=()=>{localStorage.setItem('lion_containers_v1',JSON.stringi
 const savePayments=()=>{localStorage.setItem('lion_payments_v1',JSON.stringify(payments));window.__cloudPush&&window.__cloudPush('payments');};
 const saveTeam=()=>{localStorage.setItem('lion_team_v1',JSON.stringify(team));window.__cloudPush&&window.__cloudPush('team');};
 const saveExpensesData=()=>{localStorage.setItem('lion_expenses_v1',JSON.stringify(expensesData));window.__cloudPush&&window.__cloudPush('expenses');};
+const saveSalaryData=()=>{localStorage.setItem('lion_salary_v1',JSON.stringify(salaryData));window.__cloudPush&&window.__cloudPush('salary');};
 
 function lookupCustomer(cno){
   cno=(cno||'').trim().toUpperCase();
@@ -2143,6 +2145,17 @@ const XP_SALTYPES=[{key:'salary',label:'Salary',field:'salary',yearly:false},{ke
 const XP_MAIN_ROUTE='Airport–Malé';
 const xpState={sub:'exp',month:'',sel:[],salMonth:isoLocal(new Date()).slice(0,7)};
 const xpKind=k=>expensesData.filter(r=>r.kind===k);
+const salKind=k=>salaryData.filter(r=>r.kind===k);
+// one-time migration: salary records used to live inside 'expenses' — move them to the locked 'salary' store
+(function(){
+  const move=expensesData.filter(r=>r.kind==='staff'||r.kind==='salpay');
+  if(!move.length)return;
+  const have=new Set(salaryData.map(r=>r.id));
+  move.forEach(r=>{if(!have.has(r.id))salaryData.push(r);});
+  expensesData=expensesData.filter(r=>r.kind!=='staff'&&r.kind!=='salpay');
+  localStorage.setItem('lion_expenses_v1',JSON.stringify(expensesData));
+  localStorage.setItem('lion_salary_v1',JSON.stringify(salaryData));
+})();
 const rf=n=>'Rf '+Number(n||0).toLocaleString('en-US');
 const xpD=iso=>iso?iso.split('-').reverse().join('-'):'';
 const XP_MONTHN=['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -2459,10 +2472,10 @@ function xpDelFill(id){
 
 /* ---- salary ---- */
 const xpSalPeriod=t=>t.yearly?xpState.salMonth.slice(0,4):xpState.salMonth;
-const xpFindPay=(staffId,t)=>xpKind('salpay').find(p=>p.staffId===staffId&&p.type===t.key&&p.period===xpSalPeriod(t));
+const xpFindPay=(staffId,t)=>salKind('salpay').find(p=>p.staffId===staffId&&p.type===t.key&&p.period===xpSalPeriod(t));
 function renderXpSalary(){
-  const staff=xpKind('staff').slice().sort((a,b)=>(a.no||0)-(b.no||0));
-  const pays=xpKind('salpay');
+  const staff=salKind('staff').slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const pays=salKind('salpay');
   let due=0,paid=0;
   staff.forEach(s=>{if((s.startMonth||'')<=xpState.salMonth)due+=(s.salary||0)+(s.house||0)+(s.visa||0);});
   pays.forEach(p=>{if(p.period===xpState.salMonth&&p.type!=='insurance')paid+=p.amount;});
@@ -2505,7 +2518,7 @@ function renderXpSalary(){
 }
 function openXpStaff(id){
   if(!xpGuard())return;
-  const s=id?xpKind('staff').find(x=>x.id===id):null;
+  const s=id?salKind('staff').find(x=>x.id===id):null;
   document.getElementById('xps_title').textContent=s?'✎ Edit Staff':'＋ Add Staff';
   document.getElementById('xps_id').value=s?s.id:'';
   document.getElementById('xps_name').value=s?s.name:'';
@@ -2524,50 +2537,50 @@ function saveXpStaff(ev){
   if(!name)return false;
   const num=el=>Math.max(0,parseInt(document.getElementById(el).value,10)||0);
   if(!id){
-    const dup=xpKind('staff').find(s=>s.name.toLowerCase()===name.toLowerCase());
+    const dup=salKind('staff').find(s=>s.name.toLowerCase()===name.toLowerCase());
     if(dup){toast(`"${name}" already exists — edit that staff instead`);return false;}
   }
-  const staff=xpKind('staff');
+  const staff=salKind('staff');
   let s=id?staff.find(x=>x.id===id):null;
   if(!s){
     s={id:uid(),kind:'staff',no:staff.reduce((m,x)=>Math.max(m,x.no||0),0)+1};
-    expensesData.push(s);
+    salaryData.push(s);
   }
   s.name=name;s.salary=num('xps_salary');s.house=num('xps_house');
   s.visa=num('xps_visa');s.insurance=num('xps_insurance');
   s.startMonth=document.getElementById('xps_start').value||isoLocal(new Date()).slice(0,7);
-  saveExpensesData();closeModal('overlay-xpstaff');
+  saveSalaryData();closeModal('overlay-xpstaff');
   renderExpenses();
   toast(name+' saved ✓');
   return false;
 }
 function xpDelStaff(id){
   if(!xpGuard())return;
-  const s=xpKind('staff').find(x=>x.id===id);if(!s)return;
+  const s=salKind('staff').find(x=>x.id===id);if(!s)return;
   if(!confirm(`Remove ${s.name} AND all their payment history?`))return;
-  expensesData=expensesData.filter(x=>x.id!==id&&!(x.kind==='salpay'&&x.staffId===id));
-  saveExpensesData();renderExpenses();
+  salaryData=salaryData.filter(x=>x.id!==id&&!(x.kind==='salpay'&&x.staffId===id));
+  saveSalaryData();renderExpenses();
 }
 function xpSalPay(staffId,typeKey){
   if(!xpGuard())return;
-  const s=xpKind('staff').find(x=>x.id===staffId);
+  const s=salKind('staff').find(x=>x.id===staffId);
   const t=XP_SALTYPES.find(x=>x.key===typeKey);
   if(!s||!t)return;
   const amount=s[t.field]||0;
   if(!amount||xpFindPay(staffId,t))return;
   if(!confirm(`Mark ${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)} for ${s.name} (${rf(amount)}) as PAID?`))return;
-  expensesData.push({id:uid(),kind:'salpay',staffId,type:t.key,period:xpSalPeriod(t),amount,paidAt:new Date().toISOString()});
-  saveExpensesData();renderExpenses();
+  salaryData.push({id:uid(),kind:'salpay',staffId,type:t.key,period:xpSalPeriod(t),amount,paidAt:new Date().toISOString()});
+  saveSalaryData();renderExpenses();
   document.getElementById('xpr_text').value=
     `✅ PAID — ${s.name}\n${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)}: ${rf(amount)}\nPaid ${xpD(isoLocal(new Date()))}\nLion Logistics`;
   showModal('overlay-xprec');
 }
 function xpSalUnpay(payId){
   if(!xpGuard())return;
-  const p=xpKind('salpay').find(x=>x.id===payId);if(!p)return;
+  const p=salKind('salpay').find(x=>x.id===payId);if(!p)return;
   if(!confirm('Undo this salary payment?'))return;
-  expensesData=expensesData.filter(x=>x.id!==payId);
-  saveExpensesData();renderExpenses();
+  salaryData=salaryData.filter(x=>x.id!==payId);
+  saveSalaryData();renderExpenses();
 }
 
 /* ============ QuickBooks invoice (AP) ============ */
@@ -3679,17 +3692,18 @@ fitTables();setTimeout(fitTables,300);
 
 // Bridge for the cloud-sync module (module scripts can't reach these top-level lets directly)
 window.__app={
-  get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,payments:()=>payments,team:()=>team,expenses:()=>expensesData},
-  set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},payments:v=>{payments=v},team:v=>{team=v},expenses:v=>{expensesData=v}},
+  get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,payments:()=>payments,team:()=>team,expenses:()=>expensesData,salary:()=>salaryData},
+  set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},payments:v=>{payments=v},team:v=>{team=v},expenses:v=>{expensesData=v},salary:v=>{salaryData=v}},
   rerender(){syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();applyAdminUI();renderExpenses();updateCounts();}
 };
 </script>
 
 <script type="module">
 /* ============ Team Cloud Sync (Firebase) ============ */
-const COLS=['entries','customers','creds','containers','payments','team','expenses'];
+const COLS=['entries','customers','creds','containers','payments','team','expenses','salary'];
 const KEYMAP={entries:'lion_clearance_v2',customers:'lion_customers_v1',creds:'lion_creds_v1',
-  containers:'lion_containers_v1',payments:'lion_payments_v1',team:'lion_team_v1',expenses:'lion_expenses_v1'};
+  containers:'lion_containers_v1',payments:'lion_payments_v1',team:'lion_team_v1',
+  expenses:'lion_expenses_v1',salary:'lion_salary_v1'};
 // deep stable serializer: sorts keys at EVERY level (a replacer array would silently drop
 // nested keys like portInfo's container numbers — that bug made per-container edits invisible to sync)
 const stable=o=>{
@@ -3883,9 +3897,11 @@ async function startSync(){
     fx.onSnapshot(ref,s=>mergeSnap(col,s),()=>{});
   }
   const failed=[];
-  // 'expenses' (salary data!) syncs ONLY on the admin's login — pairs with a Firestore rule that
-  // limits that collection to the admin email, and keeps staff devices from hitting permission-denied.
-  const myCols=COLS.filter(c=>c!=='expenses'||isAdmin());
+  // 'salary' syncs ONLY on the admin's login — pairs with a Firestore rule that limits that
+  // collection to the admin email, so staff devices never hit permission-denied. 'expenses' is
+  // shared (the standalone expenses page writes it) but staff TRACKER devices skip it too —
+  // the tab is hidden for them, no point spending reads.
+  const myCols=COLS.filter(c=>(c!=='expenses'&&c!=='salary')||isAdmin());
   for(const col of myCols){
     try{await initCol(col);}
     catch(e){failed.push(col);shadow[col]=shadow[col]||new Map();console.warn('cloud init failed for "'+col+'" — other collections keep syncing:',(e&&e.code)||e);}
