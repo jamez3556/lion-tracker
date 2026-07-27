@@ -2228,9 +2228,10 @@ function renderExpenses(){
 
 /* ---- daily expenses ---- */
 function renderXpExp(){
-  const exps=xpKind('exp');
-  // drop selections that got paid/deleted meanwhile
-  xpState.sel=xpState.sel.filter(id=>exps.some(e=>e.id===id&&!e.paid));
+  const all=xpKind('exp');
+  const exps=all.filter(e=>e.item!=='Labour'); // labour lives in its own tab
+  // drop selections that got paid/deleted meanwhile (kept across tabs so labour + daily can pay together)
+  xpState.sel=xpState.sel.filter(id=>all.some(e=>e.id===id&&!e.paid));
   const unpaid=exps.filter(e=>!e.paid);
   const unpaidTotal=unpaid.reduce((s,e)=>s+e.amount,0);
   const thisMonth=isoLocal(new Date()).slice(0,7);
@@ -2242,7 +2243,7 @@ function renderXpExp(){
     <div class="card c-purple"><div class="n">${rf(allPaid)}</div><div class="l">Paid — all time</div></div>`;
   const months=[...new Set(exps.map(e=>e.date.slice(0,7)))].sort().reverse();
   const items=[...new Set(exps.map(e=>e.item))].sort();
-  const sel=exps.filter(e=>xpState.sel.includes(e.id));
+  const sel=all.filter(e=>xpState.sel.includes(e.id)); // selection bar counts labour ticks too → one combined receipt
   const selTotal=sel.reduce((s,e)=>s+e.amount,0);
   let list=xpState.month?exps.filter(e=>e.date.startsWith(xpState.month)):exps;
   if(xpState.item)list=list.filter(e=>e.item===xpState.item);
@@ -2271,7 +2272,7 @@ function renderXpExp(){
       ${fUnpaid.length?`<a href="javascript:void(0)" onclick="xpSelFiltered()" style="font-weight:700">select all pending</a>`:''}
     </div>`:''}
     ${sel.length?`<div style="display:flex;align-items:center;gap:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:12px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap">
-      <b>${sel.length} selected — ${rf(selTotal)}</b>
+      <b>${sel.length} selected — ${rf(selTotal)}${sel.some(e=>e.item==='Labour')?' (incl. Labour)':''}</b>
       <button class="primary" onclick="xpMarkPaid()">✓ Mark PAID + receipt</button>
       <button class="ghost" onclick="xpState.sel=[];renderExpenses()">Clear</button>
     </div>`:''}
@@ -2299,7 +2300,8 @@ function renderXpExp(){
 function xpMonth(v){xpState.month=v;renderExpenses();}
 function xpItemFilter(v){xpState.item=v;renderExpenses();}
 function xpSelFiltered(){
-  let list=xpState.month?xpKind('exp').filter(e=>e.date.startsWith(xpState.month)):xpKind('exp');
+  const base=xpKind('exp').filter(e=>e.item!=='Labour');
+  let list=xpState.month?base.filter(e=>e.date.startsWith(xpState.month)):base;
   if(xpState.item)list=list.filter(e=>e.item===xpState.item);
   xpState.sel=[...new Set([...xpState.sel,...list.filter(e=>!e.paid).map(e=>e.id)])];
   renderExpenses();
@@ -2310,7 +2312,7 @@ function xpToggleSel(id){
   renderExpenses();
 }
 function xpSelDay(d){
-  const ids=xpKind('exp').filter(e=>e.date===d&&!e.paid).map(e=>e.id);
+  const ids=xpKind('exp').filter(e=>e.date===d&&!e.paid&&e.item!=='Labour').map(e=>e.id);
   const allIn=ids.every(id=>xpState.sel.includes(id));
   xpState.sel=allIn?xpState.sel.filter(id=>!ids.includes(id)):[...new Set([...xpState.sel,...ids])];
   renderExpenses();
@@ -2379,7 +2381,7 @@ function xpDel(id){
 }
 function xpCopyReport(){
   const m=xpState.month||isoLocal(new Date()).slice(0,7);
-  const list=xpKind('exp').filter(e=>e.date.startsWith(m));
+  const list=xpKind('exp').filter(e=>e.date.startsWith(m)&&e.item!=='Labour');
   if(!list.length){toast('No expenses in '+xpMonthLabel(m));return;}
   const paid=list.filter(e=>e.paid),pend=list.filter(e=>!e.paid);
   const byItem={};
@@ -2391,7 +2393,8 @@ function xpCopyReport(){
   copyText(`📊 Lion Logistics — ${xpMonthLabel(m)}\n\nPAID: ${rf(paid.reduce((s,e)=>s+e.amount,0))} (${paid.length} items)\nPENDING: ${rf(pend.reduce((s,e)=>s+e.amount,0))} (${pend.length} items)\n\n`+lines.join('\n'));
 }
 function xpExcel(){
-  const list=(xpState.month?xpKind('exp').filter(e=>e.date.startsWith(xpState.month)):xpKind('exp'))
+  const base=xpKind('exp').filter(e=>e.item!=='Labour');
+  const list=(xpState.month?base.filter(e=>e.date.startsWith(xpState.month)):base)
     .slice().sort((a,b)=>a.date<b.date?-1:1);
   xlsExport('lion-expenses',['DATE','ITEM','AMOUNT (Rf)','STATUS','PAID ON'],
     list.map(e=>[xpD(e.date),e.item,e.amount,e.paid?'PAID':'PENDING',e.paidAt?xpD(e.paidAt.slice(0,10)):'']));
