@@ -2567,6 +2567,7 @@ function renderXpVan(){
           <a href="javascript:void(0)" onclick="copyText('${esc(vd.account)}')" title="Copy account number for transfer" style="font-size:12.5px">${esc(vd.account)} 📋</a>
           ${vd.accName?`<span style="color:var(--muted);font-size:12px">${esc(vd.accName)}</span>`:''}
           <button class="ghost" style="padding:2px 8px;font-size:11px" onclick="xpEditVendor('${vd.id}')">✎</button>
+          <button class="ghost" style="padding:2px 8px;font-size:11px" onclick="xpDelVendor('${vd.id}')" title="Delete this account and all its entries">🗑</button>
           <span style="margin-left:auto;font-weight:800;color:${upT?'#dc2626':'#16a34a'}">${upT?rf(upT)+' pending':'✓ settled'}</span>
           ${upT?`<button class="primary" style="padding:5px 12px;font-size:12px" onclick="xpVanPayAll('${vd.id}')">${selHere.length?`✓ Pay ${selHere.length} selected — ${rf(selT)}`:'✓ Pay ALL + receipt'}</button>`:''}
         </div>
@@ -2609,6 +2610,16 @@ function xpEditVendor(id){
   const accName=prompt('Account name in bank (optional):',vd.accName||'');if(accName===null)return;
   vd.name=name.trim();vd.accName=accName.trim();
   saveExpensesData();renderExpenses();
+}
+function xpDelVendor(id){
+  if(!xpGuard())return;
+  const vd=xpKind('vendor').find(v=>v.id===id);if(!vd)return;
+  const list=xpKind('van').filter(v=>v.vendor===vd.account);
+  const pend=list.filter(v=>!v.paid).reduce((s,v)=>s+v.amount,0);
+  if(!confirm(`Delete account ${vd.name||vd.account} (${vd.account}) AND its ${list.length} entr${list.length===1?'y':'ies'}?${pend?'\n⚠ It still has '+rf(pend)+' PENDING!':''}`))return;
+  expensesData=expensesData.filter(x=>x.id!==id&&!(x.kind==='van'&&x.vendor===vd.account));
+  saveExpensesData();renderExpenses();
+  toast('Account deleted');
 }
 function openXpVanForm(){
   if(!xpGuard())return;
