@@ -958,6 +958,7 @@ service cloud.firestore {
           <div class="field"><label>BILL ONLY ABOVE (KG) — at/below: pass-throughs only</label><input id="u_min_kg" type="number" step="any" min="0" placeholder="e.g. 50 (STELCO)"></div>
           <div class="field"><label>CLEARANCE LINE LABEL (custom)</label><input id="u_clear_label" placeholder="e.g. Clearance KG Above 50"></div>
         </div>
+        <div class="field"><label>INVOICE EMAIL(S) — comma-separated; pre-fills the invoice's "Email to"</label><input id="u_bill_email" placeholder="billing@customer.mv, second@customer.mv"></div>
       </div>
       <div id="u_docs" style="margin-top:12px"></div>
       <div class="actions">
@@ -3213,9 +3214,10 @@ function openInvoiceForm(entryId){
   bnEl.value=e.billNo||'';
   bnEl.placeholder=e.billNo?'L26/…':('blank = QuickBooks assigns (next ≈ '+(nextBillNo()||'L…')+')');
   document.getElementById('inv_memo').value=e.billNo?('LION Ref '+e.billNo):(e.rNo?('LION R '+e.rNo):'');
-  // customer email: pre-fill from MPL & Custom Logins (REGISTERED EMAIL) by C-No — editable per invoice
+  // customer email: the customer's own INVOICE EMAIL(S) (Customers tab) wins, else the
+  // MPL & Custom Logins REGISTERED EMAIL by C-No — editable per invoice
   const cred=creds.find(c=>(c.cno||'').toUpperCase()===(e.cno||'').toUpperCase());
-  document.getElementById('inv_email').value=(cred&&cred.email)||'';
+  document.getElementById('inv_email').value=(cust&&cust.billEmail)||(cred&&cred.email)||'';
   // Resend / Update only make sense once the invoice exists in QuickBooks
   const invoiced=(e.qbInvoiced||e.billNo)?'':'none';
   document.getElementById('inv_resendBtn').style.display=invoiced;
@@ -3788,6 +3790,7 @@ function openCustForm(id){
     u_rate_dh.value=ar['Dhoni Charges']??'';
     u_ff_qty.value=pf.ffQty??'';u_no_dhoni.checked=!!pf.noDhoni;u_no_proc.checked=!!pf.noProc;
     u_no_ff.checked=!!pf.noFF;u_min_kg.value=pf.minKg??'';u_clear_label.value=pf.clearLabel||'';
+    u_bill_email.value=r.billEmail||'';
     document.getElementById('u_docs').innerHTML=
       `<button type="button" class="ghost" onclick="closeModal('overlay-cust');openAttachCust('${r.id}')">📎 Documents${r.attachments&&r.attachments.length?' ('+r.attachments.length+')':''}</button>
        <span style="font-size:12px;color:#94a3b8;margin-left:8px">ID, licences, forms — shared with the Logins tab</span>`;
@@ -3795,6 +3798,7 @@ function openCustForm(id){
     u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';
     u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;u_no_proc.checked=false;
     u_no_ff.checked=false;u_min_kg.value='';u_clear_label.value='';
+    u_bill_email.value='';
     document.getElementById('u_docs').innerHTML=
       `<input type="file" id="u_docs_file" multiple style="display:none" onchange="custPickDocs(this.files)">
        <button type="button" class="ghost" onclick="document.getElementById('u_docs_file').click()">📎 Add documents</button>
@@ -3823,10 +3827,13 @@ function saveCust(e){
     const ex=lookupCustomer(cno);
     if(ex){toast('C number already in list: '+ex.name);return false;}
     const rec={id:uid(),cno,name,contact,apRates,apProfile};
+    if(u_bill_email.value.trim())rec.billEmail=u_bill_email.value.trim();
     customers.push(rec);toast('Customer added');
     uploadPendingCustDocs(rec); // documents picked in the Add form upload now (async, non-blocking)
   }else{
-    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;r.apRates=apRates;r.apProfile=apProfile;delete r.apFee;toast('Customer updated');
+    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;r.apRates=apRates;r.apProfile=apProfile;delete r.apFee;
+    if(u_bill_email.value.trim())r.billEmail=u_bill_email.value.trim();else delete r.billEmail;
+    toast('Customer updated');
   }
   saveCustomers();renderCusts();updateCounts();closeModal('overlay-cust');
   return false;
@@ -4261,9 +4268,20 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
   seed('STATE ELECTRIC',c=>{
     c.apProfile={noFF:true,noProc:true,noDhoni:true,minKg:50,clearLabel:'Clearance KG Above 50'};
     c.apRates=Object.assign({},c.apRates,{'Clearance KG':9});
+    // invoice To list from the QuickBooks customer record (BillEmail)
+    if(!c.billEmail)c.billEmail='clearance@stelco.com.mv,Azhadh.Rameez@stelco.com.mv,mohamed.afshah@stelco.com.mv';
   });
   localStorage.setItem('lion_profile_seed_v3','1');
   if(n){saveCustomers();toast('STELCO air billing profile set (9/kg above 50 kg, pass-throughs only below)');}
+})();
+(()=>{ // seed v4 — STELCO invoice email list (own pass: v3 may have already run without it)
+  if(localStorage.getItem('lion_profile_seed_v4'))return;
+  const c=customers.find(x=>(x.name||'').toUpperCase().includes('STATE ELECTRIC'));
+  if(c&&!c.billEmail){
+    c.billEmail='clearance@stelco.com.mv,Azhadh.Rameez@stelco.com.mv,mohamed.afshah@stelco.com.mv';
+    saveCustomers();
+  }
+  localStorage.setItem('lion_profile_seed_v4','1');
 })();
 // Backfill missing C numbers on saved logins (many sheet-imported logins had none): exact,
 // unambiguous name match against the Customers list. Runs each load; already-filled rows untouched.
