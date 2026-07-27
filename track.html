@@ -65,16 +65,16 @@
   </div>
   <div id="result"></div>
   <div class="apibox" id="apibox">
-    ⚡ <b>Live in-page status (API)</b> — not connected yet. This page currently jumps to the carrier's own tracker.
-    Once a tracking API account (TrackingMore / ShipsGo) is connected, the status and milestones will appear right here
-    without leaving the page.
+    ⚡ <b>Live in-page status (API)</b> — the connection is ready (Supabase proxy → TrackingMore). Air shipment status
+    and milestones will appear under the result the moment the TrackingMore API key is added. Sea shipments use the
+    carrier buttons / my.port.mv.
   </div>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
-/* Set to your API proxy endpoint (e.g. a Supabase edge function) to enable live in-page status. */
-const API_PROXY='';
+/* Supabase edge function that proxies the tracking API (keeps the key server-side). */
+const API_PROXY='https://ueujljkllrribxyfcnly.supabase.co/functions/v1/cargo-track';
 
 /* ---------- carrier data ---------- */
 const AWB_AIR={
@@ -223,17 +223,25 @@ function runTrack(){
 
 /* Live status via API proxy — activates when API_PROXY is configured */
 async function apiStatus(type,num){
-  if(!API_PROXY)return;
+  if(!API_PROXY||type!=='air')return;
   const box=document.getElementById('apistatus');
   box.innerHTML='<div class="mile"><span>⏳ Fetching live status…</span></div>';
   try{
     const r=await fetch(API_PROXY+'?type='+type+'&num='+encodeURIComponent(num));
-    if(!r.ok)throw new Error(r.status);
-    const d=await r.json();
-    box.innerHTML=(d.milestones||[]).map(ms=>
-      `<div class="mile"><span class="dt">${esc(ms.date||'')}</span><span>${esc(ms.status||'')}${ms.location?' · '+esc(ms.location):''}</span></div>`
-    ).join('')||'<div class="mile"><span>No live events yet for this number.</span></div>';
-  }catch(e){box.innerHTML='<div class="mile"><span>⚠ Live status unavailable ('+esc(e.message)+') — use the carrier buttons above.</span></div>';}
+    const d=await r.json().catch(()=>null);
+    if(!r.ok||!d||d.error){
+      if(d&&d.error==='not_configured'){box.innerHTML='';return;} // silently skip until the API key is set up
+      box.innerHTML='<div class="mile"><span>⚠ '+esc((d&&d.message)||'Live status unavailable')+' — use the carrier buttons above.</span></div>';
+      return;
+    }
+    const head=[d.status&&('<b>'+esc(String(d.status).toUpperCase())+'</b>'),
+      (d.origin||d.destination)&&esc((d.origin||'?')+' → '+(d.destination||'?')),
+      d.pieces&&esc(d.pieces+' pcs'),d.weight&&esc(d.weight+' kg')].filter(Boolean).join(' &nbsp;·&nbsp; ');
+    box.innerHTML=(head?'<div class="mile"><span>'+head+'</span></div>':'')+
+      ((d.milestones||[]).map(ms=>
+        `<div class="mile"><span class="dt">${esc(ms.date||'')}</span><span>${esc(ms.status||'')}${ms.location?' · '+esc(ms.location):''}</span></div>`
+      ).join('')||'<div class="mile"><span>No live events yet for this number.</span></div>');
+  }catch(e){box.innerHTML='<div class="mile"><span>⚠ Live status unavailable — use the carrier buttons above.</span></div>';}
 }
 
 document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')runTrack();});
