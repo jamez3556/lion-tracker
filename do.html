@@ -86,6 +86,7 @@
       <input type="file" id="f_photo" accept="image/*" capture="environment" style="display:none" onchange="gotPhoto()">
       <div class="field">
         <button type="button" class="snapbtn" id="snapBtn" onclick="document.getElementById('f_photo').click()">📸 Take DO photo</button>
+        <div id="ocrStatus" class="muted" style="margin-top:5px;font-weight:600"></div>
       </div>
       <div class="grid2">
         <div class="field"><label>AWB NO</label><input id="f_awb" placeholder="e.g. 926-1234 5675" required></div>
@@ -207,6 +208,64 @@ authM.onAuthStateChanged(auth,user=>{
   }
 });
 
+/* ---------- OCR auto-read (in-browser Tesseract, free): fills ONLY empty fields, always amendable ---------- */
+let ocrRno='';
+let tessP=null;
+const tessLoad=()=>{
+  if(tessP)return tessP;
+  tessP=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload=()=>res(window.Tesseract);
+    s.onerror=()=>{tessP=null;rej(new Error('load failed'));};
+    document.head.appendChild(s);
+  });
+  return tessP;
+};
+const ocrImg=file=>new Promise((res,rej)=>{const u=URL.createObjectURL(file);const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('bad image'));i.src=u;});
+function ocrCanvas(img,rot){
+  const MAX=2000;let w=img.naturalWidth,h=img.naturalHeight;
+  const sc=Math.min(1,MAX/Math.max(w,h));w=Math.round(w*sc);h=Math.round(h*sc);
+  const c=document.createElement('canvas');
+  if(rot===90||rot===270){c.width=h;c.height=w;}else{c.width=w;c.height=h;}
+  const x=c.getContext('2d');x.translate(c.width/2,c.height/2);x.rotate(rot*Math.PI/180);x.drawImage(img,-w/2,-h/2,w,h);
+  return c;
+}
+function ocrParse(text){
+  const t=(text||'').toUpperCase(),out={};
+  const awb=t.match(/\b(\d{3})\s*[-–—]?\s*(\d{8})\b/);if(awb)out.awb=awb[1]+'-'+awb[2];
+  const cons=t.split(/\n/).map(l=>l.trim()).find(l=>/CONSIGNEE/.test(l)&&!/AGENT/.test(l));
+  if(cons){let nm=cons.replace(/.*CONSIGNEE/,'').replace(/^[\s:.\-]+/,'').replace(/[^A-Z0-9&.\-' ]+/g,' ').replace(/\s+/g,' ').trim();
+    nm=nm.split(/\b(?:PCS|WGT|RECEIVED|NOTIFY|RECEIPT|CONDITION|LOCATION|SIGN|DATE|ID CARD|N ?O ?G)\b/)[0].trim().slice(0,40).trim();
+    if(nm.length>=4)out.consignee=nm;}
+  const wg=t.match(/WGT[^\n]*?\b\d+\s*\/\s*(\d+(?:[.,]\d+)?)/);if(wg)out.kg=Number(wg[1].replace(',','.'));
+  const rn=t.match(/\bR\s*[=\-:]\s*(\d{4,6})\b/);if(rn)out.rNo=rn[1];
+  return out;
+}
+async function ocrRun(file){
+  const st=document.getElementById('ocrStatus');
+  try{
+    const T=await tessLoad();
+    const img=await ocrImg(file);
+    let best=null;
+    for(const rot of [0,270,90,180]){
+      st.textContent='🔍 Reading photo'+(rot?' ↻':'')+'…';
+      try{
+        const r=await T.recognize(ocrCanvas(img,rot),'eng');
+        const p=ocrParse(r&&r.data&&r.data.text);
+        if(p.awb){best=p;break;}
+        if(!best&&(p.consignee||p.kg))best=p;
+      }catch(e){}
+    }
+    if(!best){st.textContent='Could not read — type the details';return;}
+    const got=[];
+    const set=(id,v,l)=>{const el=document.getElementById(id);if(v!=null&&v!==''&&el.value===''){el.value=v;got.push(l+' '+v);}};
+    set('f_awb',best.awb,'AWB');set('f_kg',best.kg,'KG');set('f_customer',best.consignee,'');
+    if(best.rNo){ocrRno=best.rNo;got.push('R '+best.rNo);}
+    st.textContent=got.length?'✓ Auto-read: '+got.join(', ')+' — check & amend if wrong':'Photo read — type the details';
+  }catch(e){st.textContent='Auto-read unavailable — type the details';}
+}
+
 /* ---------- form ---------- */
 window.gotPhoto=()=>{
   const f=document.getElementById('f_photo').files[0];
@@ -214,6 +273,9 @@ window.gotPhoto=()=>{
   const b=document.getElementById('snapBtn');
   b.textContent=f?'✅ DO photo ready — tap to retake':'📸 Take DO photo';
   b.classList.toggle('got',!!f);
+  document.getElementById('ocrStatus').textContent='';
+  ocrRno='';
+  if(f)ocrRun(f);
 };
 window.exAdd=name=>{
   const item=name||prompt('Charge name:','');
@@ -252,7 +314,7 @@ window.saveSnap=async ev=>{
     }
     const macl=Number(document.getElementById('f_macl').value)||null;
     const demur=Number(document.getElementById('f_demur').value)||null;
-    const rec={id,awb,kg,macl,demur,customer:document.getElementById('f_customer').value.trim(),
+    const rec={id,awb,kg,macl,demur,rNo:ocrRno||'',customer:document.getElementById('f_customer').value.trim(),
       extras:extras.slice(),photos,by:me,byEmail:myEmail,
       date:today(),time:new Date().toTimeString().slice(0,5),status:'pending',u:Date.now()};
     await fsM.setDoc(fsM.doc(db,'dosnaps',id),JSON.parse(JSON.stringify(rec)));
