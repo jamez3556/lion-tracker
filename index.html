@@ -2581,7 +2581,7 @@ function renderXpVan(){
           <div style="display:flex;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px solid #f1f5f9;align-items:center;opacity:.75">
             <span style="width:17px;text-align:center">✔</span>
             <span>${xpD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><span>${rf(v.amount)}</span>
-            <span style="font-size:10px;font-weight:800;color:#16a34a;border:1px solid #16a34a;border-radius:999px;padding:1px 7px">PAID${v.paidAt?' '+xpD(v.paidAt.slice(0,10)):''}</span>
+            <button style="font-size:10px;font-weight:800;color:#16a34a;border:1px solid #16a34a;border-radius:999px;padding:1px 7px;background:none;cursor:pointer" title="Click to UNDO this payment" onclick="xpVanUnpay('${v.id}')">PAID${v.paidAt?' '+xpD(v.paidAt.slice(0,10)):''}</button>
             ${v.slip?`<a href="${esc(v.slip.url)}" target="_blank" rel="noopener" title="${esc(v.slip.name)}">🧾</a>`:''}
           </div>`).join('')}
       </div>`;}).join('')}`;
@@ -2692,6 +2692,13 @@ function xpVanExcel(){
     rows.push([vd.account,vd.name||'','','TOTAL',list.reduce((s,v)=>s+v.amount,0),'PENDING: '+list.filter(v=>!v.paid).reduce((s,v)=>s+v.amount,0),'','']);
   });
   xlsExport('lion-van',['ACCOUNT','COMPANY','DATE','NOTE','AMOUNT (Rf)','STATUS','PAID ON','SLIP'],rows);
+}
+function xpVanUnpay(id){
+  if(!xpGuard())return;
+  const v=xpKind('van').find(x=>x.id===id);if(!v||!v.paid)return;
+  if(!confirm(`Un-pay "${v.note||'van laari'}" ${xpD(v.date)} (${rf(v.amount)})? It goes back to pending.`))return;
+  v.paid=false;v.paidAt=null;delete v.slip;
+  saveExpensesData();renderExpenses();
 }
 function xpDelVan(id){
   if(!xpGuard())return;
