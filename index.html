@@ -556,11 +556,13 @@
     <button class="ghost" id="xp_sub_exp" onclick="xpSub('exp')">🧾 Daily Expenses</button>
     <button class="ghost" id="xp_sub_dhoni" onclick="xpSub('dhoni')">🛥️ Dhoni Fuel</button>
     <button class="ghost" id="xp_sub_van" onclick="xpSub('van')">🚐 Van</button>
+    <button class="ghost" id="xp_sub_labour" onclick="xpSub('labour')">🏗️ Labour</button>
     <button class="ghost" id="xp_sub_salary" onclick="xpSub('salary')">👷 Salary</button>
   </div>
   <div id="xp_panel_exp"></div>
   <div id="xp_panel_dhoni" style="display:none"></div>
   <div id="xp_panel_van" style="display:none"></div>
+  <div id="xp_panel_labour" style="display:none"></div>
   <div id="xp_panel_salary" style="display:none"></div>
 </section>
 </div>
@@ -2211,7 +2213,7 @@ function xpSub(s){xpState.sub=s;renderExpenses();}
 function renderExpenses(){
   if(!document.getElementById('view-expenses'))return;
   if(!isAdmin())return;
-  ['exp','dhoni','van','salary'].forEach(s=>{
+  ['exp','dhoni','van','labour','salary'].forEach(s=>{
     document.getElementById('xp_panel_'+s).style.display=xpState.sub===s?'':'none';
     const b=document.getElementById('xp_sub_'+s);
     b.classList.toggle('primary',xpState.sub===s);
@@ -2220,6 +2222,7 @@ function renderExpenses(){
   if(xpState.sub==='exp')renderXpExp();
   else if(xpState.sub==='dhoni')renderXpDhoni();
   else if(xpState.sub==='van')renderXpVan();
+  else if(xpState.sub==='labour')renderXpLabour();
   else renderXpSalary();
 }
 
@@ -2546,6 +2549,59 @@ function xpDelFill(id){
   if(!confirm(`Delete the ${xpD(p.date)} oil fill (${p.liters} L, ${rf(p.cost)})? The matching expense line is NOT deleted.`))return;
   expensesData=expensesData.filter(x=>x.id!==id);
   saveExpensesData();renderExpenses();
+}
+
+/* ---- labour (daily outside unloaders, cash) — same exp records, item 'Labour', own tab ---- */
+function renderXpLabour(){
+  const list=xpKind('exp').filter(e=>e.item==='Labour').sort((a,b)=>a.date<b.date?1:-1);
+  xpState.sel=xpState.sel.filter(id=>xpKind('exp').some(e=>e.id===id&&!e.paid));
+  const unpaid=list.filter(e=>!e.paid);
+  const unpaidT=unpaid.reduce((s,e)=>s+e.amount,0);
+  const thisMonth=isoLocal(new Date()).slice(0,7);
+  const mPaid=list.filter(e=>e.paid&&e.date.startsWith(thisMonth)).reduce((s,e)=>s+e.amount,0);
+  const allPaid=list.filter(e=>e.paid).reduce((s,e)=>s+e.amount,0);
+  document.getElementById('xp_stats').innerHTML=`
+    <div class="card c-danger"><div class="n">${rf(unpaidT)}</div><div class="l">Labour pending (${unpaid.length} days)</div></div>
+    <div class="card c-info"><div class="n">${rf(mPaid)}</div><div class="l">Paid — ${xpMonthLabel(thisMonth)}</div></div>
+    <div class="card c-purple"><div class="n">${rf(allPaid)}</div><div class="l">Paid — all time</div></div>`;
+  const sel=list.filter(e=>xpState.sel.includes(e.id));
+  const selT=sel.reduce((s,e)=>s+e.amount,0);
+  document.getElementById('xp_panel_labour').innerHTML=`
+    <div class="toolbar" style="margin-top:0">
+      <button class="primary" onclick="openXpLabourAdd()">＋ Add Labour</button>
+      ${unpaid.length?`<button class="ghost" onclick="xpLabourSelAll()">Select all pending</button>`:''}
+      <button class="ghost" onclick="xpLabourExcel()">⬇ Excel</button>
+    </div>
+    ${sel.length?`<div style="display:flex;align-items:center;gap:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:12px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap">
+      <b>${sel.length} day(s) selected — ${rf(selT)}</b>
+      <button class="primary" onclick="xpMarkPaid()">✓ Mark PAID + receipt</button>
+      <button class="ghost" onclick="xpState.sel=[];renderExpenses()">Clear</button>
+    </div>`:''}
+    ${list.length===0?'<div class="empty" style="display:block"><div class="big">🏗️</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No labour recorded yet</div><div style="margin-top:4px">Jakir adds it daily from his page (Labour preset), or add here.</div></div>':''}
+    ${list.map(e=>`
+      <div style="display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:5px">
+        ${e.paid?'<span style="width:18px;text-align:center">✔</span>':`<input type="checkbox" style="width:18px;height:18px;margin:0" ${xpState.sel.includes(e.id)?'checked':''} onchange="xpToggleSel('${e.id}')">`}
+        <span style="flex:1;font-size:13.5px">${xpD(e.date)}</span>
+        <b style="font-size:13.5px">${rf(e.amount)}</b>
+        ${e.paid
+          ?`<button class="ghost" style="padding:3px 10px;font-size:11.5px;color:#16a34a;border-color:#16a34a" onclick="xpUnpay('${e.id}')" title="Paid ${e.paidAt?xpD(e.paidAt.slice(0,10)):''} — click to undo">PAID</button>`
+          :`<button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDel('${e.id}')" title="Delete">🗑</button>`}
+      </div>`).join('')}`;
+}
+function openXpLabourAdd(){
+  if(!xpGuard())return;
+  openXpAdd();
+  xpPickPreset(XP_PRESETS.findIndex(p=>p.label==='Labour'));
+}
+function xpLabourSelAll(){
+  const ids=xpKind('exp').filter(e=>e.item==='Labour'&&!e.paid).map(e=>e.id);
+  xpState.sel=[...new Set([...xpState.sel,...ids])];
+  renderExpenses();
+}
+function xpLabourExcel(){
+  const list=xpKind('exp').filter(e=>e.item==='Labour').sort((a,b)=>a.date<b.date?-1:1);
+  xlsExport('lion-labour',['DATE','AMOUNT (Rf)','STATUS','PAID ON'],
+    list.map(e=>[xpD(e.date),e.amount,e.paid?'PAID':'PENDING',e.paidAt?xpD(e.paidAt.slice(0,10)):'']));
 }
 
 /* ---- van / transport (kind 'vendor' = van company account, kind 'van' = one charge) ---- */
