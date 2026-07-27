@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="robots" content="noindex">
+<title>LION Expenses</title>
+<style>
+  :root{--brand:#e8730f;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+  header{background:#0f172a;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+  header h1{font-size:16px;font-weight:800}
+  header .who{margin-left:auto;font-size:11.5px;color:#94a3b8;text-align:right}
+  header .who a{color:#fbbf24;text-decoration:none;font-weight:600}
+  main{max-width:560px;margin:0 auto;padding:14px 12px 90px}
+  .tabs{display:flex;gap:8px;margin-bottom:14px}
+  .tabs button{flex:1;padding:11px 8px;border:1px solid var(--line);background:#fff;border-radius:12px;font-size:14px;font-weight:700;color:var(--muted);cursor:pointer}
+  .tabs button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .bigrow{display:flex;gap:10px;margin-bottom:12px}
+  .stat{flex:1;background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;text-align:center}
+  .stat .n{font-size:19px;font-weight:800}
+  .stat .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+  .stat.warn .n{color:#dc2626}
+  button.primary{background:var(--brand);color:#fff;border:none;border-radius:12px;padding:12px 18px;font-size:14.5px;font-weight:700;cursor:pointer;width:100%}
+  button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;cursor:pointer}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
+  .chips button{border:1px solid var(--line);background:#f8fafc;border-radius:999px;padding:8px 13px;font-size:13px;cursor:pointer}
+  .chips button.on{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:700}
+  .field{margin-bottom:11px}
+  .field label{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+  .field input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .dayhead{display:flex;gap:10px;font-size:12px;font-weight:700;color:var(--muted);padding:10px 2px 4px}
+  .item{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:5px;font-size:14px}
+  .item .nm{flex:1}
+  .item .amt{font-weight:800}
+  .paid{font-size:10.5px;font-weight:800;color:#16a34a;border:1px solid #16a34a;border-radius:999px;padding:2px 8px}
+  .del{background:none;border:none;font-size:15px;cursor:pointer;opacity:.6}
+  .cnt{display:flex;align-items:center;justify-content:center;gap:16px}
+  .cnt button{width:56px;height:56px;border-radius:16px;border:1px solid var(--line);background:#f8fafc;font-size:26px;cursor:pointer}
+  .cnt button.plus{background:var(--brand);border-color:var(--brand);color:#fff}
+  .cnt .n{font-size:34px;font-weight:800;min-width:52px;text-align:center}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;padding:6px 6px;border-bottom:1px solid var(--line)}
+  td{padding:8px 6px;border-bottom:1px solid #f1f5f9}
+  .num{text-align:right}
+  .flagbad{color:#dc2626;font-weight:800;font-size:10.5px}
+  .overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:flex-end;justify-content:center;z-index:20}
+  .overlay.show{display:flex}
+  .modal{background:#fff;border-radius:18px 18px 0 0;padding:18px 16px 24px;width:100%;max-width:560px}
+  .modal h2{font-size:16px;margin-bottom:14px}
+  .actions{display:flex;gap:10px;margin-top:6px}
+  .actions button{flex:1}
+  #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(80px);background:#0f172a;color:#fff;padding:10px 18px;border-radius:999px;font-size:13.5px;transition:.25s;z-index:30;max-width:92vw;text-align:center}
+  #toast.show{transform:translateX(-50%) translateY(0)}
+  #gate{position:fixed;inset:0;background:#0f172a;display:flex;align-items:center;justify-content:center;z-index:10;padding:20px}
+  #gate .box{background:#fff;border-radius:18px;padding:26px 22px;width:100%;max-width:360px}
+  #gate h1{font-size:19px;margin-bottom:4px}
+  #gate p{font-size:13px;color:var(--muted);margin-bottom:16px}
+  #gate .err{color:#dc2626;font-size:12.5px;min-height:16px;margin-top:8px}
+  .addbar{position:fixed;bottom:0;left:0;right:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 30%);z-index:6}
+  .addbar .inner{max-width:560px;margin:0 auto}
+  .muted{color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="box">
+    <h1>🦁 LION Expenses</h1>
+    <p>Sign in with your LION Tracker login</p>
+    <form onsubmit="return doSignIn(event)">
+      <div class="field"><label>EMAIL</label><input id="g_email" type="email" required autocomplete="username"></div>
+      <div class="field"><label>PASSWORD</label><input id="g_pass" type="password" required autocomplete="current-password"></div>
+      <button class="primary" id="g_btn" type="submit">Sign in</button>
+      <div class="err" id="g_err"></div>
+    </form>
+  </div>
+</div>
+
+<header>
+  <h1>🦁 LION Expenses</h1>
+  <div class="who"><span id="who"></span><br><a href="javascript:void(0)" onclick="doSignOut()">sign out</a></div>
+</header>
+
+<main>
+  <div class="tabs">
+    <button id="tb_exp" class="on" onclick="setTab('exp')">🧾 Expenses</button>
+    <button id="tb_dhoni" onclick="setTab('dhoni')">🛥️ Dhoni</button>
+  </div>
+  <div id="pane_exp"></div>
+  <div id="pane_dhoni" style="display:none"></div>
+</main>
+
+<div class="addbar" id="addbar"><div class="inner"><button class="primary" onclick="openAdd()">＋ Add Expense</button></div></div>
+
+<div class="overlay" id="ov_add">
+  <div class="modal">
+    <h2>＋ Add Expense</h2>
+    <form onsubmit="return saveAdd(event)">
+      <div class="chips" id="a_chips"></div>
+      <div class="field"><label>EXPENSE</label><input id="a_item" required></div>
+      <div class="grid2">
+        <div class="field"><label>AMOUNT (Rf)</label><input id="a_amount" type="number" min="1" inputmode="numeric" required></div>
+        <div class="field"><label>DATE</label><input id="a_date" type="date" required></div>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="hide('ov_add')">Cancel</button>
+        <button type="submit" class="primary">Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="overlay" id="ov_fill">
+  <div class="modal">
+    <h2>⛽ Log Oil Fill</h2>
+    <form onsubmit="return saveFill(event)">
+      <div class="grid2">
+        <div class="field"><label>LITERS</label><input id="f_liters" type="number" min="1" inputmode="numeric" required></div>
+        <div class="field"><label>COST (Rf)</label><input id="f_cost" type="number" min="1" inputmode="numeric" required></div>
+      </div>
+      <div class="field"><label>DATE</label><input id="f_date" type="date" required></div>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-bottom:12px">
+        <input type="checkbox" id="f_toexp" checked style="width:18px;height:18px"> Also add to expense list (Dhoni oil)
+      </label>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="hide('ov_fill')">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+const CFG={apiKey:"AIzaSyAkNK-8qXg6kHTqrpof90BwIM81vh5ER4o",
+  authDomain:"lion-tracker-47830.firebaseapp.com",projectId:"lion-tracker-47830",
+  storageBucket:"lion-tracker-47830.firebasestorage.app",
+  messagingSenderId:"1076678882929",appId:"1:1076678882929:web:bf0a470ec4b5e639b20dd0"};
+const V='10.12.5';
+const [appM,authM,fsM]=await Promise.all([
+  import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
+  import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
+  import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`)
+]);
+const app=appM.initializeApp(CFG);
+const auth=authM.getAuth(app);
+const db=fsM.initializeFirestore(app,{localCache:fsM.persistentLocalCache({tabManager:fsM.persistentMultipleTabManager()})});
+
+/* ---------- state ---------- */
+const PRESETS=[{label:'Airport mehi',amount:360},{label:'Dhoni mehi',amount:660},{label:'Dhoni kappi',amount:400},{label:'Dhoni oil',amount:''},{label:'Other',amount:''}];
+const MAIN_ROUTE='Airport–Malé';
+let data=[];        // live mirror of the 'expenses' collection
+let tab='exp';
+let preset=0;
+let me='';
+const uid=()=>'id'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+const iso=d=>{const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());};
+const today=()=>iso(new Date());
+const fmtD=s=>s?s.split('-').reverse().join('-'):'';
+const rf=n=>'Rf '+Number(n||0).toLocaleString('en-US');
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const kind=k=>data.filter(r=>r.kind===k);
+let toastT;const toast=m=>{const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);};
+window.hide=id=>document.getElementById(id).classList.remove('show');
+const show=id=>document.getElementById(id).classList.add('show');
+document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('show')}));
+
+/* ---------- cloud ---------- */
+async function put(rec){
+  rec.u=Date.now();
+  const i=data.findIndex(r=>r.id===rec.id);
+  if(i>=0)data[i]=rec;else data.push(rec);
+  render();
+  try{await fsM.setDoc(fsM.doc(db,'expenses',rec.id),JSON.parse(JSON.stringify(rec)));}
+  catch(e){toast('Could not save — check connection');}
+}
+async function del(id){
+  data=data.filter(r=>r.id!==id);
+  render();
+  try{await fsM.deleteDoc(fsM.doc(db,'expenses',id));}catch(e){toast('Could not delete — check connection');}
+}
+function listen(){
+  fsM.onSnapshot(fsM.collection(db,'expenses'),s=>{
+    const byId=new Map(data.map(r=>[r.id,r]));
+    s.docChanges().forEach(ch=>{
+      if(ch.type==='removed')byId.delete(ch.doc.id);
+      else byId.set(ch.doc.id,ch.doc.data());
+    });
+    data=[...byId.values()];
+    render();
+  },e=>toast('Sync error: '+(e.code||e.message)));
+}
+
+/* ---------- auth ---------- */
+window.doSignIn=async ev=>{
+  ev.preventDefault();
+  const b=document.getElementById('g_btn'),err=document.getElementById('g_err');
+  b.disabled=true;b.textContent='Signing in…';err.textContent='';
+  try{await authM.signInWithEmailAndPassword(auth,document.getElementById('g_email').value.trim(),document.getElementById('g_pass').value);}
+  catch(e){err.textContent='Sign-in failed: '+(e.code||e.message).replace('auth/','').replace(/-/g,' ');}
+  b.disabled=false;b.textContent='Sign in';
+  return false;
+};
+window.doSignOut=async()=>{await authM.signOut(auth);location.reload();};
+authM.onAuthStateChanged(auth,user=>{
+  if(user){
+    me=(user.email||'').split('@')[0];
+    document.getElementById('who').textContent=user.email;
+    document.getElementById('gate').style.display='none';
+    listen();
+  }else{
+    document.getElementById('gate').style.display='flex';
+  }
+});
+
+/* ---------- render ---------- */
+window.setTab=t=>{tab=t;render();};
+function render(){
+  document.getElementById('tb_exp').classList.toggle('on',tab==='exp');
+  document.getElementById('tb_dhoni').classList.toggle('on',tab==='dhoni');
+  document.getElementById('pane_exp').style.display=tab==='exp'?'':'none';
+  document.getElementById('pane_dhoni').style.display=tab==='dhoni'?'':'none';
+  document.getElementById('addbar').style.display=tab==='exp'?'':'none';
+  if(tab==='exp')renderExp();else renderDhoni();
+}
+function renderExp(){
+  const exps=kind('exp');
+  const unpaid=exps.filter(e=>!e.paid);
+  const unpaidTotal=unpaid.reduce((s,e)=>s+e.amount,0);
+  const m=today().slice(0,7);
+  const mPaid=exps.filter(e=>e.paid&&e.date.startsWith(m)).reduce((s,e)=>s+e.amount,0);
+  const byDate={};
+  exps.forEach(e=>{(byDate[e.date]=byDate[e.date]||[]).push(e)});
+  const days=Object.keys(byDate).sort().reverse().slice(0,45);
+  document.getElementById('pane_exp').innerHTML=`
+    <div class="bigrow">
+      <div class="stat warn"><div class="n">${rf(unpaidTotal)}</div><div class="l">Unpaid (${unpaid.length})</div></div>
+      <div class="stat"><div class="n">${rf(mPaid)}</div><div class="l">Paid this month</div></div>
+    </div>
+    ${days.length===0?'<div class="card" style="text-align:center;color:var(--muted)">No expenses yet — tap ＋ Add Expense</div>':''}
+    ${days.map(d=>{
+      const items=byDate[d];
+      return `<div class="dayhead"><span>${fmtD(d)}</span><span>${rf(items.reduce((s,e)=>s+e.amount,0))}</span></div>`+
+        items.map(e=>`<div class="item">
+          <span class="nm">${esc(e.item)}${e.addedBy?`<br><span class="muted" style="font-size:10.5px">${esc(e.addedBy)}</span>`:''}</span>
+          <span class="amt">${rf(e.amount)}</span>
+          ${e.paid?'<span class="paid">PAID</span>':(e.addedBy===me?`<button class="del" onclick="delExp('${e.id}')">🗑</button>`:'')}
+        </div>`).join('');
+    }).join('')}`;
+}
+function fuel(){
+  const fills=kind('fill').slice().sort((a,b)=>a.date<b.date?-1:1);
+  const trips=kind('trip');
+  const between=(s,e)=>trips.filter(t=>t.date>=s&&(!e||t.date<e)).reduce((x,t)=>x+t.count,0);
+  const periods=fills.map((f,i)=>{
+    const next=fills[i+1];
+    const n=between(f.date,next?next.date:null);
+    return {...f,trips:n,open:!next,lPerTrip:n>0?f.liters/n:null};
+  });
+  const closed=periods.filter(p=>!p.open&&p.trips>0);
+  const avg=closed.length?closed.reduce((s,p)=>s+p.lPerTrip,0)/closed.length:null;
+  return {periods:periods.slice().reverse(),avg,flag:p=>avg&&p.lPerTrip&&p.lPerTrip>avg*1.25};
+}
+function renderDhoni(){
+  const f=fuel();
+  const t=kind('trip').find(x=>x.date===today());
+  const routes=t?(t.routes||{[MAIN_ROUTE]:t.count}):{};
+  const recent=kind('trip').slice().sort((a,b)=>a.date<b.date?1:-1).slice(0,7);
+  document.getElementById('pane_dhoni').innerHTML=`
+    <div class="card" style="text-align:center">
+      <div class="muted" style="margin-bottom:8px;font-weight:700">TODAY — ${MAIN_ROUTE}</div>
+      <div class="cnt">
+        <button onclick="trip('${MAIN_ROUTE}',-1)">−</button>
+        <span class="n">${routes[MAIN_ROUTE]||0}</span>
+        <button class="plus" onclick="trip('${MAIN_ROUTE}',1)">＋</button>
+      </div>
+      <div style="margin-top:10px"><button class="ghost" onclick="tripOther()">＋ other route</button></div>
+      <div class="muted" style="margin-top:6px">${esc(Object.entries(routes).filter(([r])=>r!==MAIN_ROUTE).map(([r,c])=>r+': '+c).join(' · '))}</div>
+    </div>
+    <button class="primary" style="margin-bottom:12px" onclick="openFill()">⛽ Log Oil Fill</button>
+    <div class="card">
+      <div class="muted" style="font-weight:700;margin-bottom:8px">OIL FILLS ${f.avg?'· normal '+f.avg.toFixed(1)+' L/trip':''}</div>
+      <table>
+        <tr><th>Date</th><th class="num">L</th><th class="num">Cost</th><th class="num">Trips</th><th class="num">L/trip</th></tr>
+        ${f.periods.map(p=>`<tr>
+          <td>${fmtD(p.date)}${f.flag(p)?'<br><span class="flagbad">⚠ CHECK</span>':''}</td>
+          <td class="num">${p.liters}</td><td class="num">${Number(p.cost).toLocaleString()}</td>
+          <td class="num">${p.trips}${p.open?'…':''}</td>
+          <td class="num">${p.lPerTrip?p.lPerTrip.toFixed(1):'—'}</td>
+        </tr>`).join('')||'<tr><td colspan="5" class="muted">No fills yet</td></tr>'}
+      </table>
+    </div>
+    <div class="card">
+      <div class="muted" style="font-weight:700;margin-bottom:8px">LAST 7 TRIP DAYS</div>
+      ${recent.map(x=>`<div style="display:flex;gap:10px;font-size:13.5px;padding:5px 0;border-bottom:1px solid #f1f5f9">
+        <b>${fmtD(x.date)}</b><span>${x.count} trip(s)</span>
+        <span class="muted">${esc(x.routes?Object.entries(x.routes).map(([r,c])=>r+': '+c).join(' · '):'')}</span>
+      </div>`).join('')||'<div class="muted">No trips yet</div>'}
+    </div>`;
+}
+
+/* ---------- actions ---------- */
+window.openAdd=()=>{
+  document.getElementById('a_chips').innerHTML=PRESETS.map((p,i)=>
+    `<button type="button" class="${i===preset?'on':''}" onclick="pick(${i})">${esc(p.label)}${p.amount?' · '+p.amount:''}</button>`).join('');
+  window.pick(0);
+  document.getElementById('a_date').value=today();
+  show('ov_add');
+};
+window.pick=i=>{
+  preset=i;
+  const p=PRESETS[i];
+  document.getElementById('a_chips').querySelectorAll('button').forEach((b,j)=>b.classList.toggle('on',j===i));
+  document.getElementById('a_item').value=p.label==='Other'?'':p.label;
+  document.getElementById('a_amount').value=p.amount||'';
+};
+window.saveAdd=ev=>{
+  ev.preventDefault();
+  const item=document.getElementById('a_item').value.trim();
+  const amount=parseInt(document.getElementById('a_amount').value,10);
+  const date=document.getElementById('a_date').value;
+  if(!item||!amount||!date)return false;
+  const dup=kind('exp').find(e=>e.date===date&&e.item.toLowerCase()===item.toLowerCase());
+  if(dup){toast(`"${item}" is already on the list for ${fmtD(date)}${dup.paid?' (already PAID)':''}`);return false;}
+  put({id:uid(),kind:'exp',date,item,amount,paid:false,paidAt:null,addedBy:me});
+  hide('ov_add');
+  toast('Added '+item+' · '+rf(amount));
+  return false;
+};
+window.delExp=id=>{
+  const e=kind('exp').find(x=>x.id===id);
+  if(!e||e.paid)return;
+  if(!confirm(`Delete "${e.item}" ${fmtD(e.date)} (${rf(e.amount)})?`))return;
+  del(id);
+};
+window.trip=(route,delta)=>{
+  let t=kind('trip').find(x=>x.date===today());
+  if(!t){
+    if(delta<0)return;
+    t={id:uid(),kind:'trip',date:today(),count:0,routes:{},by:me};
+  }
+  t.routes=t.routes||{};
+  t.routes[route]=Math.max(0,(t.routes[route]||0)+delta);
+  if(!t.routes[route])delete t.routes[route];
+  t.count=Object.values(t.routes).reduce((s,c)=>s+c,0);
+  if(t.count===0)del(t.id);else put(t);
+};
+window.tripOther=()=>{
+  const r=prompt('Route name:','Airport–Hulhumalé');
+  if(r&&r.trim())window.trip(r.trim(),1);
+};
+window.openFill=()=>{
+  document.getElementById('f_liters').value=200;
+  document.getElementById('f_cost').value='';
+  document.getElementById('f_date').value=today();
+  document.getElementById('f_toexp').checked=true;
+  show('ov_fill');
+};
+window.saveFill=ev=>{
+  ev.preventDefault();
+  const liters=parseInt(document.getElementById('f_liters').value,10);
+  const cost=parseInt(document.getElementById('f_cost').value,10);
+  const date=document.getElementById('f_date').value;
+  if(!liters||!cost||!date)return false;
+  put({id:uid(),kind:'fill',date,liters,cost,addedBy:me});
+  if(document.getElementById('f_toexp').checked&&!kind('exp').some(e=>e.date===date&&e.item==='Dhoni oil'))
+    put({id:uid(),kind:'exp',date,item:'Dhoni oil',amount:cost,paid:false,paidAt:null,addedBy:me});
+  hide('ov_fill');
+  toast('Oil fill saved — '+liters+' L');
+  return false;
+};
+render();
+</script>
+</body>
+</html>
