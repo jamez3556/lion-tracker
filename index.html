@@ -980,7 +980,10 @@ service cloud.firestore {
 <div class="toast" id="toast"></div>
 
 <script id="seed">
-const SEED_DATA=[];const SEED_CUSTOMERS=[];const SEED_CREDS=[];const SEED_CONTAINERS=[];
+const SEED_DATA=[];
+const SEED_CUSTOMERS=[];
+const SEED_CREDS=[];
+const SEED_CONTAINERS=[];
 </script>
 <script>
 /* ============ shared helpers ============ */
@@ -1557,7 +1560,14 @@ function renderConts(){
       <td data-l="R No">${esc(r.rNo)||'—'}</td>
       <td data-l="BL No">${esc(r.blNo)||'—'}</td>
       <td data-l="Container">${containerNoCell(r)}</td>
-      <td data-l="Clearance">${fmtDate(r.clearance)}</td>
+      <td data-l="Clearance">${(()=>{ // noted clearance date: bold + coloured (amber=today, blue=tomorrow, green=later/past)
+        if(!r.clearance)return '—';
+        const t=isoLocal(new Date());
+        const c=r.clearance===t?['#b45309','#fef3c7','today']
+              :r.clearance===addDays(t,1)?['#1d4ed8','#dbeafe','tomorrow']
+              :['#15803d','#dcfce7',''];
+        return `<span style="font-weight:800;color:${c[0]};background:${c[1]};padding:2px 8px;border-radius:8px;white-space:nowrap">${fmtDate(r.clearance)}${c[2]?' · '+c[2]:''}</span>`;
+      })()}</td>
       <td data-l="DO Approval">${fmtDate(r.doDate)}${needsDOExtend(r)?' <span class="daysbadge d-danger">⚠ Extend DO</span>':''}</td>
       <td data-l="Discharge">${fmtDate(r.discharge)}</td>
       <td data-l="Last Date">${badge}</td>
