@@ -3694,7 +3694,7 @@ function renderDoQueue(){
     return `<div style="display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;${billed?'opacity:.55':''}">
       ${ph?`<a href="${esc(ph.url)}" target="_blank" rel="noopener" title="Open the DO photo"><img src="${esc(ph.url)}" alt="DO" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"></a>`:''}
       <div style="flex:1;min-width:0;font-size:13px">
-        <div style="font-weight:800;font-size:14px">${esc(dp.awb)} · ${Number(dp.kg)||'—'} kg
+        <div style="font-weight:800;font-size:14px">${esc(dp.awb)} · ${Number(dp.kg)||'—'} kg${dp.rNo?' · R '+esc(dp.rNo):''}
           ${billed?`<span style="color:#16a34a;font-size:11.5px;font-weight:800;margin-left:6px">✅ BILLED${dp.billNo?' · '+esc(dp.billNo):''}</span>`:''}</div>
         <div style="color:var(--muted);margin:2px 0">${esc(dp.customer||'')}${dp.customer?' · ':''}${fmtDate(dp.date)} ${esc(dp.time||'')} · by ${esc(dp.by||'—')}${dp.macl?' · MACL <b>'+Number(dp.macl).toLocaleString()+'</b>':''}${dp.demur?' · Demurrage <b>'+Number(dp.demur).toLocaleString()+'</b>':''}${(dp.photos||[]).length>1?' · 📎 '+dp.photos.length+' photos':''}</div>
         ${extras?`<div style="color:#b45309;font-weight:600">＋ ${extras}</div>`:''}
@@ -3753,6 +3753,7 @@ function dpNewEntry(id){
   openEntryForm(null,'AP');
   document.getElementById('e_awbBl').value=dp.awb||'';
   document.getElementById('e_grsWt').value=dp.kg??'';
+  if(dp.rNo)document.getElementById('e_rNo').value=dp.rNo;
   if(dp.customer){
     document.getElementById('e_customer').value=dp.customer;
     // try to find the C number from the customer list by name
@@ -3782,7 +3783,7 @@ function bToggleCapture(){
   c.style.display=opening?'':'none';
   if(opening){
     ['b_ph_do','b_ph_macl','b_ph_dem','b_awb','b_kg','b_cust','b_macl','b_dem'].forEach(id=>{document.getElementById(id).value='';});
-    bExtras=[];bExList();['do','macl','dem'].forEach(bPickLabel);
+    window.__bRno='';bExtras=[];bExList();['do','macl','dem'].forEach(bPickLabel);
     document.getElementById('b_capStatus').textContent='';
     setTimeout(()=>document.getElementById('b_awb').focus(),50);
   }
@@ -3795,7 +3796,18 @@ function bPickLabel(slot){
   b.style.background=f?'#f0fdf4':'';
   b.style.borderColor=f?'#16a34a':(slot==='do'?'#e8730f':'');
 }
-function bPick(slot){bPickLabel(slot);}
+function bPick(slot){
+  bPickLabel(slot);
+  // DO photo picked → auto-read AWB / consignee / weight / R number (empty fields only, always amendable)
+  if(slot==='do'){
+    const f=document.getElementById('b_ph_do').files[0];
+    if(!f)return;
+    const st=document.getElementById('b_capStatus');
+    ocrExtract(f,m=>st.textContent=m)
+      .then(p=>ocrFill(p,{awb:'b_awb',kg:'b_kg',cust:'b_cust',rno:'__bRno'},st))
+      .catch(()=>st.textContent='Auto-read unavailable (offline?) — type the details');
+  }
+}
 function bExAdd(name){
   const item=name||prompt('Charge name:','');
   if(item===null||!String(item).trim())return;
@@ -3806,6 +3818,89 @@ function bExAdd(name){
 function bExList(){
   document.getElementById('b_exList').innerHTML=bExtras.map((x,i)=>
     `<span style="display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:4px 10px;margin:0 6px 6px 0;font-size:12.5px;background:#fff"><b>${esc(x.item)}</b> Rf ${x.amount.toLocaleString()} <button class="iconbtn del" onclick="bExtras.splice(${i},1);bExList()" style="padding:0">✕</button></span>`).join('');
+}
+// ---- OCR auto-read (free, in-browser Tesseract; no API key). Fills ONLY empty fields —
+// everything stays editable so a bad read is amended by hand. Loads the library lazily on first use.
+let __tessP=null;
+function tessLoad(){
+  if(__tessP)return __tessP;
+  __tessP=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload=()=>res(window.Tesseract);
+    s.onerror=()=>{__tessP=null;rej(new Error('OCR library failed to load'));};
+    document.head.appendChild(s);
+  });
+  return __tessP;
+}
+function ocrLoadImg(file){
+  return new Promise((res,rej)=>{
+    const url=URL.createObjectURL(file);
+    const img=new Image();
+    img.onload=()=>res(img);
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('not an image'));};
+    img.src=url;
+  });
+}
+function ocrCanvas(img,rot){
+  const MAX=2000;
+  let w=img.naturalWidth,h=img.naturalHeight;
+  const sc=Math.min(1,MAX/Math.max(w,h));w=Math.round(w*sc);h=Math.round(h*sc);
+  const c=document.createElement('canvas');
+  if(rot===90||rot===270){c.width=h;c.height=w;}else{c.width=w;c.height=h;}
+  const x=c.getContext('2d');
+  x.translate(c.width/2,c.height/2);x.rotate(rot*Math.PI/180);
+  x.drawImage(img,-w/2,-h/2,w,h);
+  return c;
+}
+function ocrParse(text){
+  const t=(text||'').toUpperCase();
+  const out={};
+  const awb=t.match(/\b(\d{3})\s*[-–—]?\s*(\d{8})\b/);
+  if(awb)out.awb=awb[1]+'-'+awb[2];
+  // consignee line: "CONSIGNEE : STATE ELECTRIC COMPANY"
+  const cons=t.split(/\n/).map(l=>l.trim()).find(l=>/CONSIGNEE/.test(l)&&!/AGENT/.test(l));
+  if(cons){
+    let nm=cons.replace(/.*CONSIGNEE/,'').replace(/^[\s:.\-]+/,'').replace(/[^A-Z0-9&.\-' ]+/g,' ').replace(/\s+/g,' ').trim();
+    // the OCR often merges the next column onto the same line — cut at known form labels
+    nm=nm.split(/\b(?:PCS|WGT|RECEIVED|NOTIFY|RECEIPT|CONDITION|LOCATION|SIGN|DATE|ID CARD|N ?O ?G)\b/)[0].trim().slice(0,40).trim();
+    if(nm.length>=4)out.consignee=nm;
+  }
+  // weight: "PCS/WGT ON MAWB : 1/54.0" or "PCS/WGT RECEIVED : 1/54.0"
+  const wg=t.match(/WGT[^\n]*?\b\d+\s*\/\s*(\d+(?:[.,]\d+)?)/);
+  if(wg)out.kg=Number(wg[1].replace(',','.'));
+  // R number: "R= 70166"
+  const rn=t.match(/\bR\s*[=\-:]\s*(\d{4,6})\b/);
+  if(rn)out.rNo=rn[1];
+  return out;
+}
+// tries the photo in 4 orientations until an AWB appears (phone photos are often sideways)
+async function ocrExtract(file,status){
+  const T=await tessLoad();
+  const img=await ocrLoadImg(file);
+  let best=null;
+  for(const rot of [0,270,90,180]){
+    status('🔍 Reading photo'+(rot?' ↻':'')+'…');
+    try{
+      const r=await T.recognize(ocrCanvas(img,rot),'eng');
+      const p=ocrParse(r&&r.data&&r.data.text);
+      if(p.awb)return p;                 // AWB found — this orientation is right
+      if(!best&&(p.consignee||p.kg))best=p;
+    }catch(e){}
+  }
+  return best;
+}
+// fill a set of inputs from OCR, never overwriting anything already typed
+function ocrFill(p,map,statusEl){
+  if(!p){statusEl.textContent='Could not read the photo — type the details';return;}
+  const got=[];
+  const set=(id,v,label)=>{const el=document.getElementById(id);
+    if(el&&v!=null&&v!==''&&el.value===''){el.value=v;got.push(label+' '+v);}};
+  if(map.awb)set(map.awb,p.awb,'AWB');
+  if(map.kg)set(map.kg,p.kg,'KG');
+  if(map.cust)set(map.cust,p.consignee,'');
+  if(map.rno&&p.rNo){window[map.rno]=p.rNo;got.push('R '+p.rNo);}
+  statusEl.textContent=got.length?('✓ Auto-read: '+got.join(', ')+' — please check & amend if wrong'):'Photo read, nothing new found — type the details';
 }
 // canvas-compress a photo to max 1600px JPEG (~150-400 KB) before upload
 function bShrink(file){
@@ -3847,7 +3942,7 @@ async function bSnapSave(){
     if(fM){st.textContent='Uploading MACL bill…';await put(fM,'MACL bill '+awb+'.jpg','dosnaps/'+id+'/macl.jpg');}
     const fD=document.getElementById('b_ph_dem').files[0];
     if(fD){st.textContent='Uploading demurrage bill…';await put(fD,'Demurrage bill '+awb+'.jpg','dosnaps/'+id+'/demurrage.jpg');}
-    dosnaps.push({id,awb,kg,
+    dosnaps.push({id,awb,kg,rNo:window.__bRno||'',
       macl:Number(document.getElementById('b_macl').value)||null,
       demur:Number(document.getElementById('b_dem').value)||null,
       customer:document.getElementById('b_cust').value.trim(),
