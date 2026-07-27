@@ -157,7 +157,9 @@ const MAIN_ROUTE='Airport–Malé';
 let data=[];        // live mirror of the 'expenses' collection
 let tab='exp';
 let preset=0;
-let me='';
+let me='',myEmail='';
+const ADMIN='jaamiz25@gmail.com';
+const isAdm=()=>myEmail===ADMIN;
 const uid=()=>'id'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);
 const iso=d=>{const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());};
 const today=()=>iso(new Date());
@@ -209,7 +211,8 @@ window.doSignIn=async ev=>{
 window.doSignOut=async()=>{await authM.signOut(auth);location.reload();};
 authM.onAuthStateChanged(auth,user=>{
   if(user){
-    me=(user.email||'').split('@')[0];
+    myEmail=(user.email||'').toLowerCase();
+    me=myEmail.split('@')[0];
     document.getElementById('who').textContent=user.email;
     document.getElementById('gate').style.display='none';
     listen();
@@ -249,7 +252,7 @@ function renderExp(){
         items.map(e=>`<div class="item">
           <span class="nm">${esc(e.item)}${e.addedBy?`<br><span class="muted" style="font-size:10.5px">${esc(e.addedBy)}</span>`:''}</span>
           <span class="amt">${rf(e.amount)}</span>
-          ${e.paid?'<span class="paid">PAID</span>':(e.addedBy===me?`<button class="del" onclick="delExp('${e.id}')">🗑</button>`:'')}
+          ${e.paid?'<span class="paid">PAID</span>':(isAdm()?`<button class="del" onclick="delExp('${e.id}')">🗑</button>`:'')}
         </div>`).join('');
     }).join('')}`;
 }
@@ -333,6 +336,7 @@ window.saveAdd=ev=>{
   return false;
 };
 window.delExp=id=>{
+  if(!isAdm()){toast('Only admin can delete — ask Jaamiz');return;}
   const e=kind('exp').find(x=>x.id===id);
   if(!e||e.paid)return;
   if(!confirm(`Delete "${e.item}" ${fmtD(e.date)} (${rf(e.amount)})?`))return;
