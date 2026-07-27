@@ -555,10 +555,12 @@
   <div class="toolbar">
     <button class="ghost" id="xp_sub_exp" onclick="xpSub('exp')">🧾 Daily Expenses</button>
     <button class="ghost" id="xp_sub_dhoni" onclick="xpSub('dhoni')">🛥️ Dhoni Fuel</button>
+    <button class="ghost" id="xp_sub_van" onclick="xpSub('van')">🚐 Van</button>
     <button class="ghost" id="xp_sub_salary" onclick="xpSub('salary')">👷 Salary</button>
   </div>
   <div id="xp_panel_exp"></div>
   <div id="xp_panel_dhoni" style="display:none"></div>
+  <div id="xp_panel_van" style="display:none"></div>
   <div id="xp_panel_salary" style="display:none"></div>
 </section>
 </div>
@@ -576,6 +578,25 @@
       </div>
       <div class="actions">
         <button type="button" class="ghost" onclick="closeModal('overlay-xpadd')">Cancel</button>
+        <button type="submit" class="primary">Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- expenses: van charge -->
+<div class="overlay" id="overlay-xpvan">
+  <div class="modal" style="max-width:420px">
+    <h2>🚐 Add Van Charge</h2>
+    <form onsubmit="return saveXpVan(event)">
+      <div class="field"><label>VAN COMPANY (account)</label><select id="xpv_vendor"></select></div>
+      <div class="field"><label>NOTE (which van / shipment)</label><input id="xpv_note" placeholder="Simer van laari" autocomplete="off"></div>
+      <div class="grid2">
+        <div class="field"><label>AMOUNT (Rf)</label><input id="xpv_amount" type="number" min="1" required></div>
+        <div class="field"><label>DATE</label><input id="xpv_date" type="date" required></div>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-xpvan')">Cancel</button>
         <button type="submit" class="primary">Add</button>
       </div>
     </form>
@@ -2140,7 +2161,7 @@ function exportPayments(){
 //   trip   {date,count,routes:{route:n}}         — dhoni trips per day
 //   staff  {no,name,salary,house,visa,insurance,startMonth}
 //   salpay {staffId,type,period,amount,paidAt}   — period = YYYY-MM (or YYYY for insurance)
-const XP_PRESETS=[{label:'Airport mehi',amount:360},{label:'Dhoni mehi',amount:660},{label:'Dhoni kappi',amount:400},{label:'Dhoni oil',amount:''},{label:'Other',amount:''}];
+const XP_PRESETS=[{label:'Airport mehi',amount:360},{label:'Dhoni mehi',amount:660},{label:'Dhoni kappi',amount:400},{label:'Dhoni oil',amount:''},{label:'Labour',amount:''},{label:'Other',amount:''}];
 const XP_SALTYPES=[{key:'salary',label:'Salary',field:'salary',yearly:false},{key:'house',label:'House + food',field:'house',yearly:false},{key:'visa',label:'Work visa fee',field:'visa',yearly:false},{key:'insurance',label:'Insurance',field:'insurance',yearly:true}];
 const XP_MAIN_ROUTE='Airport–Malé';
 const xpState={sub:'exp',month:'',sel:[],salMonth:isoLocal(new Date()).slice(0,7)};
@@ -2174,7 +2195,7 @@ function xpSub(s){xpState.sub=s;renderExpenses();}
 function renderExpenses(){
   if(!document.getElementById('view-expenses'))return;
   if(!isAdmin())return;
-  ['exp','dhoni','salary'].forEach(s=>{
+  ['exp','dhoni','van','salary'].forEach(s=>{
     document.getElementById('xp_panel_'+s).style.display=xpState.sub===s?'':'none';
     const b=document.getElementById('xp_sub_'+s);
     b.classList.toggle('primary',xpState.sub===s);
@@ -2182,6 +2203,7 @@ function renderExpenses(){
   });
   if(xpState.sub==='exp')renderXpExp();
   else if(xpState.sub==='dhoni')renderXpDhoni();
+  else if(xpState.sub==='van')renderXpVan();
   else renderXpSalary();
 }
 
@@ -2488,6 +2510,154 @@ function xpDelFill(id){
   if(!confirm(`Delete the ${xpD(p.date)} oil fill (${p.liters} L, ${rf(p.cost)})? The matching expense line is NOT deleted.`))return;
   expensesData=expensesData.filter(x=>x.id!==id);
   saveExpensesData();renderExpenses();
+}
+
+/* ---- van / transport (kind 'vendor' = van company account, kind 'van' = one charge) ---- */
+function renderXpVan(){
+  const vendors=xpKind('vendor');
+  const vans=xpKind('van');
+  const unpaid=vans.filter(v=>!v.paid);
+  const pend=unpaid.reduce((s,v)=>s+v.amount,0);
+  const thisMonth=isoLocal(new Date()).slice(0,7);
+  const mPaid=vans.filter(v=>v.paid&&v.date.startsWith(thisMonth)).reduce((s,v)=>s+v.amount,0);
+  document.getElementById('xp_stats').innerHTML=`
+    <div class="card c-danger"><div class="n">${rf(pend)}</div><div class="l">Van pending (${unpaid.length})</div></div>
+    <div class="card c-info"><div class="n">${rf(mPaid)}</div><div class="l">Paid — ${xpMonthLabel(thisMonth)}</div></div>
+    <div class="card c-purple"><div class="n">${vendors.length}</div><div class="l">Van accounts</div></div>`;
+  document.getElementById('xp_panel_van').innerHTML=`
+    <div class="toolbar" style="margin-top:0">
+      <button class="primary" onclick="openXpVanForm()">＋ Add Van Charge</button>
+      <button class="ghost" onclick="xpAddVendor()">＋ Van Account</button>
+      ${vans.some(v=>String(v.id).startsWith('vn-'))?'':'<button class="ghost" onclick="xpImportVans()">⤵ Import Viber van list (27-07)</button>'}
+    </div>
+    ${vendors.length===0?'<div class="empty" style="display:block"><div class="big">🚐</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No van accounts yet</div><div style="margin-top:4px">Add a van account, or import the Viber list.</div></div>':''}
+    ${vendors.map(vd=>{
+      const list=vans.filter(v=>v.vendor===vd.account);
+      const up=list.filter(v=>!v.paid).sort((a,b)=>a.date<b.date?-1:1);
+      const upT=up.reduce((s,v)=>s+v.amount,0);
+      const lastPaid=list.filter(v=>v.paid).sort((a,b)=>(a.paidAt||'')<(b.paidAt||'')?1:-1)[0];
+      return `<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <b>${esc(vd.name||'Van account')}</b>
+          <a href="javascript:void(0)" onclick="copyText('${esc(vd.account)}')" title="Copy account number for transfer" style="font-size:12.5px">${esc(vd.account)} 📋</a>
+          ${vd.accName?`<span style="color:var(--muted);font-size:12px">${esc(vd.accName)}</span>`:''}
+          <button class="ghost" style="padding:2px 8px;font-size:11px" onclick="xpEditVendor('${vd.id}')">✎</button>
+          <span style="margin-left:auto;font-weight:800;color:${upT?'#dc2626':'#16a34a'}">${upT?rf(upT)+' pending':'✓ settled'}</span>
+          ${upT?`<button class="primary" style="padding:5px 12px;font-size:12px" onclick="xpVanPayAll('${vd.id}')">✓ PAID + receipt</button>`:''}
+        </div>
+        ${up.map(v=>`
+          <div style="display:flex;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid #f1f5f9;align-items:center">
+            <span>${xpD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><b>${rf(v.amount)}</b>
+            <button class="ghost" style="padding:2px 7px;font-size:11px" onclick="xpDelVan('${v.id}')">🗑</button>
+          </div>`).join('')}
+        ${lastPaid?`<div style="color:var(--muted);font-size:11.5px;margin-top:6px">Last paid ${lastPaid.paidAt?xpD(lastPaid.paidAt.slice(0,10)):''} — ${rf(lastPaid.amount)}</div>`:''}
+      </div>`;}).join('')}`;
+}
+function xpAddVendor(){
+  if(!xpGuard())return;
+  const account=(prompt('Account number (for bank transfer):')||'').trim();
+  if(!account)return;
+  if(xpKind('vendor').some(v=>v.account===account)){toast('That account already exists');return;}
+  const name=(prompt('Company / owner name for this account:')||'').trim();
+  const accName=(prompt('Account name shown in bank (optional):')||'').trim();
+  expensesData.push({id:uid(),kind:'vendor',account,name,accName});
+  saveExpensesData();renderExpenses();
+  toast('Van account added');
+}
+function xpEditVendor(id){
+  if(!xpGuard())return;
+  const vd=xpKind('vendor').find(v=>v.id===id);if(!vd)return;
+  const name=prompt('Company / owner name:',vd.name||'');if(name===null)return;
+  const accName=prompt('Account name in bank (optional):',vd.accName||'');if(accName===null)return;
+  vd.name=name.trim();vd.accName=accName.trim();
+  saveExpensesData();renderExpenses();
+}
+function openXpVanForm(){
+  if(!xpGuard())return;
+  const vendors=xpKind('vendor');
+  if(!vendors.length){toast('Add a van account first');return;}
+  document.getElementById('xpv_vendor').innerHTML=vendors.map(v=>
+    `<option value="${esc(v.account)}">${esc(v.name||v.account)} — ${esc(v.account)}</option>`).join('');
+  document.getElementById('xpv_note').value='';
+  document.getElementById('xpv_amount').value='';
+  document.getElementById('xpv_date').value=isoLocal(new Date());
+  showModal('overlay-xpvan');
+}
+function saveXpVan(ev){
+  ev.preventDefault();
+  if(!xpGuard())return false;
+  const vendor=document.getElementById('xpv_vendor').value;
+  const note=document.getElementById('xpv_note').value.trim()||'van laari';
+  const amount=parseInt(document.getElementById('xpv_amount').value,10);
+  const date=document.getElementById('xpv_date').value;
+  if(!vendor||!amount||!date)return false;
+  expensesData.push({id:uid(),kind:'van',date,vendor,note,amount,paid:false,paidAt:null});
+  saveExpensesData();closeModal('overlay-xpvan');
+  renderExpenses();
+  toast('Added '+note+' · '+rf(amount));
+  return false;
+}
+function xpVanPayAll(vendorId){
+  if(!xpGuard())return;
+  const vd=xpKind('vendor').find(v=>v.id===vendorId);if(!vd)return;
+  const up=xpKind('van').filter(v=>v.vendor===vd.account&&!v.paid);
+  if(!up.length)return;
+  const total=up.reduce((s,v)=>s+v.amount,0);
+  if(!confirm(`Mark ${up.length} van charge(s) — ${rf(total)} — to ${vd.name||vd.account} as PAID?\n(Transfer to ${vd.account} first, then confirm.)`))return;
+  const now=new Date().toISOString();
+  up.forEach(v=>{v.paid=true;v.paidAt=now;});
+  saveExpensesData();renderExpenses();
+  const lines=[...up].sort((a,b)=>a.date<b.date?-1:1).map(v=>`${xpD(v.date)} ${v.note||'van laari'} ${v.amount}`);
+  document.getElementById('xpr_text').value=
+    `✅ PAID ${rf(total)} on ${xpD(isoLocal(new Date()))}\nAcct ${vd.account}${vd.name?' ('+vd.name+')':''}\n\n`+
+    lines.join('\n')+`\n\nTotal: ${rf(total)}\nLion Logistics`;
+  showModal('overlay-xprec');
+}
+function xpDelVan(id){
+  if(!xpGuard())return;
+  const v=xpKind('van').find(x=>x.id===id);if(!v)return;
+  if(!confirm(`Delete "${v.note||'van laari'}" ${xpD(v.date)} (${rf(v.amount)})?`))return;
+  expensesData=expensesData.filter(x=>x.id!==id);
+  saveExpensesData();renderExpenses();
+}
+// Van pending list from the "Van payment" Viber group (verified 27-07-2026). Deterministic ids → idempotent.
+function xpImportVans(){
+  if(!xpGuard())return;
+  const out=[];
+  let n=0;
+  const vd=(account)=>out.push({id:'vv-'+account,kind:'vendor',account,name:'',accName:''});
+  const add=(vendor,date,note,amount)=>out.push({id:'vn-'+vendor+'-'+(n++),kind:'van',date,vendor,note,amount,paid:false,paidAt:null});
+  const jul=d=>'2026-07-'+String(d).padStart(2,'0');
+  vd('7730000290843');
+  add('7730000290843',jul(14),'Simer van laari',300);
+  add('7730000290843',jul(17),'Simer van laari',600);
+  add('7730000290843',jul(18),'Kianan van laari',300);
+  add('7730000290843',jul(18),'Simer van laari',600);
+  add('7730000290843',jul(20),'Winbiz van laari',150);
+  add('7730000290843',jul(24),'Simer van laari',600);
+  vd('7730000577657');
+  add('7730000577657',jul(14),'Simer n winbiz',600);
+  add('7730000577657',jul(15),'Simer van laari',300);
+  add('7730000577657',jul(17),'Simer van laari',300);
+  add('7730000577657',jul(18),'Simer van laari',600);
+  add('7730000577657',jul(19),'Simer van laari',300);
+  add('7730000577657',jul(23),'Simer van laari',600);
+  vd('7703216957001');
+  add('7703216957001',jul(14),'Simer van laari',600);
+  add('7703216957001',jul(15),'Simer van laari',300);
+  // labour list from the same Viber group (daily cash) → goes to Daily Expenses as "Labour"
+  [[3,1050],[4,700],[7,700],[10,1050],[14,1050],[15,700],[17,1050],[18,1050],[23,1050]].forEach(([d,amt])=>
+    out.push({id:'vbl-'+jul(d),kind:'exp',date:jul(d),item:'Labour',amount:amt,paid:false,paidAt:null}));
+  const have=new Set(expensesData.map(r=>r.id));
+  const haveAcct=new Set(xpKind('vendor').map(v=>v.account));
+  const fresh=out.filter(r=>!have.has(r.id)&&!(r.kind==='vendor'&&haveAcct.has(r.account)));
+  if(!fresh.length){toast('Van list already imported');return;}
+  const total=fresh.filter(r=>r.kind==='van').reduce((s,v)=>s+v.amount,0);
+  const lab=fresh.filter(r=>r.kind==='exp').reduce((s,v)=>s+v.amount,0);
+  if(!confirm(`Import from the Van payment Viber group?\n• 3 van accounts, ${rf(total)} pending\n• Labour ${rf(lab)} → Daily Expenses`))return;
+  expensesData.push(...fresh);
+  saveExpensesData();renderExpenses();updateCounts();
+  toast('Imported — vans '+rf(total)+' + labour '+rf(lab));
 }
 
 /* ---- salary ---- */
