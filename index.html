@@ -800,6 +800,7 @@
       <span style="font-size:12px;color:var(--muted)">Add line:</span>
       <button type="button" class="ghost" onclick="invAddLine({name:'Transport',tax:8})">＋ Transport</button>
       <button type="button" class="ghost" onclick="invAddLine({name:'Handling',tax:8})">＋ Handling</button>
+      <button type="button" class="ghost" onclick="invAddLine({name:'Storage Fee (Air)',qty:1,tax:0})" title="MACL demurrage pass-through — actual amount, no GST">＋ Storage/Demurrage</button>
       <button type="button" class="ghost" onclick="invAddLine({name:'',tax:8})">＋ Custom (GST)</button>
       <button type="button" class="ghost" onclick="invAddLine({name:'',tax:0})">＋ Custom (non-tax)</button>
     </div>
@@ -950,6 +951,13 @@ service cloud.firestore {
         <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);margin-top:4px;cursor:pointer">
           <input type="checkbox" id="u_no_proc" style="width:auto"> No Processing Charges line for this customer
         </label>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);margin-top:4px;cursor:pointer">
+          <input type="checkbox" id="u_no_ff" style="width:auto"> No Form Filling line for this customer
+        </label>
+        <div class="grid2" style="margin-top:6px">
+          <div class="field"><label>BILL ONLY ABOVE (KG) — at/below: pass-throughs only</label><input id="u_min_kg" type="number" step="any" min="0" placeholder="e.g. 50 (STELCO)"></div>
+          <div class="field"><label>CLEARANCE LINE LABEL (custom)</label><input id="u_clear_label" placeholder="e.g. Clearance KG Above 50"></div>
+        </div>
       </div>
       <div id="u_docs" style="margin-top:12px"></div>
       <div class="actions">
@@ -3051,6 +3059,11 @@ const QB_ITEMS={
   'clearance kg':{air:15,sea:15},        // air-only item
   'dhoni charges':{air:9,sea:10},
   'delivery order fee':{air:19,sea:20},
+  'delivery order fee (air)':{air:19,sea:19},
+  'clearance kg above 50':{air:15,sea:15},   // STELCO label — same Clearance KG (Air) item
+  'storage fee':{air:19,sea:20},             // MACL demurrage pass-through — billed on the DO Fee item (per real invoices)
+  'storage fee (air)':{air:19,sea:19},
+  'macl charge':{air:19,sea:19},
   'customs duty':{air:17,sea:18},
   'transport':{air:23,sea:24},           // billed as Lorry Charges
   'lorry charges':{air:23,sea:24},
@@ -3115,11 +3128,18 @@ function expectedLines(e){
   const wt=e.grsWt!=null?e.grsWt:'';
   const prof=(cust&&cust.apProfile)||{};
   const L=[];
-  L.push({name:'Form Filling',qty:prof.ffQty!=null?prof.ffQty:8,rate:rate('Form Filling'),tax:8});
-  if(!prof.noProc)L.push({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8});
-  if(prof.clearMode==='Box')L.push({name:'Clearance Box',qty:e.pkgs!=null?e.pkgs:'',rate:rate('Clearance Box'),tax:8});
-  else L.push({name:'Clearance KG',qty:wt,rate:rate('Clearance KG'),tax:8});
-  if(!prof.noDhoni)L.push({name:'Dhoni Charges',qty:wt,rate:rate('Dhoni Charges'),tax:8});
+  // minKg rule (e.g. STELCO "bill only above 50 kg"): at/below the threshold NO service charges —
+  // the invoice carries only the actual pass-throughs (MACL / duty). Unknown weight = bill normally.
+  const svc=!(prof.minKg&&wt!==''&&Number(wt)<=Number(prof.minKg));
+  if(svc){
+    if(!prof.noFF)L.push({name:'Form Filling',qty:prof.ffQty!=null?prof.ffQty:8,rate:rate('Form Filling'),tax:8});
+    if(!prof.noProc)L.push({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8});
+    // clearLabel renames the clearance line on the invoice (e.g. "Clearance KG Above 50") — the rate
+    // still comes from the Clearance KG/Box rate and the QB item resolves via QB_ITEMS
+    if(prof.clearMode==='Box')L.push({name:prof.clearLabel||'Clearance Box',qty:e.pkgs!=null?e.pkgs:'',rate:rate('Clearance Box'),tax:8});
+    else L.push({name:prof.clearLabel||'Clearance KG',qty:wt,rate:rate('Clearance KG'),tax:8});
+    if(!prof.noDhoni)L.push({name:'Dhoni Charges',qty:wt,rate:rate('Dhoni Charges'),tax:8});
+  }
   // DO Fee: actual MACL amount from the Payment tab wins; otherwise auto-estimate from the KG (AP only)
   L.push({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:(e.type==='AP'?maclEstimate(wt):'')),tax:0,est:!(pay&&pay.macl!=null)});
   L.push({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0,est:!(pay&&pay.duty!=null)});
@@ -3608,7 +3628,7 @@ function renderDoQueue(){
       <div style="flex:1;min-width:0;font-size:13px">
         <div style="font-weight:800;font-size:14px">${esc(dp.awb)} · ${Number(dp.kg)||'—'} kg
           ${billed?`<span style="color:#16a34a;font-size:11.5px;font-weight:800;margin-left:6px">✅ BILLED${dp.billNo?' · '+esc(dp.billNo):''}</span>`:''}</div>
-        <div style="color:var(--muted);margin:2px 0">${esc(dp.customer||'')}${dp.customer?' · ':''}${fmtDate(dp.date)} ${esc(dp.time||'')} · by ${esc(dp.by||'—')}${dp.macl?' · MACL <b>'+Number(dp.macl).toLocaleString()+'</b>':''}${(dp.photos||[]).length>1?' · 📎 '+dp.photos.length+' photos':''}</div>
+        <div style="color:var(--muted);margin:2px 0">${esc(dp.customer||'')}${dp.customer?' · ':''}${fmtDate(dp.date)} ${esc(dp.time||'')} · by ${esc(dp.by||'—')}${dp.macl?' · MACL <b>'+Number(dp.macl).toLocaleString()+'</b>':''}${dp.demur?' · Demurrage <b>'+Number(dp.demur).toLocaleString()+'</b>':''}${(dp.photos||[]).length>1?' · 📎 '+dp.photos.length+' photos':''}</div>
         ${extras?`<div style="color:#b45309;font-weight:600">＋ ${extras}</div>`:''}
         <div style="margin-top:3px">${matchTxt}</div>
       </div>
@@ -3655,6 +3675,8 @@ function dpBill(id){
     if(Number(dp.macl))document.querySelectorAll('#inv_lines .invline').forEach(tr=>{
       if(tr.querySelector('.invname').value==='Delivery Order Fee')tr.querySelector('.invrate').value=Number(dp.macl);
     });
+    // demurrage slip (separate MACL invoice) → its own non-tax pass-through line
+    if(Number(dp.demur))invAddLine({name:'Storage Fee (Air)',qty:1,rate:Number(dp.demur),tax:0});
     (dp.extras||[]).forEach(x=>invAddLine({name:x.item,qty:1,rate:x.amount,tax:8}));
     invCalc();
   }
@@ -3668,10 +3690,13 @@ function dpNewEntry(id){
   if(dp.customer){
     document.getElementById('e_customer').value=dp.customer;
     // try to find the C number from the customer list by name
-    const nm=dp.customer.trim().toLowerCase();
-    // staff type the name freely ("CHAPS RESERVED" vs list "CHAPS") — match either direction, 4+ chars only
-    const c=customers.find(x=>(x.name||'').trim().toLowerCase()===nm)
-      ||customers.find(x=>{const n=(x.name||'').trim().toLowerCase();return n.length>=4&&nm.length>=4&&(n.includes(nm)||nm.includes(n));});
+    // staff type the name freely ("STATE ELECTRIC COMPANY" vs list "STATE ELECTRIC CO LTD",
+    // "CHAPS RESERVED" vs "CHAPS") — normalize away legal suffixes, then exact / contains either way
+    const nrm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9 ]+/g,' ')
+      .replace(/\b(pvt|private|ltd|limited|llp|co|company)\b/g,' ').replace(/\s+/g,' ').trim();
+    const nm=nrm(dp.customer);
+    const c=nm.length>=4&&(customers.find(x=>nrm(x.name)===nm)
+      ||customers.find(x=>{const n=nrm(x.name);return n.length>=4&&(n.includes(nm)||nm.includes(n));}));
     if(c){document.getElementById('e_cno').value=c.cno;document.getElementById('e_customer').value=c.name;
       document.getElementById('e_custHint').textContent='✓ Found in customer list';}
   }
@@ -3762,12 +3787,14 @@ function openCustForm(id){
     u_rate_cl.value=(pf.clearMode==='Box'?ar['Clearance Box']:ar['Clearance KG'])??'';
     u_rate_dh.value=ar['Dhoni Charges']??'';
     u_ff_qty.value=pf.ffQty??'';u_no_dhoni.checked=!!pf.noDhoni;u_no_proc.checked=!!pf.noProc;
+    u_no_ff.checked=!!pf.noFF;u_min_kg.value=pf.minKg??'';u_clear_label.value=pf.clearLabel||'';
     document.getElementById('u_docs').innerHTML=
       `<button type="button" class="ghost" onclick="closeModal('overlay-cust');openAttachCust('${r.id}')">📎 Documents${r.attachments&&r.attachments.length?' ('+r.attachments.length+')':''}</button>
        <span style="font-size:12px;color:#94a3b8;margin-left:8px">ID, licences, forms — shared with the Logins tab</span>`;
   }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';u_contact.value='';
     u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';
     u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;u_no_proc.checked=false;
+    u_no_ff.checked=false;u_min_kg.value='';u_clear_label.value='';
     document.getElementById('u_docs').innerHTML=
       `<input type="file" id="u_docs_file" multiple style="display:none" onchange="custPickDocs(this.files)">
        <button type="button" class="ghost" onclick="document.getElementById('u_docs_file').click()">📎 Add documents</button>
@@ -3789,6 +3816,9 @@ function saveCust(e){
   if(u_clear_mode.value==='Box')apProfile.clearMode='Box';
   if(u_no_dhoni.checked)apProfile.noDhoni=true;
   if(u_no_proc.checked)apProfile.noProc=true;
+  if(u_no_ff.checked)apProfile.noFF=true;
+  if(u_min_kg.value!=='')apProfile.minKg=Number(u_min_kg.value);
+  if(u_clear_label.value.trim())apProfile.clearLabel=u_clear_label.value.trim();
   if(!u_id.value){
     const ex=lookupCustomer(cno);
     if(ex){toast('C number already in list: '+ex.name);return false;}
@@ -4220,6 +4250,20 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
   seed('WHITE MINA',c=>{c.apProfile={noProc:true,noDhoni:true};});
   localStorage.setItem('lion_profile_seed_v2','1');
   if(n){saveCustomers();toast(n+' customer billing profile'+(n>1?'s':'')+' set from recent invoices');}
+})();
+(()=>{ // seed v3 — STELCO air (QB "Stelco Air" template + real invoices L26/1261, 1187, 1259…):
+  // only "Clearance KG Above 50" at 9.00/kg × FULL weight (GST) + MACL actual pass-throughs;
+  // at/below 50 kg no service charge at all — pass-throughs only.
+  if(localStorage.getItem('lion_profile_seed_v3'))return;
+  let n=0;
+  const seed=(match,fn)=>{const c=customers.find(x=>(x.name||'').toUpperCase().includes(match));
+    if(c&&(!c.apProfile||!Object.keys(c.apProfile).length)){fn(c);n++;}};
+  seed('STATE ELECTRIC',c=>{
+    c.apProfile={noFF:true,noProc:true,noDhoni:true,minKg:50,clearLabel:'Clearance KG Above 50'};
+    c.apRates=Object.assign({},c.apRates,{'Clearance KG':9});
+  });
+  localStorage.setItem('lion_profile_seed_v3','1');
+  if(n){saveCustomers();toast('STELCO air billing profile set (9/kg above 50 kg, pass-throughs only below)');}
 })();
 // Backfill missing C numbers on saved logins (many sheet-imported logins had none): exact,
 // unambiguous name match against the Customers list. Runs each load; already-filled rows untouched.
