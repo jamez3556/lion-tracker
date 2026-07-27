@@ -334,7 +334,7 @@ window.saveVan=ev=>{
   return false;
 };
 function renderExp(){
-  const exps=kind('exp');
+  const exps=kind('exp').filter(e=>e.item!=='Labour'); // labour has its own tab
   const unpaid=exps.filter(e=>!e.paid);
   const unpaidTotal=unpaid.reduce((s,e)=>s+e.amount,0);
   const m=today().slice(0,7);
