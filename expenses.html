@@ -123,6 +123,7 @@
         <div class="field"><label>COST (Rf)</label><input id="f_cost" type="number" min="1" inputmode="numeric" required></div>
       </div>
       <div class="field"><label>DATE</label><input id="f_date" type="date" required></div>
+      <div class="field"><label>BILL PHOTO (optional)</label><input id="f_bill" type="file" accept="image/*,.pdf"></div>
       <label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-bottom:12px">
         <input type="checkbox" id="f_toexp" checked style="width:18px;height:18px"> Also add to expense list (Dhoni oil)
       </label>
@@ -142,14 +143,21 @@ const CFG={apiKey:"AIzaSyAkNK-8qXg6kHTqrpof90BwIM81vh5ER4o",
   storageBucket:"lion-tracker-47830.firebasestorage.app",
   messagingSenderId:"1076678882929",appId:"1:1076678882929:web:bf0a470ec4b5e639b20dd0"};
 const V='10.12.5';
-const [appM,authM,fsM]=await Promise.all([
+const [appM,authM,fsM,stM]=await Promise.all([
   import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
   import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
-  import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`)
+  import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
+  import(`https://www.gstatic.com/firebasejs/${V}/firebase-storage.js`)
 ]);
 const app=appM.initializeApp(CFG);
 const auth=authM.getAuth(app);
 const db=fsM.initializeFirestore(app,{localCache:fsM.persistentLocalCache({tabManager:fsM.persistentMultipleTabManager()})});
+const fst=stM.getStorage(app,'gs://lion-tracker-47830.firebasestorage.app');
+async function upload(path,file){
+  const r=stM.ref(fst,path);
+  await stM.uploadBytes(r,file);
+  return await stM.getDownloadURL(r);
+}
 
 /* ---------- state ---------- */
 const PRESETS=[{label:'Airport mehi',amount:360},{label:'Dhoni mehi',amount:660},{label:'Dhoni kappi',amount:400},{label:'Dhoni oil',amount:''},{label:'Other',amount:''}];
@@ -289,13 +297,14 @@ function renderDhoni(){
     <div class="card">
       <div class="muted" style="font-weight:700;margin-bottom:8px">OIL FILLS ${f.avg?'· normal '+f.avg.toFixed(1)+' L/trip':''}</div>
       <table>
-        <tr><th>Date</th><th class="num">L</th><th class="num">Cost</th><th class="num">Trips</th><th class="num">L/trip</th></tr>
+        <tr><th>Date</th><th class="num">L</th><th class="num">Cost</th><th class="num">Trips</th><th class="num">L/trip</th><th>Bill</th></tr>
         ${f.periods.map(p=>`<tr>
           <td>${fmtD(p.date)}${f.flag(p)?'<br><span class="flagbad">⚠ CHECK</span>':''}</td>
           <td class="num">${p.liters}</td><td class="num">${Number(p.cost).toLocaleString()}</td>
           <td class="num">${p.trips}${p.open?'…':''}</td>
           <td class="num">${p.lPerTrip?p.lPerTrip.toFixed(1):'—'}</td>
-        </tr>`).join('')||'<tr><td colspan="5" class="muted">No fills yet</td></tr>'}
+          <td>${p.bill?`<a href="${esc(p.bill.url)}" target="_blank" rel="noopener">🧾</a>`:`<button class="del" style="opacity:1" onclick="attachFill('${p.id}')">📎</button>`}</td>
+        </tr>`).join('')||'<tr><td colspan="6" class="muted">No fills yet</td></tr>'}
       </table>
     </div>
     <div class="card">
@@ -366,18 +375,45 @@ window.openFill=()=>{
   document.getElementById('f_toexp').checked=true;
   show('ov_fill');
 };
-window.saveFill=ev=>{
+window.saveFill=async ev=>{
   ev.preventDefault();
   const liters=parseInt(document.getElementById('f_liters').value,10);
   const cost=parseInt(document.getElementById('f_cost').value,10);
   const date=document.getElementById('f_date').value;
   if(!liters||!cost||!date)return false;
-  put({id:uid(),kind:'fill',date,liters,cost,addedBy:me});
+  const rec={id:uid(),kind:'fill',date,liters,cost,addedBy:me};
+  const file=document.getElementById('f_bill').files[0];
+  if(file){
+    if(file.size>25*1024*1024){toast('File too big (max 25 MB)');return false;}
+    toast('Uploading bill…');
+    try{
+      const path='expenses/'+rec.id+'/'+Date.now()+'_'+file.name.replace(/[^\w.\-]+/g,'_');
+      rec.bill={name:file.name,path,url:await upload(path,file),size:file.size};
+    }catch(e){toast('Bill upload failed — fill saved without it');}
+  }
+  put(rec);
   if(document.getElementById('f_toexp').checked&&!kind('exp').some(e=>e.date===date&&e.item==='Dhoni oil'))
     put({id:uid(),kind:'exp',date,item:'Dhoni oil',amount:cost,paid:false,paidAt:null,addedBy:me});
   hide('ov_fill');
-  toast('Oil fill saved — '+liters+' L');
+  toast('Oil fill saved — '+liters+' L'+(rec.bill?' · 🧾 bill attached':''));
   return false;
+};
+window.attachFill=id=>{
+  const inp=document.createElement('input');
+  inp.type='file';inp.accept='image/*,.pdf';
+  inp.onchange=async()=>{
+    const file=inp.files[0];if(!file)return;
+    if(file.size>25*1024*1024){toast('File too big (max 25 MB)');return;}
+    const p=kind('fill').find(x=>x.id===id);if(!p)return;
+    toast('Uploading bill…');
+    try{
+      const path='expenses/'+p.id+'/'+Date.now()+'_'+file.name.replace(/[^\w.\-]+/g,'_');
+      p.bill={name:file.name,path,url:await upload(path,file),size:file.size};
+      put(p);
+      toast('🧾 Bill attached');
+    }catch(e){toast('Upload failed — check connection');}
+  };
+  inp.click();
 };
 render();
 </script>
