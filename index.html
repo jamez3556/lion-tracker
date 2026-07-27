@@ -289,6 +289,7 @@
     <button data-view="payments">💰 Payment <span class="cnt" id="cnt-payments"></span></button>
     <button data-view="customers">👥 Customers <span class="cnt" id="cnt-customers"></span></button>
     <button data-view="creds">🔐 MPL &amp; Custom Logins <span class="cnt" id="cnt-creds"></span></button>
+    <button data-view="expenses" id="tab-expenses" style="display:none">💵 Expenses <span class="cnt" id="cnt-expenses"></span></button>
   </nav>
 </header>
 <div class="alertbar" id="alertbar" onclick="goToDOList()"></div>
@@ -547,6 +548,95 @@
     <div class="pager" id="p_pager"></div>
   </div>
 </section>
+
+<!-- ==================== EXPENSES VIEW (admin only) ==================== -->
+<section class="view" id="view-expenses">
+  <div class="stats" id="xp_stats"></div>
+  <div class="toolbar">
+    <button class="ghost" id="xp_sub_exp" onclick="xpSub('exp')">🧾 Daily Expenses</button>
+    <button class="ghost" id="xp_sub_dhoni" onclick="xpSub('dhoni')">🛥️ Dhoni Fuel</button>
+    <button class="ghost" id="xp_sub_salary" onclick="xpSub('salary')">👷 Salary</button>
+  </div>
+  <div id="xp_panel_exp"></div>
+  <div id="xp_panel_dhoni" style="display:none"></div>
+  <div id="xp_panel_salary" style="display:none"></div>
+</section>
+</div>
+
+<!-- expenses: add expense -->
+<div class="overlay" id="overlay-xpadd">
+  <div class="modal" style="max-width:420px">
+    <h2>＋ Add Expense</h2>
+    <form onsubmit="return saveXpAdd(event)">
+      <div id="xpa_presets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
+      <div class="field"><label>EXPENSE</label><input id="xpa_item" required autocomplete="off"></div>
+      <div class="grid2">
+        <div class="field"><label>AMOUNT (Rf)</label><input id="xpa_amount" type="number" min="1" required></div>
+        <div class="field"><label>DATE</label><input id="xpa_date" type="date" required></div>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-xpadd')">Cancel</button>
+        <button type="submit" class="primary">Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- expenses: oil fill -->
+<div class="overlay" id="overlay-xpfill">
+  <div class="modal" style="max-width:420px">
+    <h2>⛽ Log Oil Fill</h2>
+    <form onsubmit="return saveXpFill(event)">
+      <div class="grid2">
+        <div class="field"><label>LITERS</label><input id="xpf_liters" type="number" min="1" required></div>
+        <div class="field"><label>COST (Rf)</label><input id="xpf_cost" type="number" min="1" required></div>
+      </div>
+      <div class="field"><label>DATE</label><input id="xpf_date" type="date" required></div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:4px 0 8px;cursor:pointer">
+        <input type="checkbox" id="xpf_toexp" checked style="width:auto"> Also add to the expense list (Dhoni oil)
+      </label>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-xpfill')">Cancel</button>
+        <button type="submit" class="primary">Save Fill</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- expenses: staff form -->
+<div class="overlay" id="overlay-xpstaff">
+  <div class="modal" style="max-width:460px">
+    <h2 id="xps_title">＋ Add Staff</h2>
+    <form onsubmit="return saveXpStaff(event)">
+      <input type="hidden" id="xps_id">
+      <div class="field"><label>NAME</label><input id="xps_name" required autocomplete="off"></div>
+      <div class="grid2">
+        <div class="field"><label>SALARY (Rf / month)</label><input id="xps_salary" type="number" min="0" value="0"></div>
+        <div class="field"><label>HOUSE + FOOD (Rf / month)</label><input id="xps_house" type="number" min="0" value="0"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>WORK VISA FEE (Rf / month)</label><input id="xps_visa" type="number" min="0" value="0"></div>
+        <div class="field"><label>INSURANCE (Rf / YEAR)</label><input id="xps_insurance" type="number" min="0" value="0"></div>
+      </div>
+      <div class="field"><label>JOINED (month)</label><input id="xps_start" type="month"></div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-xpstaff')">Cancel</button>
+        <button type="submit" class="primary">Save Staff</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- expenses: receipt -->
+<div class="overlay" id="overlay-xprec">
+  <div class="modal" style="max-width:420px">
+    <h2>🧾 Receipt</h2>
+    <textarea id="xpr_text" readonly style="width:100%;min-height:200px;font-family:ui-monospace,Consolas,monospace;font-size:13px;padding:10px;border:1px solid var(--line);border-radius:10px;background:#f8fafc"></textarea>
+    <div class="actions">
+      <button type="button" class="ghost" onclick="closeModal('overlay-xprec')">Close</button>
+      <button type="button" class="primary" onclick="copyText(document.getElementById('xpr_text').value)">📋 Copy for Viber</button>
+    </div>
+  </div>
 </div>
 
 <!-- ==================== MODALS ==================== -->
@@ -1002,12 +1092,14 @@ let creds=store('lion_creds_v1',SEED_CREDS);
 let containers=store('lion_containers_v1',SEED_CONTAINERS);
 let payments=store('lion_payments_v1',(typeof SEED_PAYMENTS!=='undefined')?SEED_PAYMENTS:[]);
 let team=store('lion_team_v1',[]);
+let expensesData=store('lion_expenses_v1',[]); // admin-only: daily expenses / dhoni fuel / salary (kind: exp|fill|trip|staff|salpay)
 const saveEntries=()=>{localStorage.setItem('lion_clearance_v2',JSON.stringify(entries));window.__cloudPush&&window.__cloudPush('entries');};
 const saveCustomers=()=>{localStorage.setItem('lion_customers_v1',JSON.stringify(customers));window.__cloudPush&&window.__cloudPush('customers');};
 const saveCreds=()=>{localStorage.setItem('lion_creds_v1',JSON.stringify(creds));window.__cloudPush&&window.__cloudPush('creds');};
 const saveContainers=()=>{localStorage.setItem('lion_containers_v1',JSON.stringify(containers));window.__cloudPush&&window.__cloudPush('containers');};
 const savePayments=()=>{localStorage.setItem('lion_payments_v1',JSON.stringify(payments));window.__cloudPush&&window.__cloudPush('payments');};
 const saveTeam=()=>{localStorage.setItem('lion_team_v1',JSON.stringify(team));window.__cloudPush&&window.__cloudPush('team');};
+const saveExpensesData=()=>{localStorage.setItem('lion_expenses_v1',JSON.stringify(expensesData));window.__cloudPush&&window.__cloudPush('expenses');};
 
 function lookupCustomer(cno){
   cno=(cno||'').trim().toUpperCase();
@@ -1033,7 +1125,7 @@ function wireAutofill(cnoInput,nameInput,hintEl){
 }
 
 /* ============ nav ============ */
-const VIEWTITLES={entries:'Form Log',mp:'MP Shipments',containers:'Container Status',payments:'Payment',customers:'Customer List',creds:'MPL & Custom Logins'};
+const VIEWTITLES={entries:'Form Log',mp:'MP Shipments',containers:'Container Status',payments:'Payment',customers:'Customer List',creds:'MPL & Custom Logins',expenses:'Daily Expenses'};
 document.querySelectorAll('#nav button').forEach(b=>{
   b.addEventListener('click',()=>{
     document.querySelectorAll('#nav button').forEach(x=>x.classList.remove('active'));
@@ -1051,6 +1143,7 @@ function updateCounts(){
   document.getElementById('cnt-payments').textContent=payments.length.toLocaleString();
   document.getElementById('cnt-customers').textContent=customers.length.toLocaleString();
   document.getElementById('cnt-creds').textContent=creds.length.toLocaleString();
+  document.getElementById('cnt-expenses').textContent=expensesData.filter(r=>r.kind==='exp'&&!r.paid).length.toLocaleString();
 }
 
 /* ============ FORM LOG ============ */
@@ -2036,6 +2129,445 @@ function exportPayments(){
   xlsExport('lion-payments',
     ['NO','DATE','C NO','CUSTOMER','R NO','AWB / BL NO','DUTY','MACL','MPL','TOTAL','ADVANCE','BALANCE','REMARKS','BILL NO','BILL STATUS'],
     filteredPayments().map(r=>[r.no,r.date,r.cno,r.name,r.rNo,r.blNo,r.duty,r.macl,r.mpl,payHasMoney(r)?payTotal(r):null,r.advance,payHasMoney(r)?payBalance(r):null,r.remark,r.billNo,r.billNo?'Bill Done':'Pending']));
+}
+
+/* ============ EXPENSES (admin only) ============ */
+// One synced collection ('expenses') holds five kinds of records:
+//   exp    {date,item,amount,paid,paidAt}        — daily expense line
+//   fill   {date,liters,cost}                    — dhoni oil fill
+//   trip   {date,count,routes:{route:n}}         — dhoni trips per day
+//   staff  {no,name,salary,house,visa,insurance,startMonth}
+//   salpay {staffId,type,period,amount,paidAt}   — period = YYYY-MM (or YYYY for insurance)
+const XP_PRESETS=[{label:'Airport mehi',amount:360},{label:'Dhoni mehi',amount:660},{label:'Dhoni kappi',amount:400},{label:'Dhoni oil',amount:''},{label:'Other',amount:''}];
+const XP_SALTYPES=[{key:'salary',label:'Salary',field:'salary',yearly:false},{key:'house',label:'House + food',field:'house',yearly:false},{key:'visa',label:'Work visa fee',field:'visa',yearly:false},{key:'insurance',label:'Insurance',field:'insurance',yearly:true}];
+const XP_MAIN_ROUTE='Airport–Malé';
+const xpState={sub:'exp',month:'',sel:[],salMonth:isoLocal(new Date()).slice(0,7)};
+const xpKind=k=>expensesData.filter(r=>r.kind===k);
+const rf=n=>'Rf '+Number(n||0).toLocaleString('en-US');
+const xpD=iso=>iso?iso.split('-').reverse().join('-'):'';
+const XP_MONTHN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const xpMonthLabel=m=>XP_MONTHN[parseInt(m.slice(5,7),10)-1]+' '+m.slice(0,4);
+function xpGuard(){if(!isAdmin()){toast('Expenses is admin-only');return false;}return true;}
+
+function applyAdminUI(){
+  const t=document.getElementById('tab-expenses');if(!t)return;
+  const ok=isAdmin();
+  t.style.display=ok?'':'none';
+  if(!ok&&document.getElementById('view-expenses').classList.contains('active'))
+    document.querySelector('#nav button[data-view="entries"]').dispatchEvent(new MouseEvent('click',{bubbles:true}));
+}
+function xpSub(s){xpState.sub=s;renderExpenses();}
+
+function renderExpenses(){
+  if(!document.getElementById('view-expenses'))return;
+  if(!isAdmin())return;
+  ['exp','dhoni','salary'].forEach(s=>{
+    document.getElementById('xp_panel_'+s).style.display=xpState.sub===s?'':'none';
+    const b=document.getElementById('xp_sub_'+s);
+    b.classList.toggle('primary',xpState.sub===s);
+    b.classList.toggle('ghost',xpState.sub!==s);
+  });
+  if(xpState.sub==='exp')renderXpExp();
+  else if(xpState.sub==='dhoni')renderXpDhoni();
+  else renderXpSalary();
+}
+
+/* ---- daily expenses ---- */
+function renderXpExp(){
+  const exps=xpKind('exp');
+  // drop selections that got paid/deleted meanwhile
+  xpState.sel=xpState.sel.filter(id=>exps.some(e=>e.id===id&&!e.paid));
+  const unpaid=exps.filter(e=>!e.paid);
+  const unpaidTotal=unpaid.reduce((s,e)=>s+e.amount,0);
+  const thisMonth=isoLocal(new Date()).slice(0,7);
+  const mPaid=exps.filter(e=>e.paid&&e.date.startsWith(thisMonth)).reduce((s,e)=>s+e.amount,0);
+  const allPaid=exps.filter(e=>e.paid).reduce((s,e)=>s+e.amount,0);
+  document.getElementById('xp_stats').innerHTML=`
+    <div class="card c-danger"><div class="n">${rf(unpaidTotal)}</div><div class="l">Unpaid (${unpaid.length} items)</div></div>
+    <div class="card c-info"><div class="n">${rf(mPaid)}</div><div class="l">Paid — ${xpMonthLabel(thisMonth)}</div></div>
+    <div class="card c-purple"><div class="n">${rf(allPaid)}</div><div class="l">Paid — all time</div></div>`;
+  const months=[...new Set(exps.map(e=>e.date.slice(0,7)))].sort().reverse();
+  const sel=exps.filter(e=>xpState.sel.includes(e.id));
+  const selTotal=sel.reduce((s,e)=>s+e.amount,0);
+  const list=xpState.month?exps.filter(e=>e.date.startsWith(xpState.month)):exps;
+  const byDate={};
+  list.forEach(e=>{(byDate[e.date]=byDate[e.date]||[]).push(e)});
+  const days=Object.keys(byDate).sort().reverse();
+  document.getElementById('xp_panel_exp').innerHTML=`
+    <div class="toolbar" style="margin-top:0">
+      <select class="filter" onchange="xpMonth(this.value)">
+        <option value="">All months</option>
+        ${months.map(m=>`<option value="${m}" ${m===xpState.month?'selected':''}>${xpMonthLabel(m)}</option>`).join('')}
+      </select>
+      <button class="primary" onclick="openXpAdd()">＋ Add Expense</button>
+      <button class="ghost" onclick="xpCopyReport()">📋 Copy month report</button>
+      <button class="ghost" onclick="xpExcel()">⬇ Excel</button>
+      ${exps.some(e=>String(e.id).startsWith('vb-'))?'':'<button class="ghost" onclick="xpImportViber()">⤵ Import Viber list (27-07)</button>'}
+    </div>
+    ${sel.length?`<div style="display:flex;align-items:center;gap:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:12px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap">
+      <b>${sel.length} selected — ${rf(selTotal)}</b>
+      <button class="primary" onclick="xpMarkPaid()">✓ Mark PAID + receipt</button>
+      <button class="ghost" onclick="xpState.sel=[];renderExpenses()">Clear</button>
+    </div>`:''}
+    ${days.length===0?'<div class="empty" style="display:block"><div class="big">💵</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No expenses yet</div><div style="margin-top:4px">Add one, or import the old Viber list.</div></div>':''}
+    ${days.map(d=>{
+      const items=byDate[d];
+      const dayTotal=items.reduce((s,e)=>s+e.amount,0);
+      const dayUnpaid=items.filter(e=>!e.paid);
+      return `<div style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;color:var(--muted);padding:4px 2px">
+          <span>${xpD(d)}</span><span style="font-weight:600">${rf(dayTotal)}</span>
+          ${dayUnpaid.length?`<a href="javascript:void(0)" onclick="xpSelDay('${d}')" style="font-weight:600">select day</a>`:''}
+        </div>
+        ${items.map(e=>`
+          <div style="display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:5px">
+            ${e.paid?'<span style="width:18px;text-align:center">✔</span>':`<input type="checkbox" style="width:18px;height:18px;margin:0" ${xpState.sel.includes(e.id)?'checked':''} onchange="xpToggleSel('${e.id}')">`}
+            <span style="flex:1;font-size:13.5px">${esc(e.item)}</span>
+            <b style="font-size:13.5px">${rf(e.amount)}</b>
+            ${e.paid
+              ?`<button class="ghost" style="padding:3px 10px;font-size:11.5px;color:#16a34a;border-color:#16a34a" onclick="xpUnpay('${e.id}')" title="Paid ${e.paidAt?xpD(e.paidAt.slice(0,10)):''} — click to undo">PAID</button>`
+              :`<button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDel('${e.id}')" title="Delete">🗑</button>`}
+          </div>`).join('')}
+      </div>`;}).join('')}`;
+}
+function xpMonth(v){xpState.month=v;renderExpenses();}
+function xpToggleSel(id){
+  const i=xpState.sel.indexOf(id);
+  if(i>=0)xpState.sel.splice(i,1);else xpState.sel.push(id);
+  renderExpenses();
+}
+function xpSelDay(d){
+  const ids=xpKind('exp').filter(e=>e.date===d&&!e.paid).map(e=>e.id);
+  const allIn=ids.every(id=>xpState.sel.includes(id));
+  xpState.sel=allIn?xpState.sel.filter(id=>!ids.includes(id)):[...new Set([...xpState.sel,...ids])];
+  renderExpenses();
+}
+function openXpAdd(){
+  if(!xpGuard())return;
+  document.getElementById('xpa_presets').innerHTML=XP_PRESETS.map((p,i)=>
+    `<button type="button" class="ghost" style="padding:6px 12px;font-size:12.5px" onclick="xpPickPreset(${i})">${esc(p.label)}${p.amount?' · '+p.amount:''}</button>`).join('');
+  xpPickPreset(0);
+  document.getElementById('xpa_date').value=isoLocal(new Date());
+  showModal('overlay-xpadd');
+}
+function xpPickPreset(i){
+  const p=XP_PRESETS[i];
+  document.getElementById('xpa_item').value=p.label==='Other'?'':p.label;
+  document.getElementById('xpa_amount').value=p.amount||'';
+  (p.label==='Other'?document.getElementById('xpa_item'):document.getElementById('xpa_amount')).focus();
+}
+function saveXpAdd(ev){
+  ev.preventDefault();
+  if(!xpGuard())return false;
+  const item=document.getElementById('xpa_item').value.trim();
+  const amount=parseInt(document.getElementById('xpa_amount').value,10);
+  const date=document.getElementById('xpa_date').value;
+  if(!item||!amount||amount<=0||!date)return false;
+  const dup=xpKind('exp').find(e=>e.date===date&&e.item.toLowerCase()===item.toLowerCase());
+  if(dup){toast(`"${item}" is already on the list for ${xpD(date)}${dup.paid?' (already PAID)':''}`);return false;}
+  expensesData.push({id:uid(),kind:'exp',date,item,amount,paid:false,paidAt:null});
+  saveExpensesData();closeModal('overlay-xpadd');
+  renderExpenses();updateCounts();
+  toast('Added '+item+' · '+rf(amount));
+  return false;
+}
+function xpReceipt(items){
+  const total=items.reduce((s,e)=>s+e.amount,0);
+  const lines=[...items].sort((a,b)=>a.date<b.date?-1:1).map(e=>`${xpD(e.date)} ${e.item} ${e.amount}`);
+  return `✅ PAID ${rf(total)} on ${xpD(isoLocal(new Date()))}\n\n`+lines.join('\n')+`\n\nTotal: ${rf(total)}\nLion Logistics`;
+}
+function xpMarkPaid(){
+  if(!xpGuard())return;
+  const items=xpKind('exp').filter(e=>xpState.sel.includes(e.id)&&!e.paid);
+  if(!items.length)return;
+  const total=items.reduce((s,e)=>s+e.amount,0);
+  if(!confirm(`Mark ${items.length} item(s) — ${rf(total)} — as PAID?`))return;
+  const now=new Date().toISOString();
+  items.forEach(e=>{e.paid=true;e.paidAt=now;});
+  xpState.sel=[];
+  saveExpensesData();renderExpenses();updateCounts();
+  document.getElementById('xpr_text').value=xpReceipt(items);
+  showModal('overlay-xprec');
+}
+function xpUnpay(id){
+  if(!xpGuard())return;
+  const e=xpKind('exp').find(x=>x.id===id);if(!e)return;
+  if(!confirm(`Un-pay "${e.item}" ${xpD(e.date)} (${rf(e.amount)})?`))return;
+  e.paid=false;e.paidAt=null;
+  saveExpensesData();renderExpenses();updateCounts();
+}
+function xpDel(id){
+  if(!xpGuard())return;
+  const e=xpKind('exp').find(x=>x.id===id);if(!e)return;
+  if(!confirm(`Delete "${e.item}" ${xpD(e.date)} (${rf(e.amount)})?`))return;
+  expensesData=expensesData.filter(x=>x.id!==id);
+  saveExpensesData();renderExpenses();updateCounts();
+}
+function xpCopyReport(){
+  const m=xpState.month||isoLocal(new Date()).slice(0,7);
+  const list=xpKind('exp').filter(e=>e.date.startsWith(m));
+  if(!list.length){toast('No expenses in '+xpMonthLabel(m));return;}
+  const paid=list.filter(e=>e.paid),pend=list.filter(e=>!e.paid);
+  const byItem={};
+  list.forEach(e=>{
+    byItem[e.item]=byItem[e.item]||{paid:0,pending:0};
+    if(e.paid)byItem[e.item].paid+=e.amount;else byItem[e.item].pending+=e.amount;
+  });
+  const lines=Object.keys(byItem).map(k=>`${k}: paid ${byItem[k].paid.toLocaleString()}${byItem[k].pending?`, pending ${byItem[k].pending.toLocaleString()}`:''}`);
+  copyText(`📊 Lion Logistics — ${xpMonthLabel(m)}\n\nPAID: ${rf(paid.reduce((s,e)=>s+e.amount,0))} (${paid.length} items)\nPENDING: ${rf(pend.reduce((s,e)=>s+e.amount,0))} (${pend.length} items)\n\n`+lines.join('\n'));
+}
+function xpExcel(){
+  const list=(xpState.month?xpKind('exp').filter(e=>e.date.startsWith(xpState.month)):xpKind('exp'))
+    .slice().sort((a,b)=>a.date<b.date?-1:1);
+  xlsExport('lion-expenses',['DATE','ITEM','AMOUNT (Rf)','STATUS','PAID ON'],
+    list.map(e=>[xpD(e.date),e.item,e.amount,e.paid?'PAID':'PENDING',e.paidAt?xpD(e.paidAt.slice(0,10)):'']));
+}
+// Old outstanding list from the Viber group (verified 27-07-2026). Deterministic ids → pressing twice can't duplicate.
+function xpImportViber(){
+  if(!xpGuard())return;
+  const out=[];
+  const add=(date,item,amount)=>out.push({id:'vb-'+date+'-'+item.toLowerCase().replace(/[^a-z]+/g,''),kind:'exp',date,item,amount,paid:false,paidAt:null});
+  const jul=d=>'2026-07-'+String(d).padStart(2,'0');
+  for(let d=5;d<=26;d++)add(jul(d),'Airport mehi',360);
+  add('2026-06-30','Dhoni mehi',660);
+  for(let d=1;d<=26;d++)add(jul(d),'Dhoni mehi',660);
+  add(jul(25),'Dhoni kappi',400);add(jul(26),'Dhoni kappi',400);
+  add(jul(2),'Dhoni oil',800);
+  add(jul(27),'Cappi oil',160);
+  const have=new Set(expensesData.map(r=>r.id));
+  const fresh=out.filter(r=>!have.has(r.id));
+  if(!fresh.length){toast('Viber list already imported');return;}
+  const total=fresh.reduce((s,e)=>s+e.amount,0);
+  if(!confirm(`Import ${fresh.length} outstanding items (${rf(total)}) from the Viber list?`))return;
+  expensesData.push(...fresh);
+  saveExpensesData();renderExpenses();updateCounts();
+  toast('Imported '+fresh.length+' items — '+rf(total));
+}
+
+/* ---- dhoni fuel ---- */
+function xpFuel(){
+  const fills=xpKind('fill').slice().sort((a,b)=>a.date<b.date?-1:1);
+  const trips=xpKind('trip');
+  const between=(s,e)=>trips.filter(t=>t.date>=s&&(!e||t.date<e)).reduce((x,t)=>x+t.count,0);
+  const periods=fills.map((f,i)=>{
+    const next=fills[i+1];
+    const n=between(f.date,next?next.date:null);
+    return {...f,trips:n,open:!next,lPerTrip:n>0?f.liters/n:null};
+  });
+  const closed=periods.filter(p=>!p.open&&p.trips>0);
+  const avg=closed.length?closed.reduce((s,p)=>s+p.lPerTrip,0)/closed.length:null;
+  const current=periods.length?periods[periods.length-1]:null;
+  return {
+    periods:periods.slice().reverse(),avg,
+    expected:current&&avg?Math.round(current.liters/avg):null,
+    flag:p=>avg&&p.lPerTrip&&p.lPerTrip>avg*1.25,
+    total:trips.reduce((s,t)=>s+t.count,0)
+  };
+}
+function renderXpDhoni(){
+  const f=xpFuel();
+  const today=isoLocal(new Date());
+  const t=xpKind('trip').find(x=>x.date===today);
+  const routes=t?(t.routes||{[XP_MAIN_ROUTE]:t.count}):{};
+  document.getElementById('xp_stats').innerHTML=`
+    <div class="card c-info"><div class="n">${t?t.count:0}</div><div class="l">Trips today</div></div>
+    <div class="card c-purple"><div class="n">${f.avg?f.avg.toFixed(1)+' L':'—'}</div><div class="l">Normal usage / trip</div></div>
+    <div class="card c-warn"><div class="n">${f.expected!=null?'≈'+f.expected:'—'}</div><div class="l">Trips expected this fill</div></div>
+    <div class="card c-purple"><div class="n">${f.total}</div><div class="l">Trips logged (all)</div></div>`;
+  const recent=xpKind('trip').slice().sort((a,b)=>a.date<b.date?1:-1).slice(0,7);
+  const routesText=x=>x.routes?Object.entries(x.routes).map(([r,c])=>`${r}: ${c}`).join(' · '):XP_MAIN_ROUTE+': '+x.count;
+  document.getElementById('xp_panel_dhoni').innerHTML=`
+    <div class="toolbar" style="margin-top:0">
+      <button class="primary" onclick="openXpFill()">⛽ Log Oil Fill</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px;flex-wrap:wrap">
+      <b style="font-size:14px">🛥️ Today — ${XP_MAIN_ROUTE}</b>
+      <button class="ghost" style="font-size:18px;padding:4px 16px" onclick="xpTrip('${XP_MAIN_ROUTE}',-1)">−</button>
+      <b style="font-size:20px;min-width:28px;text-align:center">${routes[XP_MAIN_ROUTE]||0}</b>
+      <button class="primary" style="font-size:18px;padding:4px 16px" onclick="xpTrip('${XP_MAIN_ROUTE}',1)">＋</button>
+      <button class="ghost" onclick="xpTripOther()">＋ other route</button>
+      <span style="font-size:12.5px;color:var(--muted)">${esc(Object.entries(routes).filter(([r])=>r!==XP_MAIN_ROUTE).map(([r,c])=>`${r}: ${c}`).join(' · '))}</span>
+    </div>
+    <div class="tablewrap"><div class="scroll"><table style="min-width:640px">
+      <thead><tr><th>FILL DATE</th><th class="num">LITERS</th><th class="num">COST</th><th class="num">TRIPS</th><th class="num">L / TRIP</th><th></th><th class="actcol"></th></tr></thead>
+      <tbody>${f.periods.map(p=>`<tr>
+        <td>${xpD(p.date)}</td><td class="num">${p.liters}</td><td class="num">${rf(p.cost)}</td>
+        <td class="num">${p.trips}${p.open?' <span style="color:var(--muted);font-size:11px">(ongoing)</span>':''}</td>
+        <td class="num">${p.lPerTrip?p.lPerTrip.toFixed(1):'—'}</td>
+        <td>${f.flag(p)?'<span style="color:#dc2626;font-weight:700;font-size:11.5px">⚠ CHECK — high usage</span>':''}</td>
+        <td class="actcol"><button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDelFill('${p.id}')">🗑</button></td>
+      </tr>`).join('')||'<tr><td colspan="7" style="color:var(--muted)">No oil fills logged yet</td></tr>'}</tbody>
+    </table></div></div>
+    <div style="margin-top:12px">
+      <div style="font-size:12.5px;font-weight:700;color:var(--muted);margin-bottom:6px">LAST 7 TRIP DAYS</div>
+      ${recent.map(x=>`<div style="display:flex;gap:10px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:5px;font-size:13px">
+        <b>${xpD(x.date)}</b><span>${x.count} trip(s)</span><span style="color:var(--muted)">${esc(routesText(x))}</span>
+      </div>`).join('')||'<div style="color:var(--muted);font-size:13px">No trips logged yet</div>'}
+    </div>`;
+}
+function xpTrip(route,delta){
+  if(!xpGuard())return;
+  const today=isoLocal(new Date());
+  let t=xpKind('trip').find(x=>x.date===today);
+  if(!t){
+    if(delta<0)return;
+    t={id:uid(),kind:'trip',date:today,count:0,routes:{}};
+    expensesData.push(t);
+  }
+  t.routes=t.routes||{};
+  t.routes[route]=Math.max(0,(t.routes[route]||0)+delta);
+  if(!t.routes[route])delete t.routes[route];
+  t.count=Object.values(t.routes).reduce((s,c)=>s+c,0);
+  if(t.count===0)expensesData=expensesData.filter(x=>x.id!==t.id);
+  saveExpensesData();renderExpenses();
+}
+function xpTripOther(){
+  if(!xpGuard())return;
+  const r=prompt('Route name (e.g. Airport–Hulhumalé):','Airport–Hulhumalé');
+  if(r&&r.trim())xpTrip(r.trim(),1);
+}
+function openXpFill(){
+  if(!xpGuard())return;
+  document.getElementById('xpf_liters').value=200;
+  document.getElementById('xpf_cost').value='';
+  document.getElementById('xpf_date').value=isoLocal(new Date());
+  document.getElementById('xpf_toexp').checked=true;
+  showModal('overlay-xpfill');
+}
+function saveXpFill(ev){
+  ev.preventDefault();
+  if(!xpGuard())return false;
+  const liters=parseInt(document.getElementById('xpf_liters').value,10);
+  const cost=parseInt(document.getElementById('xpf_cost').value,10);
+  const date=document.getElementById('xpf_date').value;
+  if(!liters||!cost||!date)return false;
+  expensesData.push({id:uid(),kind:'fill',date,liters,cost});
+  if(document.getElementById('xpf_toexp').checked&&!xpKind('exp').some(e=>e.date===date&&e.item==='Dhoni oil'))
+    expensesData.push({id:uid(),kind:'exp',date,item:'Dhoni oil',amount:cost,paid:false,paidAt:null});
+  saveExpensesData();closeModal('overlay-xpfill');
+  renderExpenses();updateCounts();
+  toast('Oil fill saved — '+liters+' L · '+rf(cost));
+  return false;
+}
+function xpDelFill(id){
+  if(!xpGuard())return;
+  const p=xpKind('fill').find(x=>x.id===id);if(!p)return;
+  if(!confirm(`Delete the ${xpD(p.date)} oil fill (${p.liters} L, ${rf(p.cost)})? The matching expense line is NOT deleted.`))return;
+  expensesData=expensesData.filter(x=>x.id!==id);
+  saveExpensesData();renderExpenses();
+}
+
+/* ---- salary ---- */
+const xpSalPeriod=t=>t.yearly?xpState.salMonth.slice(0,4):xpState.salMonth;
+const xpFindPay=(staffId,t)=>xpKind('salpay').find(p=>p.staffId===staffId&&p.type===t.key&&p.period===xpSalPeriod(t));
+function renderXpSalary(){
+  const staff=xpKind('staff').slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const pays=xpKind('salpay');
+  let due=0,paid=0;
+  staff.forEach(s=>{if((s.startMonth||'')<=xpState.salMonth)due+=(s.salary||0)+(s.house||0)+(s.visa||0);});
+  pays.forEach(p=>{if(p.period===xpState.salMonth&&p.type!=='insurance')paid+=p.amount;});
+  document.getElementById('xp_stats').innerHTML=`
+    <div class="card c-warn"><div class="n">${rf(due-paid)}</div><div class="l">Still to pay — ${xpMonthLabel(xpState.salMonth)}</div></div>
+    <div class="card c-info"><div class="n">${rf(paid)}</div><div class="l">Paid this month</div></div>
+    <div class="card c-purple"><div class="n">${rf(due)}</div><div class="l">Monthly total due</div></div>
+    <div class="card c-purple"><div class="n">${staff.length}</div><div class="l">Staff</div></div>`;
+  const months=[];
+  {const d=new Date();for(let i=0;i<12;i++){months.push(isoLocal(d).slice(0,7));d.setMonth(d.getMonth()-1);}}
+  const cost=s=>(s.salary||0)+(s.house||0)+(s.visa||0)+Math.round((s.insurance||0)/12);
+  const cell=(s,t)=>{
+    const amt=s[t.field]||0;
+    if(!amt)return '<td class="num">—</td>';
+    const p=xpFindPay(s.id,t);
+    return `<td class="num" style="white-space:nowrap">${rf(amt)}${t.yearly?'<span style="color:var(--muted);font-size:10.5px">/yr</span>':''}<br>
+      ${p?`<button class="ghost" style="padding:2px 8px;font-size:11px;color:#16a34a;border-color:#16a34a" onclick="xpSalUnpay('${p.id}')" title="Paid ${xpD(p.paidAt.slice(0,10))} — click to undo">✓ PAID</button>`
+         :`<button class="ghost" style="padding:2px 8px;font-size:11px" onclick="xpSalPay('${s.id}','${t.key}')">Mark paid</button>`}</td>`;
+  };
+  document.getElementById('xp_panel_salary').innerHTML=`
+    <div class="toolbar" style="margin-top:0">
+      <select class="filter" onchange="xpState.salMonth=this.value;renderExpenses()">
+        ${months.map(m=>`<option value="${m}" ${m===xpState.salMonth?'selected':''}>${xpMonthLabel(m)}</option>`).join('')}
+      </select>
+      <button class="primary" onclick="openXpStaff()">＋ Add Staff</button>
+    </div>
+    <div class="tablewrap"><div class="scroll"><table style="min-width:860px">
+      <thead><tr><th>ID</th><th>NAME</th><th class="num">SALARY</th><th class="num">HOUSE+FOOD</th><th class="num">VISA</th><th class="num">INSURANCE</th><th class="num">TRUE COST/MO</th><th class="actcol"></th></tr></thead>
+      <tbody>${staff.map(s=>`<tr>
+        <td>${String(s.no||0).padStart(2,'0')}</td>
+        <td><b>${esc(s.name)}</b><br><span style="color:var(--muted);font-size:11px">joined ${s.startMonth||'—'}</span></td>
+        ${XP_SALTYPES.map(t=>cell(s,t)).join('')}
+        <td class="num"><b>${rf(cost(s))}</b></td>
+        <td class="actcol" style="white-space:nowrap">
+          <button class="ghost" style="padding:3px 8px;font-size:12px" onclick="openXpStaff('${s.id}')">✎</button>
+          <button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDelStaff('${s.id}')">🗑</button>
+        </td>
+      </tr>`).join('')||'<tr><td colspan="8" style="color:var(--muted)">No staff added yet</td></tr>'}</tbody>
+    </table></div></div>`;
+}
+function openXpStaff(id){
+  if(!xpGuard())return;
+  const s=id?xpKind('staff').find(x=>x.id===id):null;
+  document.getElementById('xps_title').textContent=s?'✎ Edit Staff':'＋ Add Staff';
+  document.getElementById('xps_id').value=s?s.id:'';
+  document.getElementById('xps_name').value=s?s.name:'';
+  document.getElementById('xps_salary').value=s?(s.salary||0):0;
+  document.getElementById('xps_house').value=s?(s.house||0):0;
+  document.getElementById('xps_visa').value=s?(s.visa||0):0;
+  document.getElementById('xps_insurance').value=s?(s.insurance||0):0;
+  document.getElementById('xps_start').value=s?(s.startMonth||''):isoLocal(new Date()).slice(0,7);
+  showModal('overlay-xpstaff');
+}
+function saveXpStaff(ev){
+  ev.preventDefault();
+  if(!xpGuard())return false;
+  const id=document.getElementById('xps_id').value;
+  const name=document.getElementById('xps_name').value.trim();
+  if(!name)return false;
+  const num=el=>Math.max(0,parseInt(document.getElementById(el).value,10)||0);
+  if(!id){
+    const dup=xpKind('staff').find(s=>s.name.toLowerCase()===name.toLowerCase());
+    if(dup){toast(`"${name}" already exists — edit that staff instead`);return false;}
+  }
+  const staff=xpKind('staff');
+  let s=id?staff.find(x=>x.id===id):null;
+  if(!s){
+    s={id:uid(),kind:'staff',no:staff.reduce((m,x)=>Math.max(m,x.no||0),0)+1};
+    expensesData.push(s);
+  }
+  s.name=name;s.salary=num('xps_salary');s.house=num('xps_house');
+  s.visa=num('xps_visa');s.insurance=num('xps_insurance');
+  s.startMonth=document.getElementById('xps_start').value||isoLocal(new Date()).slice(0,7);
+  saveExpensesData();closeModal('overlay-xpstaff');
+  renderExpenses();
+  toast(name+' saved ✓');
+  return false;
+}
+function xpDelStaff(id){
+  if(!xpGuard())return;
+  const s=xpKind('staff').find(x=>x.id===id);if(!s)return;
+  if(!confirm(`Remove ${s.name} AND all their payment history?`))return;
+  expensesData=expensesData.filter(x=>x.id!==id&&!(x.kind==='salpay'&&x.staffId===id));
+  saveExpensesData();renderExpenses();
+}
+function xpSalPay(staffId,typeKey){
+  if(!xpGuard())return;
+  const s=xpKind('staff').find(x=>x.id===staffId);
+  const t=XP_SALTYPES.find(x=>x.key===typeKey);
+  if(!s||!t)return;
+  const amount=s[t.field]||0;
+  if(!amount||xpFindPay(staffId,t))return;
+  if(!confirm(`Mark ${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)} for ${s.name} (${rf(amount)}) as PAID?`))return;
+  expensesData.push({id:uid(),kind:'salpay',staffId,type:t.key,period:xpSalPeriod(t),amount,paidAt:new Date().toISOString()});
+  saveExpensesData();renderExpenses();
+  document.getElementById('xpr_text').value=
+    `✅ PAID — ${s.name}\n${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)}: ${rf(amount)}\nPaid ${xpD(isoLocal(new Date()))}\nLion Logistics`;
+  showModal('overlay-xprec');
+}
+function xpSalUnpay(payId){
+  if(!xpGuard())return;
+  const p=xpKind('salpay').find(x=>x.id===payId);if(!p)return;
+  if(!confirm('Undo this salary payment?'))return;
+  expensesData=expensesData.filter(x=>x.id!==payId);
+  saveExpensesData();renderExpenses();
 }
 
 /* ============ QuickBooks invoice (AP) ============ */
@@ -3147,17 +3679,17 @@ fitTables();setTimeout(fitTables,300);
 
 // Bridge for the cloud-sync module (module scripts can't reach these top-level lets directly)
 window.__app={
-  get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,payments:()=>payments,team:()=>team},
-  set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},payments:v=>{payments=v},team:v=>{team=v}},
-  rerender(){syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();updateCounts();}
+  get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,payments:()=>payments,team:()=>team,expenses:()=>expensesData},
+  set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},payments:v=>{payments=v},team:v=>{team=v},expenses:v=>{expensesData=v}},
+  rerender(){syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();applyAdminUI();renderExpenses();updateCounts();}
 };
 </script>
 
 <script type="module">
 /* ============ Team Cloud Sync (Firebase) ============ */
-const COLS=['entries','customers','creds','containers','payments','team'];
+const COLS=['entries','customers','creds','containers','payments','team','expenses'];
 const KEYMAP={entries:'lion_clearance_v2',customers:'lion_customers_v1',creds:'lion_creds_v1',
-  containers:'lion_containers_v1',payments:'lion_payments_v1',team:'lion_team_v1'};
+  containers:'lion_containers_v1',payments:'lion_payments_v1',team:'lion_team_v1',expenses:'lion_expenses_v1'};
 // deep stable serializer: sorts keys at EVERY level (a replacer array would silently drop
 // nested keys like portInfo's container numbers — that bug made per-container edits invisible to sync)
 const stable=o=>{
@@ -3351,7 +3883,10 @@ async function startSync(){
     fx.onSnapshot(ref,s=>mergeSnap(col,s),()=>{});
   }
   const failed=[];
-  for(const col of COLS){
+  // 'expenses' (salary data!) syncs ONLY on the admin's login — pairs with a Firestore rule that
+  // limits that collection to the admin email, and keeps staff devices from hitting permission-denied.
+  const myCols=COLS.filter(c=>c!=='expenses'||isAdmin());
+  for(const col of myCols){
     try{await initCol(col);}
     catch(e){failed.push(col);shadow[col]=shadow[col]||new Map();console.warn('cloud init failed for "'+col+'" — other collections keep syncing:',(e&&e.code)||e);}
   }
@@ -3364,7 +3899,7 @@ async function startSync(){
     if(sh){const now=Date.now();window.__app.get[col]().forEach(r=>{if(sh.get(r.id)!==cmpStr(r)&&(!r.u||r.u<now))r.u=now;});}
     clearTimeout(debounces[col]);debounces[col]=setTimeout(()=>pushCol(col),800);
   };
-  COLS.forEach(c=>window.__cloudPush(c)); // push offline edits made before sign-in (incl. anything stranded earlier)
+  myCols.forEach(c=>window.__cloudPush(c)); // push offline edits made before sign-in (incl. anything stranded earlier)
   app.rerender();
   // QuickBooks invoice-number write-back: after creating an invoice, Zapier drops {entryId, billNo}
   // into the 'qbinv' collection (REST create allowed by a secret-gated rule). Apply the number to the
