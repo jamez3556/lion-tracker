@@ -2402,14 +2402,15 @@ function renderXpDhoni(){
       <span style="font-size:12.5px;color:var(--muted)">${esc(Object.entries(routes).filter(([r])=>r!==XP_MAIN_ROUTE).map(([r,c])=>`${r}: ${c}`).join(' · '))}</span>
     </div>
     <div class="tablewrap"><div class="scroll"><table style="min-width:640px">
-      <thead><tr><th>FILL DATE</th><th class="num">LITERS</th><th class="num">COST</th><th class="num">TRIPS</th><th class="num">L / TRIP</th><th></th><th class="actcol"></th></tr></thead>
+      <thead><tr><th>FILL DATE</th><th class="num">LITERS</th><th class="num">COST</th><th class="num">TRIPS</th><th class="num">L / TRIP</th><th>BILL</th><th></th><th class="actcol"></th></tr></thead>
       <tbody>${f.periods.map(p=>`<tr>
         <td>${xpD(p.date)}</td><td class="num">${p.liters}</td><td class="num">${rf(p.cost)}</td>
         <td class="num">${p.trips}${p.open?' <span style="color:var(--muted);font-size:11px">(ongoing)</span>':''}</td>
         <td class="num">${p.lPerTrip?p.lPerTrip.toFixed(1):'—'}</td>
+        <td>${p.bill?`<a href="${esc(p.bill.url)}" target="_blank" rel="noopener" title="${esc(p.bill.name)}">🧾 bill</a>`:`<button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpAttachFill('${p.id}')" title="Attach the fuel bill">📎</button>`}</td>
         <td>${f.flag(p)?'<span style="color:#dc2626;font-weight:700;font-size:11.5px">⚠ CHECK — high usage</span>':''}</td>
         <td class="actcol"><button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDelFill('${p.id}')">🗑</button></td>
-      </tr>`).join('')||'<tr><td colspan="7" style="color:var(--muted)">No oil fills logged yet</td></tr>'}</tbody>
+      </tr>`).join('')||'<tr><td colspan="8" style="color:var(--muted)">No oil fills logged yet</td></tr>'}</tbody>
     </table></div></div>
     <div style="margin-top:12px">
       <div style="font-size:12.5px;font-weight:700;color:var(--muted);margin-bottom:6px">LAST 7 TRIP DAYS</div>
@@ -2461,6 +2462,25 @@ function saveXpFill(ev){
   renderExpenses();updateCounts();
   toast('Oil fill saved — '+liters+' L · '+rf(cost));
   return false;
+}
+function xpAttachFill(id){
+  if(!xpGuard())return;
+  if(!window.__att){toast('Cloud storage not ready — check connection');return;}
+  const inp=document.createElement('input');
+  inp.type='file';inp.accept='image/*,.pdf';
+  inp.onchange=async()=>{
+    const file=inp.files[0];if(!file)return;
+    if(file.size>25*1024*1024){toast('File too big (max 25 MB)');return;}
+    const p=xpKind('fill').find(x=>x.id===id);if(!p)return;
+    toast('Uploading bill…');
+    try{
+      const path='expenses/'+p.id+'/'+Date.now()+'_'+file.name.replace(/[^\w.\-]+/g,'_');
+      p.bill={name:file.name,path,url:await window.__att.upload(path,file),size:file.size};
+      saveExpensesData();renderExpenses();
+      toast('🧾 Bill attached');
+    }catch(e){toast('Upload failed: '+(e.code||e.message));}
+  };
+  inp.click();
 }
 function xpDelFill(id){
   if(!xpGuard())return;
