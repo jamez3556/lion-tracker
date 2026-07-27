@@ -2327,6 +2327,9 @@ function openXpAdd(){
 }
 function xpPickPreset(i){
   const p=XP_PRESETS[i];
+  document.querySelectorAll('#xpa_presets button').forEach((b,j)=>{
+    b.classList.toggle('primary',j===i);b.classList.toggle('ghost',j!==i);
+  });
   document.getElementById('xpa_item').value=p.label==='Other'?'':p.label;
   document.getElementById('xpa_amount').value=p.amount||'';
   (p.label==='Other'?document.getElementById('xpa_item'):document.getElementById('xpa_amount')).focus();
@@ -2339,7 +2342,18 @@ function saveXpAdd(ev){
   const date=document.getElementById('xpa_date').value;
   if(!item||!amount||amount<=0||!date)return false;
   const dup=xpKind('exp').find(e=>e.date===date&&e.item.toLowerCase()===item.toLowerCase());
-  if(dup){toast(`"${item}" is already on the list for ${xpD(date)}${dup.paid?' (already PAID)':''}`);return false;}
+  if(dup){
+    // Labour comes in parts through the day → same-day entries ADD UP (unless that day is already paid)
+    if(item==='Labour'&&!dup.paid){
+      dup.amount+=amount;
+      saveExpensesData();closeModal('overlay-xpadd');
+      renderExpenses();updateCounts();
+      toast('Labour '+xpD(date)+': +'+rf(amount)+' → now '+rf(dup.amount));
+      return false;
+    }
+    if(!(item==='Labour'&&dup.paid)){toast(`"${item}" is already on the list for ${xpD(date)}${dup.paid?' (already PAID)':''}`);return false;}
+    // Labour for that day already PAID → start a fresh entry for the extra work
+  }
   expensesData.push({id:uid(),kind:'exp',date,item,amount,paid:false,paidAt:null});
   saveExpensesData();closeModal('overlay-xpadd');
   renderExpenses();updateCounts();
