@@ -432,7 +432,17 @@ window.saveAdd=ev=>{
   const date=document.getElementById('a_date').value;
   if(!item||!amount||!date)return false;
   const dup=kind('exp').find(e=>e.date===date&&e.item.toLowerCase()===item.toLowerCase());
-  if(dup){toast(`"${item}" is already on the list for ${fmtD(date)}${dup.paid?' (already PAID)':''}`);return false;}
+  if(dup){
+    // Labour comes in parts through the day → same-day entries ADD UP (unless already paid)
+    if(item==='Labour'&&!dup.paid){
+      dup.amount+=amount;
+      put(dup);
+      hide('ov_add');
+      toast('Labour '+fmtD(date)+': +'+rf(amount)+' → now '+rf(dup.amount));
+      return false;
+    }
+    if(!(item==='Labour'&&dup.paid)){toast(`"${item}" is already on the list for ${fmtD(date)}${dup.paid?' (already PAID)':''}`);return false;}
+  }
   put({id:uid(),kind:'exp',date,item,amount,paid:false,paidAt:null,addedBy:me});
   hide('ov_add');
   toast('Added '+item+' · '+rf(amount));
