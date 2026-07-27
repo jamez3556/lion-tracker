@@ -93,8 +93,9 @@
       </div>
       <div class="grid2">
         <div class="field"><label>CUSTOMER (optional)</label><input id="f_customer" placeholder="name on the DO"></div>
-        <div class="field"><label>MACL BILL Rf (optional)</label><input id="f_macl" type="number" step="any" min="0" inputmode="decimal" placeholder="airport charge total"></div>
+        <div class="field"><label>MACL BILL Rf (optional)</label><input id="f_macl" type="number" step="any" min="0" inputmode="decimal" placeholder="handling invoice total"></div>
       </div>
+      <div class="field"><label>DEMURRAGE Rf (optional — the separate MACL demurrage invoice)</label><input id="f_demur" type="number" step="any" min="0" inputmode="decimal" placeholder="demurrage invoice total"></div>
       <div class="field">
         <label>EXTRA CHARGES (optional)</label>
         <div class="chips">
@@ -250,7 +251,8 @@ window.saveSnap=async ev=>{
       }catch(e){toast('Skipped '+(more[i].name||'a file')+' — not an image');}
     }
     const macl=Number(document.getElementById('f_macl').value)||null;
-    const rec={id,awb,kg,macl,customer:document.getElementById('f_customer').value.trim(),
+    const demur=Number(document.getElementById('f_demur').value)||null;
+    const rec={id,awb,kg,macl,demur,customer:document.getElementById('f_customer').value.trim(),
       extras:extras.slice(),photos,by:me,byEmail:myEmail,
       date:today(),time:new Date().toTimeString().slice(0,5),status:'pending',u:Date.now()};
     await fsM.setDoc(fsM.doc(db,'dosnaps',id),JSON.parse(JSON.stringify(rec)));
@@ -258,6 +260,7 @@ window.saveSnap=async ev=>{
     document.getElementById('f_photo').value='';document.getElementById('f_more').value='';
     document.getElementById('f_awb').value='';document.getElementById('f_kg').value='';
     document.getElementById('f_customer').value='';document.getElementById('f_macl').value='';
+    document.getElementById('f_demur').value='';
     window.gotPhoto();
     toast('✅ Sent — the office will bill it now');
   }catch(e){toast('Upload failed: '+(e.code||e.message||e));}
@@ -291,7 +294,7 @@ function render(){
       ${ph?`<a href="${esc(ph.url)}" target="_blank" rel="noopener"><img class="thumb" src="${esc(ph.url)}" alt="DO"></a>`:''}
       <div class="mid">
         <div class="awb">${esc(r.awb)} · ${r.kg} kg</div>
-        <div class="sub">${esc(r.customer||'')}${r.customer?' · ':''}${fmtD(r.date)} ${esc(r.time||'')} · ${esc(r.by)}${r.macl?' · MACL '+r.macl:''}${(r.extras||[]).length?' · +'+r.extras.map(x=>esc(x.item)).join(', '):''}</div>
+        <div class="sub">${esc(r.customer||'')}${r.customer?' · ':''}${fmtD(r.date)} ${esc(r.time||'')} · ${esc(r.by)}${r.macl?' · MACL '+r.macl:''}${r.demur?' · DEM '+r.demur:''}${(r.extras||[]).length?' · +'+r.extras.map(x=>esc(x.item)).join(', '):''}</div>
       </div>
       ${stHTML(r)}
       ${r.status==='pending'?`<button class="del" onclick="delSnap('${r.id}')">🗑</button>`:''}
