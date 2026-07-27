@@ -289,6 +289,7 @@
     <button data-view="payments">💰 Payment <span class="cnt" id="cnt-payments"></span></button>
     <button data-view="customers">👥 Customers <span class="cnt" id="cnt-customers"></span></button>
     <button data-view="creds">🔐 MPL &amp; Custom Logins <span class="cnt" id="cnt-creds"></span></button>
+    <button data-view="tracking">🔎 Tracking</button>
     <button data-view="expenses" id="tab-expenses" style="display:none">💵 Expenses <span class="cnt" id="cnt-expenses"></span></button>
   </nav>
 </header>
@@ -546,6 +547,44 @@
     </div>
     <div class="empty" id="p_empty" style="display:none"><div class="big">🔐</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No logins found</div></div>
     <div class="pager" id="p_pager"></div>
+  </div>
+</section>
+
+<!-- ==================== CARGO TRACKING VIEW ==================== -->
+<section class="view" id="view-tracking">
+  <style>
+    .trc{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px 20px;margin-bottom:14px;box-shadow:0 1px 3px rgba(15,23,42,.06)}
+    .trc h3{margin:0 0 4px;font-size:16px;color:var(--ink)}
+    .trc .sub{color:var(--muted);font-size:13px;margin-bottom:12px}
+    .trc .btns{display:flex;flex-wrap:wrap;gap:8px}
+    .trc .btns button{white-space:nowrap}
+    .trc .minor{margin-top:12px;padding-top:10px;border-top:1px dashed #e2e8f0}
+    .trc .minor .lbl{font-size:12px;color:var(--muted);margin-bottom:6px}
+    .trc .chip{background:#f1f5f9;border:1px solid #e2e8f0;color:#334155;border-radius:999px;padding:4px 12px;font-size:12px;cursor:pointer}
+    .trc .chip:hover{background:#e2e8f0}
+    .trhint{color:var(--muted);font-size:13px;padding:4px 2px 12px}
+    .tlink{color:#2563eb;cursor:pointer;border-bottom:1px dashed #93c5fd}
+    .tlink:hover{color:#1d4ed8}
+  </style>
+  <div class="toolbar">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="tr_input" type="text" placeholder="AWB 176-12345678 · Container MSKU1234567 · BL COAU1234567890…">
+    </div>
+    <button class="primary" onclick="runTrack()">🔎 Track</button>
+    <button class="blue" onclick="window.open('https://my.port.mv/','_blank')">⚓ my.port.mv</button>
+    <button class="green" onclick="window.open('https://www.track-trace.com/aircargo','_blank')">✈ track-trace</button>
+  </div>
+  <div class="trhint">Paste an <b>AWB</b> (airline found from the 3-digit prefix), a <b>container number</b> (line found from the owner code) or a <b>BL number</b> — then jump straight to the carrier's tracker with the number copied to your clipboard.</div>
+  <div id="tr_result"></div>
+  <div class="tablewrap">
+    <div class="scroll">
+      <table style="min-width:700px">
+        <thead><tr><th>NO</th><th>DATE</th><th>CUSTOMER</th><th>TYPE</th><th>AWB / BL</th><th>STATUS</th><th class="actcol"></th></tr></thead>
+        <tbody id="tr_recent"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="tr_empty" style="display:none"><div class="big">🔎</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No shipments with AWB / BL yet</div></div>
   </div>
 </section>
 
@@ -980,10 +1019,7 @@ service cloud.firestore {
 <div class="toast" id="toast"></div>
 
 <script id="seed">
-const SEED_DATA=[];
-const SEED_CUSTOMERS=[];
-const SEED_CREDS=[];
-const SEED_CONTAINERS=[];
+const SEED_DATA=[];const SEED_CUSTOMERS=[];const SEED_CREDS=[];const SEED_CONTAINERS=[];
 </script>
 <script>
 /* ============ shared helpers ============ */
@@ -1165,7 +1201,7 @@ function wireAutofill(cnoInput,nameInput,hintEl){
 }
 
 /* ============ nav ============ */
-const VIEWTITLES={entries:'Form Log',mp:'MP Shipments',containers:'Container Status',payments:'Payment',customers:'Customer List',creds:'MPL & Custom Logins',expenses:'Daily Expenses'};
+const VIEWTITLES={entries:'Form Log',mp:'MP Shipments',containers:'Container Status',payments:'Payment',customers:'Customer List',creds:'MPL & Custom Logins',tracking:'Cargo Tracking',expenses:'Daily Expenses'};
 document.querySelectorAll('#nav button').forEach(b=>{
   b.addEventListener('click',()=>{
     document.querySelectorAll('#nav button').forEach(x=>x.classList.remove('active'));
@@ -1185,6 +1221,164 @@ function updateCounts(){
   document.getElementById('cnt-creds').textContent=creds.length.toLocaleString();
   document.getElementById('cnt-expenses').textContent=expensesData.filter(r=>r.kind==='exp'&&!r.paid).length.toLocaleString();
 }
+
+/* ============ CARGO TRACKING ============ */
+// AWB prefix → airline (IATA 3-digit accounting prefixes). u = cargo tracking page.
+const AWB_AIR={
+ '001':{n:'American Airlines Cargo',u:'https://www.aacargo.com/learn/track.html'},
+ '006':{n:'Delta Cargo',u:'https://www.deltacargo.com/Cargo/'},
+ '014':{n:'Air Canada Cargo',u:'https://www.aircanada.com/cargo/'},
+ '016':{n:'United Cargo',u:'https://www.unitedcargo.com/en/us/track/index.html'},
+ '020':{n:'Lufthansa Cargo',u:'https://www.lufthansa-cargo.com/eservices/etracking'},
+ '023':{n:'FedEx',u:'https://www.fedex.com/fedextrack/?trknbr={num}'},
+ '027':{n:'Alaska Air Cargo',u:'https://www.alaskacargo.com/'},
+ '057':{n:'Air France Cargo',u:'https://www.afklcargo.com/mycargo/shipment/singlesearch/{num}'},
+ '065':{n:'Saudia Cargo',u:'https://saudiacargo.com/'},
+ '071':{n:'Ethiopian Cargo',u:'https://cargo.ethiopianairlines.com/'},
+ '072':{n:'Gulf Air Cargo',u:'https://www.gulfair.com/cargo'},
+ '074':{n:'KLM Cargo',u:'https://www.afklcargo.com/mycargo/shipment/singlesearch/{num}'},
+ '075':{n:'Iberia / IAG Cargo',u:'https://www.iagcargo.com/en/track'},
+ '077':{n:'Egyptair Cargo',u:'https://egyptair-cargo.com/'},
+ '081':{n:'Qantas Freight',u:'https://www.qantas.com/freight/track'},
+ '086':{n:'Air New Zealand Cargo',u:'https://www.airnewzealandcargo.com/'},
+ '098':{n:'Air India Cargo',u:'https://www.airindia.com/in/en/cargo.html'},
+ '105':{n:'Finnair Cargo',u:'https://cargo.finnair.com/en/track'},
+ '117':{n:'SAS Cargo',u:'https://www.sascargo.com/'},
+ '125':{n:'British Airways / IAG Cargo',u:'https://www.iagcargo.com/en/track'},
+ '126':{n:'Garuda Cargo',u:'https://cargo.garuda-indonesia.com/'},
+ '131':{n:'JAL Cargo',u:'https://www.jal.co.jp/en/jalcargo/'},
+ '141':{n:'flydubai Cargo',u:'https://cargo.flydubai.com/'},
+ '157':{n:'Qatar Airways Cargo',u:'https://www.qrcargo.com/s/track-your-shipment'},
+ '160':{n:'Cathay Cargo',u:'https://www.cathaycargo.com/en-us/track-and-trace.html'},
+ '172':{n:'Cargolux',u:'https://www.cargolux.com/'},
+ '176':{n:'Emirates SkyCargo',u:'https://www.skycargo.com/'},
+ '180':{n:'Korean Air Cargo',u:'https://cargo.koreanair.com/'},
+ '205':{n:'ANA Cargo',u:'https://www.anacargo.jp/en/int/'},
+ '214':{n:'PIA Cargo',u:'https://www.piac.com.pk/'},
+ '217':{n:'Thai Cargo',u:'https://www.thaicargo.com/'},
+ '229':{n:'Kuwait Airways Cargo',u:'https://www.kuwaitairways.com/en/cargo'},
+ '232':{n:'MASkargo (Malaysia Airlines)',u:'https://www.maskargo.com/'},
+ '235':{n:'Turkish Cargo',u:'https://www.turkishcargo.com/en/online-services/shipment-tracking'},
+ '250':{n:'Uzbekistan Airways Cargo',u:'https://www.uzairways.com/'},
+ '257':{n:'Austrian Cargo',u:'https://www.austriancargo.com/'},
+ '297':{n:'China Airlines Cargo',u:'https://cargo.china-airlines.com/'},
+ '312':{n:'IndiGo CarGo',u:'https://cargo.goindigo.in/'},
+ '465':{n:'Air Astana Cargo',u:'https://airastana.com/'},
+ '512':{n:'Royal Jordanian Cargo',u:'https://www.rj.com/en/cargo'},
+ '514':{n:'Air Arabia Cargo',u:'https://www.airarabia.com/en/cargo'},
+ '603':{n:'SriLankan Cargo',u:'https://www.srilankancargo.com/'},
+ '607':{n:'Etihad Cargo',u:'https://www.etihadcargo.com/'},
+ '618':{n:'Singapore Airlines Cargo',u:'https://www.siacargo.com/'},
+ '695':{n:'EVA Air Cargo',u:'https://www.evaair.com/en-global/cargo/'},
+ '706':{n:'Kenya Airways Cargo',u:'https://cargo.kenya-airways.com/'},
+ '724':{n:'Swiss WorldCargo',u:'https://www.swissworldcargo.com/'},
+ '738':{n:'Vietnam Airlines Cargo',u:'https://www.vietnamairlines.com/'},
+ '775':{n:'SpiceXpress (SpiceJet)',u:'https://www.spicexpress.com/'},
+ '781':{n:'China Eastern Cargo',u:'https://www.ceair.com/'},
+ '784':{n:'China Southern Cargo',u:'https://cargo.csair.com/'},
+ '910':{n:'Oman Air Cargo',u:'https://www.omanair.com/en/cargo'},
+ '932':{n:'Virgin Atlantic Cargo',u:'https://www.virginatlanticcargo.com/'},
+ '988':{n:'Asiana Cargo',u:'https://www.asianacargo.com/'},
+ '997':{n:'Biman Bangladesh Cargo',u:'https://www.biman-airlines.com/'},
+ '999':{n:'Air China Cargo',u:'https://www.airchinacargo.com/'}
+};
+// Sea lines. {num} in u = direct deep link; otherwise the number is copied and the site opened.
+const SEA_LINES={
+ maersk:{n:'Maersk',u:'https://www.maersk.com/tracking/{num}'},
+ msc:{n:'MSC',u:'https://www.msc.com/en/track-a-shipment?trackingNumber={num}'},
+ cma:{n:'CMA CGM',u:'https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=Container&Reference={num}'},
+ cosco:{n:'COSCO',u:'https://elines.coscoshipping.com/ebusiness/cargotracking?number={num}'},
+ hapag:{n:'Hapag-Lloyd',u:'https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={num}'},
+ one:{n:'ONE',u:'https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam={num}'},
+ evergreen:{n:'Evergreen',u:'https://ct.shipmentlink.com/servlet/TDB1_CargoTracking.do'},
+ oocl:{n:'OOCL',u:'https://www.oocl.com/eng/ourservices/eservices/cargotracking/'},
+ pil:{n:'PIL',u:'https://www.pilship.com/'},
+ wanhai:{n:'Wan Hai',u:'https://www.wanhai.com/'},
+ yangming:{n:'Yang Ming',u:'https://www.yangming.com/e-service/Track_Trace/track_trace_cargo_tracking.aspx'},
+ zim:{n:'ZIM',u:'https://www.zim.com/tools/track-a-shipment'},
+ hmm:{n:'HMM',u:'https://www.hmm21.com/e-service/general/trackNTrace/TrackNTrace.do'},
+ sitc:{n:'SITC',u:'https://api.sitcline.com/sitcline/query/cargoTrack'},
+ rcl:{n:'RCL',u:'https://www.rclgroup.com/'},
+ xpress:{n:'X-Press Feeders',u:'https://www.x-pressfeeders.com/'}
+};
+// Container owner code (first 4 letters) → line
+const BOX_OWNER={MAEU:'maersk',MSKU:'maersk',MRKU:'maersk',MRSU:'maersk',SEAU:'maersk',PONU:'maersk',SUDU:'maersk',
+ MSCU:'msc',MEDU:'msc',MSDU:'msc',CMAU:'cma',CGMU:'cma',APZU:'cma',ANNU:'cma',AMFU:'cma',
+ COSU:'cosco',CBHU:'cosco',CCLU:'cosco',CSNU:'cosco',HLXU:'hapag',HLCU:'hapag',HLBU:'hapag',UACU:'hapag',
+ ONEU:'one',NYKU:'one',MOLU:'one',MOAU:'one',KKFU:'one',KKTU:'one',
+ EGHU:'evergreen',EGSU:'evergreen',EISU:'evergreen',EMCU:'evergreen',IMTU:'evergreen',
+ OOLU:'oocl',OOCU:'oocl',PCIU:'pil',PILU:'pil',WHLU:'wanhai',WHSU:'wanhai',
+ YMLU:'yangming',YMMU:'yangming',ZIMU:'zim',ZCSU:'zim',HDMU:'hmm',SITU:'sitc',RCLU:'rcl',REGU:'rcl'};
+// BL number prefix → line
+const BL_PFX={COSU:'cosco',COAU:'cosco',MAEU:'maersk',MEDU:'msc',HLCU:'hapag',ONEY:'one',EGLV:'evergreen',
+ CMDU:'cma',OOLU:'oocl',ZIMU:'zim',WHLC:'wanhai',YMLU:'yangming',HDMU:'hmm',SITG:'sitc'};
+
+function trGo(u,num){
+  if(u.includes('{num}')){window.open(u.replace('{num}',encodeURIComponent(num)),'_blank');}
+  else{copyText(num);window.open(u,'_blank');}
+}
+function trBtn(u,num,label,cls){
+  const direct=u.includes('{num}');
+  return `<button class="${cls||'primary'}" onclick="trGo('${u}','${num}')">${direct?'↗':'📋'} ${esc(label)}${direct?'':' (number copied)'}</button>`;
+}
+function trChips(num,except){
+  return Object.entries(SEA_LINES).filter(([k])=>k!==except)
+    .map(([k,l])=>`<button class="chip" onclick="trGo('${l.u}','${num}')">${esc(l.n)}</button>`).join(' ');
+}
+function trCard(icon,title,sub,btns,minor){
+  return `<div class="trc"><h3>${icon} ${esc(title)}</h3><div class="sub">${sub}</div><div class="btns">${btns}</div>${minor?`<div class="minor"><div class="lbl">Not the right carrier? Try another line:</div><div class="btns">${minor}</div></div>`:''}</div>`;
+}
+function runTrack(){
+  const raw=document.getElementById('tr_input').value.trim().toUpperCase().replace(/\s+/g,'');
+  const out=document.getElementById('tr_result');
+  if(!raw){out.innerHTML='';return;}
+  let m=raw.match(/^(\d{3})-?(\d{8})$/);
+  if(m){ // air waybill
+    const awb=m[1]+'-'+m[2], a=AWB_AIR[m[1]];
+    if(a){
+      out.innerHTML=trCard('✈️','Air cargo — '+a.n,'AWB <b>'+esc(awb)+'</b> · airline identified from prefix '+m[1],
+        trBtn(a.u,awb,'Track on '+a.n)+trBtn('https://www.track-trace.com/aircargo',awb,'track-trace (all airlines)','ghost'));
+    }else{
+      out.innerHTML=trCard('✈️','Air cargo — prefix '+m[1]+' not in the list','AWB <b>'+esc(awb)+'</b> — use track-trace, it auto-detects 242 airlines',
+        trBtn('https://www.track-trace.com/aircargo',awb,'Track on track-trace'));
+    }
+    return;
+  }
+  m=raw.match(/^[A-Z]{3}[UJZ]\d{7}$/);
+  if(m){ // container number
+    const line=BOX_OWNER[raw.slice(0,4)], l=line&&SEA_LINES[line];
+    out.innerHTML=trCard('🚢','Container '+raw,l?'Owner code <b>'+raw.slice(0,4)+'</b> → <b>'+esc(l.n)+'</b>':'Owner code <b>'+raw.slice(0,4)+'</b> — leased/neutral box, pick the line from the BL',
+      (l?trBtn(l.u,raw,'Track on '+l.n):'')+trBtn('https://my.port.mv/',raw,'my.port.mv Container Search','blue'),
+      trChips(raw,line));
+    return;
+  }
+  if(/^[A-Z]{4}[A-Z0-9]{4,}$/.test(raw)){ // BL number
+    const line=BL_PFX[raw.slice(0,4)], l=line&&SEA_LINES[line];
+    out.innerHTML=trCard('📄','Bill of Lading '+raw,l?'Prefix <b>'+raw.slice(0,4)+'</b> → <b>'+esc(l.n)+'</b>':'Line not recognised from the prefix — pick it below',
+      l?trBtn(l.u,raw,'Track on '+l.n):'',
+      trChips(raw,line));
+    return;
+  }
+  out.innerHTML=trCard('❓','Number format not recognised','Expected AWB <b>123-12345678</b>, container <b>ABCU1234567</b> or a BL number starting with 4 letters',
+    trBtn('https://www.track-trace.com/aircargo',raw,'Try track-trace (air)','ghost')+trBtn('https://my.port.mv/',raw,'Try my.port.mv (sea)','blue'));
+}
+function trackRef(ref){
+  switchView('tracking');
+  document.getElementById('tr_input').value=ref;
+  runTrack();
+  renderTrackRecent();
+}
+function trackEntry(id){const e=entries.find(x=>x.id===id);if(e&&e.awbBl)trackRef(e.awbBl);}
+function renderTrackRecent(){
+  const rows=entries.filter(e=>e.awbBl).sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,20);
+  document.getElementById('tr_empty').style.display=rows.length?'none':'';
+  document.getElementById('tr_recent').innerHTML=rows.map(r=>`<tr>
+    <td>${r.no??'—'}</td><td>${fmtDate(r.date)}</td><td>${esc(r.customer)||'—'}</td><td>${esc(r.type)||'—'}</td>
+    <td>${esc(r.awbBl)}</td><td>${esc(r.status)||'—'}</td>
+    <td class="actcol"><button class="ghost" onclick="trackEntry('${r.id}')">🔎 Track</button></td></tr>`).join('');
+}
+document.querySelector('#nav button[data-view="tracking"]').addEventListener('click',renderTrackRecent);
+document.getElementById('tr_input').addEventListener('keydown',e=>{if(e.key==='Enter')runTrack();});
 
 /* ============ FORM LOG ============ */
 const eState={key:'no',dir:-1,page:1};
@@ -1245,7 +1439,7 @@ function renderEntries(){
     <td data-l="Bill No">${esc(r.billNo)||'—'}</td>
     <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
     <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
-    <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
+    <td data-l="AWB / BL">${r.awbBl?`<span class="tlink" title="Track this shipment" onclick="trackEntry('${r.id}')">${esc(r.awbBl)}</span>`:'—'}</td>
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
     <td class="actcol"><div class="rowact">
       ${(r.type==='AP'&&isAdmin())?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
@@ -1891,7 +2085,7 @@ function renderMP(){
     <td data-l="Bill No">${esc(r.billNo)||'—'}</td>
     <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
     <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
-    <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
+    <td data-l="AWB / BL">${r.awbBl?`<span class="tlink" title="Track this shipment" onclick="trackEntry('${r.id}')">${esc(r.awbBl)}</span>`:'—'}</td>
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
     <td data-l="Remark"><input class="mpremark" value="${esc(r.mpRemark)}" placeholder="Add remark…" onchange="setMpRemark('${jatt(r.id)}',this.value)"></td>
     <td class="actcol"><div class="rowact">
