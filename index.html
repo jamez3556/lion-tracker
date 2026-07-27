@@ -655,6 +655,7 @@
     <textarea id="xpr_text" readonly style="width:100%;min-height:200px;font-family:ui-monospace,Consolas,monospace;font-size:13px;padding:10px;border:1px solid var(--line);border-radius:10px;background:#f8fafc"></textarea>
     <div class="actions">
       <button type="button" class="ghost" onclick="closeModal('overlay-xprec')">Close</button>
+      <button type="button" class="ghost" id="xpr_slipBtn" style="display:none" onclick="xpAttachSlip()">📎 Attach transfer slip</button>
       <button type="button" class="primary" onclick="copyText(document.getElementById('xpr_text').value)">📋 Copy for Viber</button>
     </div>
   </div>
@@ -2164,7 +2165,7 @@ function exportPayments(){
 const XP_PRESETS=[{label:'Airport mehi',amount:360},{label:'Dhoni mehi',amount:660},{label:'Dhoni kappi',amount:400},{label:'Dhoni oil',amount:''},{label:'Labour',amount:''},{label:'Other',amount:''}];
 const XP_SALTYPES=[{key:'salary',label:'Salary',field:'salary',yearly:false},{key:'house',label:'House + food',field:'house',yearly:false},{key:'visa',label:'Work visa fee',field:'visa',yearly:false},{key:'insurance',label:'Insurance',field:'insurance',yearly:true}];
 const XP_MAIN_ROUTE='Airport–Malé';
-const xpState={sub:'exp',month:'',sel:[],salMonth:isoLocal(new Date()).slice(0,7)};
+const xpState={sub:'exp',month:'',sel:[],vsel:[],salMonth:isoLocal(new Date()).slice(0,7)};
 const xpKind=k=>expensesData.filter(r=>r.kind===k);
 const salKind=k=>salaryData.filter(r=>r.kind===k);
 // one-time migration: salary records used to live inside 'expenses' — move them to the locked 'salary' store
@@ -2322,6 +2323,7 @@ function xpMarkPaid(){
   xpState.sel=[];
   saveExpensesData();renderExpenses();updateCounts();
   document.getElementById('xpr_text').value=xpReceipt(items);
+  document.getElementById('xpr_slipBtn').style.display='none';
   showModal('overlay-xprec');
 }
 function xpUnpay(id){
@@ -2516,6 +2518,7 @@ function xpDelFill(id){
 function renderXpVan(){
   const vendors=xpKind('vendor');
   const vans=xpKind('van');
+  xpState.vsel=xpState.vsel.filter(id=>vans.some(v=>v.id===id&&!v.paid));
   const unpaid=vans.filter(v=>!v.paid);
   const pend=unpaid.reduce((s,v)=>s+v.amount,0);
   const thisMonth=isoLocal(new Date()).slice(0,7);
@@ -2528,6 +2531,7 @@ function renderXpVan(){
     <div class="toolbar" style="margin-top:0">
       <button class="primary" onclick="openXpVanForm()">＋ Add Van Charge</button>
       <button class="ghost" onclick="xpAddVendor()">＋ Van Account</button>
+      <button class="ghost" onclick="xpVanExcel()">⬇ Excel</button>
       ${vans.some(v=>String(v.id).startsWith('vn-'))?'':'<button class="ghost" onclick="xpImportVans()">⤵ Import Viber van list (27-07)</button>'}
     </div>
     ${vendors.length===0?'<div class="empty" style="display:block"><div class="big">🚐</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No van accounts yet</div><div style="margin-top:4px">Add a van account, or import the Viber list.</div></div>':''}
@@ -2535,7 +2539,9 @@ function renderXpVan(){
       const list=vans.filter(v=>v.vendor===vd.account);
       const up=list.filter(v=>!v.paid).sort((a,b)=>a.date<b.date?-1:1);
       const upT=up.reduce((s,v)=>s+v.amount,0);
-      const lastPaid=list.filter(v=>v.paid).sort((a,b)=>(a.paidAt||'')<(b.paidAt||'')?1:-1)[0];
+      const selHere=up.filter(v=>xpState.vsel.includes(v.id));
+      const selT=selHere.reduce((s,v)=>s+v.amount,0);
+      const paidRecent=list.filter(v=>v.paid).sort((a,b)=>(a.paidAt||'')<(b.paidAt||'')?1:-1).slice(0,5);
       return `<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <b>${esc(vd.name||'Van account')}</b>
@@ -2543,15 +2549,28 @@ function renderXpVan(){
           ${vd.accName?`<span style="color:var(--muted);font-size:12px">${esc(vd.accName)}</span>`:''}
           <button class="ghost" style="padding:2px 8px;font-size:11px" onclick="xpEditVendor('${vd.id}')">✎</button>
           <span style="margin-left:auto;font-weight:800;color:${upT?'#dc2626':'#16a34a'}">${upT?rf(upT)+' pending':'✓ settled'}</span>
-          ${upT?`<button class="primary" style="padding:5px 12px;font-size:12px" onclick="xpVanPayAll('${vd.id}')">✓ PAID + receipt</button>`:''}
+          ${upT?`<button class="primary" style="padding:5px 12px;font-size:12px" onclick="xpVanPayAll('${vd.id}')">${selHere.length?`✓ Pay ${selHere.length} selected — ${rf(selT)}`:'✓ Pay ALL + receipt'}</button>`:''}
         </div>
+        ${up.length?`<div style="color:var(--muted);font-size:11px;margin-top:4px">Tick the lines you are paying now (none ticked = pay all)</div>`:''}
         ${up.map(v=>`
           <div style="display:flex;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid #f1f5f9;align-items:center">
+            <input type="checkbox" style="width:17px;height:17px;margin:0" ${xpState.vsel.includes(v.id)?'checked':''} onchange="xpVanSel('${v.id}')">
             <span>${xpD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><b>${rf(v.amount)}</b>
             <button class="ghost" style="padding:2px 7px;font-size:11px" onclick="xpDelVan('${v.id}')">🗑</button>
           </div>`).join('')}
-        ${lastPaid?`<div style="color:var(--muted);font-size:11.5px;margin-top:6px">Last paid ${lastPaid.paidAt?xpD(lastPaid.paidAt.slice(0,10)):''} — ${rf(lastPaid.amount)}</div>`:''}
+        ${paidRecent.map(v=>`
+          <div style="display:flex;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px solid #f1f5f9;align-items:center;opacity:.75">
+            <span style="width:17px;text-align:center">✔</span>
+            <span>${xpD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><span>${rf(v.amount)}</span>
+            <span style="font-size:10px;font-weight:800;color:#16a34a;border:1px solid #16a34a;border-radius:999px;padding:1px 7px">PAID${v.paidAt?' '+xpD(v.paidAt.slice(0,10)):''}</span>
+            ${v.slip?`<a href="${esc(v.slip.url)}" target="_blank" rel="noopener" title="${esc(v.slip.name)}">🧾</a>`:''}
+          </div>`).join('')}
       </div>`;}).join('')}`;
+}
+function xpVanSel(id){
+  const i=xpState.vsel.indexOf(id);
+  if(i>=0)xpState.vsel.splice(i,1);else xpState.vsel.push(id);
+  renderExpenses();
 }
 function xpAddVendor(){
   if(!xpGuard())return;
@@ -2600,18 +2619,60 @@ function saveXpVan(ev){
 function xpVanPayAll(vendorId){
   if(!xpGuard())return;
   const vd=xpKind('vendor').find(v=>v.id===vendorId);if(!vd)return;
-  const up=xpKind('van').filter(v=>v.vendor===vd.account&&!v.paid);
+  const pend=xpKind('van').filter(v=>v.vendor===vd.account&&!v.paid);
+  const sel=pend.filter(v=>xpState.vsel.includes(v.id));
+  const up=sel.length?sel:pend; // ticked lines only, or everything pending when nothing is ticked
   if(!up.length)return;
   const total=up.reduce((s,v)=>s+v.amount,0);
   if(!confirm(`Mark ${up.length} van charge(s) — ${rf(total)} — to ${vd.name||vd.account} as PAID?\n(Transfer to ${vd.account} first, then confirm.)`))return;
   const now=new Date().toISOString();
   up.forEach(v=>{v.paid=true;v.paidAt=now;});
+  xpState.vsel=xpState.vsel.filter(id=>!up.some(v=>v.id===id));
   saveExpensesData();renderExpenses();
   const lines=[...up].sort((a,b)=>a.date<b.date?-1:1).map(v=>`${xpD(v.date)} ${v.note||'van laari'} ${v.amount}`);
   document.getElementById('xpr_text').value=
     `✅ PAID ${rf(total)} on ${xpD(isoLocal(new Date()))}\nAcct ${vd.account}${vd.name?' ('+vd.name+')':''}\n\n`+
     lines.join('\n')+`\n\nTotal: ${rf(total)}\nLion Logistics`;
+  window.__lastVanPay=up.map(v=>v.id);
+  const sb=document.getElementById('xpr_slipBtn');
+  sb.style.display='';sb.textContent='📎 Attach transfer slip';
   showModal('overlay-xprec');
+}
+// attach the bank transfer slip to the payment just made (stored on each paid line)
+function xpAttachSlip(){
+  if(!xpGuard())return;
+  if(!window.__att){toast('Cloud storage not ready — check connection');return;}
+  const ids=window.__lastVanPay||[];
+  if(!ids.length)return;
+  const inp=document.createElement('input');
+  inp.type='file';inp.accept='image/*,.pdf';
+  inp.onchange=async()=>{
+    const file=inp.files[0];if(!file)return;
+    if(file.size>25*1024*1024){toast('File too big (max 25 MB)');return;}
+    toast('Uploading slip…');
+    try{
+      const path='expenses/vanpay/'+Date.now()+'_'+file.name.replace(/[^\w.\-]+/g,'_');
+      const url=await window.__att.upload(path,file);
+      const meta={name:file.name,path,url,size:file.size};
+      xpKind('van').filter(v=>ids.includes(v.id)).forEach(v=>{v.slip=meta;});
+      saveExpensesData();renderExpenses();
+      const sb=document.getElementById('xpr_slipBtn');
+      if(sb)sb.textContent='🧾 Slip attached ✓';
+      toast('🧾 Transfer slip attached');
+    }catch(e){toast('Upload failed: '+(e.code||e.message));}
+  };
+  inp.click();
+}
+function xpVanExcel(){
+  const vendors=xpKind('vendor');
+  const name=a=>{const vd=vendors.find(v=>v.account===a);return vd?(vd.name||''):'';};
+  const rows=xpKind('van').slice().sort((a,b)=>(a.vendor+a.date)<(b.vendor+b.date)?-1:1)
+    .map(v=>[v.vendor,name(v.vendor),xpD(v.date),v.note||'van laari',v.amount,v.paid?'PAID':'PENDING',v.paidAt?xpD(v.paidAt.slice(0,10)):'',v.slip?'yes':'']);
+  vendors.forEach(vd=>{
+    const list=xpKind('van').filter(v=>v.vendor===vd.account);
+    rows.push([vd.account,vd.name||'','','TOTAL',list.reduce((s,v)=>s+v.amount,0),'PENDING: '+list.filter(v=>!v.paid).reduce((s,v)=>s+v.amount,0),'','']);
+  });
+  xlsExport('lion-van',['ACCOUNT','COMPANY','DATE','NOTE','AMOUNT (Rf)','STATUS','PAID ON','SLIP'],rows);
 }
 function xpDelVan(id){
   if(!xpGuard())return;
@@ -2763,6 +2824,7 @@ function xpSalPay(staffId,typeKey){
   saveSalaryData();renderExpenses();
   document.getElementById('xpr_text').value=
     `✅ PAID — ${s.name}\n${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)}: ${rf(amount)}\nPaid ${xpD(isoLocal(new Date()))}\nLion Logistics`;
+  document.getElementById('xpr_slipBtn').style.display='none';
   showModal('overlay-xprec');
 }
 function xpSalUnpay(payId){
