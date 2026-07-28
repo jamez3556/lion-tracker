@@ -234,28 +234,87 @@ function ocrCanvas(img,rot){
 function ocrParse(text){
   const t=(text||'').toUpperCase(),out={};
   const awb=t.match(/\b(\d{3})\s*[-–—]?\s*(\d{8})\b/);if(awb)out.awb=awb[1]+'-'+awb[2];
-  const cons=t.split(/\n/).map(l=>l.trim()).find(l=>/CONSIGNEE/.test(l)&&!/AGENT/.test(l));
-  if(cons){let nm=cons.replace(/.*CONSIGNEE/,'').replace(/^[\s:.\-]+/,'').replace(/[^A-Z0-9&.\-' ]+/g,' ').replace(/\s+/g,' ').trim();
-    nm=nm.split(/\b(?:PCS|WGT|RECEIVED|NOTIFY|RECEIPT|CONDITION|LOCATION|SIGN|DATE|ID CARD|N ?O ?G)\b/)[0].trim().slice(0,40).trim();
-    if(nm.length>=4)out.consignee=nm;}
-  const wg=t.match(/WGT[^\n]*?\b\d+\s*\/\s*(\d+(?:[.,]\d+)?)/);if(wg)out.kg=Number(wg[1].replace(',','.'));
+  const lines=t.split(/\n/).map(l=>l.trim());
+  const ci=lines.findIndex(l=>/CONSIGNEE/.test(l)&&!/AGENT/.test(l));
+  if(ci>=0){
+    const clean=s=>{let nm=String(s||'').replace(/.*CONSIGNEE/,'').replace(/^[\s:.\-]+/,'').replace(/[^A-Z0-9&.\-' ]+/g,' ').replace(/\s+/g,' ').trim();
+      return nm.split(/\b(?:PCS|WGT|RECEIVED|NOTIFY|RECEIPT|CONDITION|LOCATION|SIGN|DATE|ID CARD|ADDRESS|ACCOUNT|N ?O ?G)\b/)[0].trim().slice(0,40).trim();};
+    let nm=clean(lines[ci]);
+    if(nm.length<4)nm=clean((lines.slice(ci+1).find(l=>l.trim().length>=4))||'');
+    if(nm.length>=4)out.consignee=nm;
+  }
+  if(/STELCO|STATE\s*ELECTRIC/.test(t))out.consignee='STATE ELECTRIC COMPANY';
+  const wg=t.match(/WGT[^\n]*?\b\d+\s*\/\s*(\d+(?:[.,]\d+)?)/)
+        ||t.match(/GROSS\s*(?:WEIGHT|WT)[^0-9]{0,12}(\d+(?:[.,]\d+)?)/)
+        ||t.match(/CHARGEABLE\s*(?:WEIGHT|WT)?[^0-9]{0,12}(\d+(?:[.,]\d+)?)/);
+  if(wg)out.kg=Number(wg[1].replace(',','.'));
   const rn=t.match(/\bR\s*[=\-:]\s*(\d{4,6})\b/);if(rn)out.rNo=rn[1];
   return out;
+}
+let pdfP=null;
+const pdfLoad=()=>{
+  if(pdfP)return pdfP;
+  pdfP=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.onload=()=>{try{window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';res(window.pdfjsLib);}catch(e){pdfP=null;rej(e);}};
+    s.onerror=()=>{pdfP=null;rej(new Error('pdf lib failed'));};
+    document.head.appendChild(s);
+  });
+  return pdfP;
+};
+async function pdfExtract(file,status){
+  const lib=await pdfLoad();
+  status('🔍 Reading PDF…');
+  const doc=await lib.getDocument({data:await file.arrayBuffer()}).promise;
+  let text='';
+  for(let i=1;i<=Math.min(doc.numPages,3);i++){
+    const tc=await (await doc.getPage(i)).getTextContent();
+    text+=tc.items.map(it=>it.str).join('\n')+'\n';
+  }
+  const p=ocrParse(text);
+  if(p.awb||p.consignee||p.kg)return p;
+  const T=await tessLoad();
+  let best=null;
+  for(let i=1;i<=Math.min(doc.numPages,2);i++){
+    status('🔍 Reading scanned PDF — page '+i+'…');
+    const pg=await doc.getPage(i);
+    const base=pg.getViewport({scale:1});
+    const vp=pg.getViewport({scale:Math.min(2,2000/Math.max(base.width,base.height))});
+    const c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;
+    await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+    try{
+      const r=await T.recognize(c,'eng');
+      const q=ocrParse(r&&r.data&&r.data.text);
+      if(q.awb)return q;
+      if(!best&&(q.consignee||q.kg))best=q;
+    }catch(e){}
+  }
+  return best;
 }
 async function ocrRun(file){
   const st=document.getElementById('ocrStatus');
   try{
-    const T=await tessLoad();
-    const img=await ocrImg(file);
     let best=null;
-    for(const rot of [0,270,90,180]){
-      st.textContent='🔍 Reading photo'+(rot?' ↻':'')+'…';
-      try{
-        const r=await T.recognize(ocrCanvas(img,rot),'eng');
-        const p=ocrParse(r&&r.data&&r.data.text);
-        if(p.awb){best=p;break;}
-        if(!best&&(p.consignee||p.kg))best=p;
-      }catch(e){}
+    if(isPdf(file)){
+      // 75 s cap — some scanned PDFs wedge the reader; give up and let the user type
+      best=await Promise.race([pdfExtract(file,m=>st.textContent=m),new Promise(res=>setTimeout(()=>res(null),75000))]);
+    }else{
+      const T=await tessLoad();
+      const img=await ocrImg(file);
+      for(const rot of [0,270,90,180]){
+        st.textContent='🔍 Reading photo'+(rot?' ↻':'')+'…';
+        try{
+          const r=await T.recognize(ocrCanvas(img,rot),'eng');
+          const p=ocrParse(r&&r.data&&r.data.text);
+          if(p.awb){best=p;break;}
+          if(!best&&(p.consignee||p.kg))best=p;
+        }catch(e){}
+      }
+    }
+    if(!best||!best.awb){ // the file name itself often carries the AWB ("HAWB_125-22299535_….pdf")
+      const m=(file.name||'').match(/(\d{3})[-_ ]?(\d{8})/);
+      if(m){best=best||{};best.awb=m[1]+'-'+m[2];}
     }
     if(!best){st.textContent='Could not read — type the details';return;}
     const got=[];
@@ -276,10 +335,7 @@ window.gotPhoto=()=>{
   b.classList.toggle('got',!!f);
   document.getElementById('ocrStatus').textContent='';
   ocrRno='';
-  if(f){
-    if(isPdf(f))document.getElementById('ocrStatus').textContent='PDF attached — type the AWB & weight';
-    else ocrRun(f);
-  }
+  if(f)ocrRun(f); // photos AND PDFs auto-read; fills empty fields only
 };
 window.exAdd=name=>{
   const item=name||prompt('Charge name:','');
