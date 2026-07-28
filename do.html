@@ -86,7 +86,10 @@
       <input type="file" id="f_photo" accept="image/*,.pdf,application/pdf" style="display:none" onchange="gotPhoto()">
       <div class="field">
         <button type="button" class="snapbtn" id="snapBtn" onclick="document.getElementById('f_photo').click()">📸 DO photo / file (PDF ok)</button>
-        <div id="ocrStatus" class="muted" style="margin-top:5px;font-weight:600"></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:5px">
+          <div id="ocrStatus" class="muted" style="font-weight:600;flex:1"></div>
+          <button type="button" class="ghost" id="clrPhoto" style="display:none;color:#dc2626" onclick="clearPhoto()">✕ remove</button>
+        </div>
       </div>
       <div class="grid2">
         <div class="field"><label>AWB NO</label><input id="f_awb" placeholder="e.g. 926-1234 5675" required></div>
@@ -334,8 +337,14 @@ window.gotPhoto=()=>{
   b.textContent=f?'✅ DO ready — tap to change':'📸 DO photo / file (PDF ok)';
   b.classList.toggle('got',!!f);
   document.getElementById('ocrStatus').textContent='';
+  document.getElementById('clrPhoto').style.display=f?'':'none';
   ocrRno='';
   if(f)ocrRun(f); // photos AND PDFs auto-read; fills empty fields only
+};
+window.clearPhoto=()=>{
+  document.getElementById('f_photo').value='';
+  window.gotPhoto();
+  document.getElementById('ocrStatus').textContent='Removed — take the DO again';
 };
 window.exAdd=name=>{
   const item=name||prompt('Charge name:','');
