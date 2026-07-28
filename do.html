@@ -83,9 +83,9 @@
   <div class="card">
     <div class="muted" style="font-weight:700;margin-bottom:10px">CLEARANCE DONE? Snap the Delivery Order — the office bills it straight away.</div>
     <form onsubmit="return saveSnap(event)">
-      <input type="file" id="f_photo" accept="image/*" capture="environment" style="display:none" onchange="gotPhoto()">
+      <input type="file" id="f_photo" accept="image/*,.pdf,application/pdf" style="display:none" onchange="gotPhoto()">
       <div class="field">
-        <button type="button" class="snapbtn" id="snapBtn" onclick="document.getElementById('f_photo').click()">📸 Take DO photo</button>
+        <button type="button" class="snapbtn" id="snapBtn" onclick="document.getElementById('f_photo').click()">📸 DO photo / file (PDF ok)</button>
         <div id="ocrStatus" class="muted" style="margin-top:5px;font-weight:600"></div>
       </div>
       <div class="grid2">
@@ -108,8 +108,8 @@
         <div id="exList"></div>
       </div>
       <div class="field">
-        <label>MORE PHOTOS — receipts / supporting documents (optional)</label>
-        <input type="file" id="f_more" accept="image/*" multiple>
+        <label>MORE DOCUMENTS — MACL bills, AWB, receipts… (photos or PDFs)</label>
+        <input type="file" id="f_more" accept="image/*,.pdf,application/pdf" multiple>
       </div>
       <button class="primary" id="sendBtn" type="submit">Send to office →</button>
     </form>
@@ -267,15 +267,19 @@ async function ocrRun(file){
 }
 
 /* ---------- form ---------- */
+const isPdf=f=>f&&(f.type==='application/pdf'||/\.pdf$/i.test(f.name||''));
 window.gotPhoto=()=>{
   const f=document.getElementById('f_photo').files[0];
   photoFile=f||null;
   const b=document.getElementById('snapBtn');
-  b.textContent=f?'✅ DO photo ready — tap to retake':'📸 Take DO photo';
+  b.textContent=f?'✅ DO ready — tap to change':'📸 DO photo / file (PDF ok)';
   b.classList.toggle('got',!!f);
   document.getElementById('ocrStatus').textContent='';
   ocrRno='';
-  if(f)ocrRun(f);
+  if(f){
+    if(isPdf(f))document.getElementById('ocrStatus').textContent='PDF attached — type the AWB & weight';
+    else ocrRun(f);
+  }
 };
 window.exAdd=name=>{
   const item=name||prompt('Charge name:','');
@@ -301,16 +305,21 @@ window.saveSnap=async ev=>{
   try{
     const id=uid();
     const photos=[];
-    const main=await shrink(photoFile);
-    photos.push({name:'DO '+awb+'.jpg',path:'dosnaps/'+id+'/do.jpg',url:await upload('dosnaps/'+id+'/do.jpg',main),size:main.size,ts:today()});
+    const putFile=async(file,label,base)=>{
+      let blob=file,ext='.jpg',ct;
+      if(isPdf(file)){ext='.pdf';ct='application/pdf';if(file.size>25*1024*1024)throw new Error('PDF over 25 MB');}
+      else{try{blob=await shrink(file);}catch(e){blob=file;ext='';}}
+      const p='dosnaps/'+id+'/'+base+ext;
+      const r=stM.ref(fst,p);
+      await stM.uploadBytes(r,blob,ct?{contentType:ct}:{contentType:'image/jpeg'});
+      photos.push({name:label,path:p,url:await stM.getDownloadURL(r),size:blob.size,ts:today()});
+    };
+    await putFile(photoFile,'DO '+awb+(isPdf(photoFile)?'.pdf':'.jpg'),'do');
     const more=Array.from(document.getElementById('f_more').files||[]);
     for(let i=0;i<more.length;i++){
       btn.textContent='Uploading '+(i+2)+'/'+(more.length+1)+'…';
-      try{
-        const b=await shrink(more[i]);
-        const p='dosnaps/'+id+'/doc'+(i+1)+'.jpg';
-        photos.push({name:more[i].name||('doc'+(i+1)+'.jpg'),path:p,url:await upload(p,b),size:b.size,ts:today()});
-      }catch(e){toast('Skipped '+(more[i].name||'a file')+' — not an image');}
+      try{await putFile(more[i],more[i].name||('doc'+(i+1)),'doc'+(i+1));}
+      catch(e){toast('Skipped '+(more[i].name||'a file'));}
     }
     const macl=Number(document.getElementById('f_macl').value)||null;
     const demur=Number(document.getElementById('f_demur').value)||null;
@@ -351,9 +360,12 @@ function render(){
   document.getElementById('st_month').textContent=data.filter(r=>r.status==='billed'&&(r.billedAt||r.date||'').startsWith(m)).length;
   const rows=data.slice().sort((a,b)=>(b.u||0)-(a.u||0)).slice(0,30);
   document.getElementById('list').innerHTML=rows.length?rows.map(r=>{
-    const ph=(r.photos&&r.photos[0])||null;
+    const phs=r.photos||[];
+    const phImg=phs.find(function(p){return !/\.pdf$/i.test(p.path||p.name||'')});
+    const ph=phImg||phs[0]||null;
     return `<div class="item">
-      ${ph?`<a href="${esc(ph.url)}" target="_blank" rel="noopener"><img class="thumb" src="${esc(ph.url)}" alt="DO"></a>`:''}
+      ${ph?(phImg?`<a href="${esc(ph.url)}" target="_blank" rel="noopener"><img class="thumb" src="${esc(ph.url)}" alt="DO"></a>`
+        :`<a href="${esc(ph.url)}" target="_blank" rel="noopener" class="thumb" style="display:flex;align-items:center;justify-content:center;font-size:24px;text-decoration:none">📄</a>`):''}
       <div class="mid">
         <div class="awb">${esc(r.awb)} · ${r.kg} kg</div>
         <div class="sub">${esc(r.customer||'')}${r.customer?' · ':''}${fmtD(r.date)} ${esc(r.time||'')} · ${esc(r.by)}${r.macl?' · MACL '+r.macl:''}${r.demur?' · DEM '+r.demur:''}${(r.extras||[]).length?' · +'+r.extras.map(x=>esc(x.item)).join(', '):''}</div>
