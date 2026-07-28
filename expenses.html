@@ -118,6 +118,21 @@
   </div>
 </div>
 
+<div class="overlay" id="ov_vendor">
+  <div class="modal">
+    <h2>🚐 Add Van Account</h2>
+    <form onsubmit="return saveVendor(event)">
+      <div class="field"><label>ACCOUNT NUMBER (for transfer)</label><input id="vd_account" inputmode="numeric" required></div>
+      <div class="field"><label>COMPANY / OWNER NAME</label><input id="vd_name" required></div>
+      <div class="field"><label>ACCOUNT NAME IN BANK (optional)</label><input id="vd_accName"></div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="hide('ov_vendor')">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="overlay" id="ov_van">
   <div class="modal">
     <h2>🚐 Add Van Charge</h2>
@@ -290,8 +305,11 @@ function renderVan(){
     <div class="bigrow">
       <div class="stat warn"><div class="n">${rf(pend)}</div><div class="l">Van pending (${unpaid.length})</div></div>
     </div>
-    <button class="primary" style="margin-bottom:12px" onclick="openVan()">＋ Add Van Charge</button>
-    ${vendors.length===0?'<div class="card" style="text-align:center;color:var(--muted)">No van accounts yet — ask Jaamiz to add them</div>':''}
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="primary" style="flex:1" onclick="openVan()">＋ Add Van Charge</button>
+      <button class="ghost" style="flex:0 0 auto" onclick="openVendor()">＋ Van Account</button>
+    </div>
+    ${vendors.length===0?'<div class="card" style="text-align:center;color:var(--muted)">No van accounts yet — press ＋ Van Account to add one</div>':''}
     ${vendors.map(vd=>{
       const list=vans.filter(v=>v.vendor===vd.account);
       const up=list.filter(v=>!v.paid).sort((a,b)=>a.date<b.date?-1:1);
@@ -311,9 +329,27 @@ function renderVan(){
         </div>`).join('')}
       </div>`;}).join('')}`;
 }
+window.openVendor=()=>{
+  document.getElementById('vd_account').value='';
+  document.getElementById('vd_name').value='';
+  document.getElementById('vd_accName').value='';
+  show('ov_vendor');
+};
+window.saveVendor=ev=>{
+  ev.preventDefault();
+  const account=document.getElementById('vd_account').value.trim();
+  const name=document.getElementById('vd_name').value.trim();
+  const accName=document.getElementById('vd_accName').value.trim();
+  if(!account||!name)return false;
+  if(kind('vendor').some(v=>v.account===account)){toast('That account number already exists');return false;}
+  put({id:uid(),kind:'vendor',account,name,accName,addedBy:me});
+  hide('ov_vendor');
+  toast('Van account added — '+name);
+  return false;
+};
 window.openVan=()=>{
   const vendors=kind('vendor');
-  if(!vendors.length){toast('No van accounts yet — ask Jaamiz to add them');return;}
+  if(!vendors.length){toast('No van accounts yet — press ＋ Van Account first');return;}
   document.getElementById('v_vendor').innerHTML=vendors.map(v=>
     `<option value="${esc(v.account)}">${esc(v.name||v.account)} — ${esc(v.account)}</option>`).join('');
   document.getElementById('v_note').value='';
