@@ -764,7 +764,7 @@
       <div class="hint" id="e_fileHint" style="margin:-8px 0 12px;color:var(--brand)"></div>
       <label style="display:flex;align-items:center;gap:8px;margin:0 0 12px;font-weight:600;cursor:pointer">
         <input type="checkbox" id="e_billOnly" onchange="toggleBillOnly()" style="width:auto">
-        💳 Billing only — cleared without documentation (own BILL serial, hidden from the Form Log)
+        💳 Billing only — cleared without documentation (no serial/FILE, tracked in the Billing tab)
       </label>
       <div class="grid3">
         <div class="field"><label>BILL NO</label><input id="e_billNo" placeholder="L26/…"></div>
@@ -1298,8 +1298,8 @@ function filteredEntries(){
   let rows=entries.filter(r=>{
     // billing-only entries are hidden from the normal Form Log (they're not documentation work);
     // the 💳 Billing Only card toggles a view of ONLY them, and a text search always finds them
-    if(eState.billView){if(!r.billOnly)return false;}
-    else if(r.billOnly&&!q)return false;
+    if(eState.billView){if(!isBillOnly(r))return false;}
+    else if(isBillOnly(r)&&!q)return false;
     if(q&&![r.cno,r.customer,r.awbBl,r.billNo,r.rNo,r.file].join(' ').toLowerCase().includes(q))return false;
     if(sf&&r.status!==sf)return false;
     if(inv==='pending'&&r.billNo)return false;   // invoice pending = no BILL NO
@@ -1314,9 +1314,9 @@ function filteredEntries(){
 // Compares the entry DATE to today's local date, so the highlight clears automatically at 00:00.
 function apToday(r){return r.type==='AP'&&r.date===isoLocal(new Date());}
 function renderEntries(){
-  const pending=entries.filter(r=>r.status==='Pending'&&!r.billOnly).length; // documentation workload only
+  const pending=entries.filter(r=>r.status==='Pending'&&!isBillOnly(r)).length; // documentation workload only
   const invPending=entries.filter(r=>!r.billNo).length; // no BILL NO = not invoiced yet (incl. billing-only)
-  const billOnlyN=entries.filter(r=>r.billOnly).length;
+  const billOnlyN=entries.filter(r=>isBillOnly(r)).length;
   // container-derived metrics brought up to the Form Log top (click a card to open Container Status filtered)
   const todayIso=isoLocal(new Date()), tomorrowIso=addDays(todayIso,1);
   const activeC=containers.filter(r=>!isDone(r));
@@ -1336,7 +1336,7 @@ function renderEntries(){
   const slice=rows.slice((eState.page-1)*PAGE_SIZE,eState.page*PAGE_SIZE);
   document.getElementById('e_empty').style.display=rows.length===0?'block':'none';
   document.getElementById('e_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}${apToday(r)?' ap-today':''}">
-    <td class="num" data-l="No" ${r.billOnly?'title="Billing only — no documentation"':''}>${r.billOnly?'💳':(r.no??'—')}</td>
+    <td class="num" data-l="No" ${isBillOnly(r)?'title="Billing only — no documentation"':''}>${isBillOnly(r)?'💳':(r.no??'—')}</td>
     <td class="cno" data-l="C No">${esc(r.cno)}</td>
     <td data-l="Date">${fmtDate(r.date)}${r.time?`<div class="sub">${esc(r.time)}</div>`:''}</td>
     <td class="name" data-l="Customer" title="${esc(r.customer)}">${esc(r.customer)}</td>
@@ -1402,20 +1402,22 @@ function updateFileHint(){
   h.textContent=`${code} — ${mCount} form${mCount===1?'':'s'} this month · ${yCount} this year`+(!e_id.value?` · this entry: ${code} - ${yCount+1}`:'');
 }
 document.getElementById('e_file').addEventListener('change',updateFileHint);
-/* Billing-only entries (e.g. STELCO clearance jobs with no documentation): no master NO —
-   they live under the shared FILE code "BILL" whose per-year fileNo is their own serial. */
+/* Billing-only entries (STELCO & other clearance-without-documentation jobs): NOT forms —
+   no master NO, no FILE/staff serial. They're tracked in the Billing tab (STELCO desk / DO queue)
+   purely as "billed on time with proper documents". STELCO (by C number) is billing-only ALWAYS. */
+function isBillOnly(e){return !!(e&&(e.billOnly||(e.cno||'').toUpperCase()===stelcoCno()));}
 function toggleBillOnly(){
   const on=document.getElementById('e_billOnly').checked;
   const noEl=document.getElementById('e_no'),sel=document.getElementById('e_file');
   if(on){
     if(!e_id.value)noEl.value='';
     noEl.disabled=true;
-    if(![...sel.options].some(o=>o.value==='BILL'))sel.insertAdjacentHTML('beforeend','<option>BILL</option>');
-    sel.value='BILL';
+    sel.value='';sel.disabled=true;
   }else{
     noEl.disabled=false;
     if(!e_id.value)noEl.value=entries.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
-    if(sel.value==='BILL')sel.value=localStorage.getItem('lion_last_file')||'';
+    sel.disabled=false;
+    if(!sel.value)sel.value=localStorage.getItem('lion_last_file')||'';
   }
   updateFileHint();
 }
@@ -1432,14 +1434,16 @@ function openEntryForm(id,defaultType){
     e_rNo.value=r.rNo||'';e_billNo.value=r.billNo||'';e_grsWt.value=r.grsWt??'';
     e_pkgs.value=r.pkgs??'';e_awbBl.value=r.awbBl||'';e_time.value=r.time||'';e_status.value=r.status;
     e_containerNo.value=r.containerNo||'';
-    document.getElementById('e_billOnly').checked=!!r.billOnly;
-    document.getElementById('e_no').disabled=!!r.billOnly;
-    if(r.billOnly)toggleBillOnly(); // ensure the BILL option exists in the FILE select
+    const bo=isBillOnly(r); // stored flag OR a billing-only customer (STELCO)
+    document.getElementById('e_billOnly').checked=bo;
+    document.getElementById('e_no').disabled=bo;
+    document.getElementById('e_file').disabled=bo;
     toggleContBox();
   }else{
     t.textContent='Add Entry';f.reset();e_id.value='';
     document.getElementById('e_billOnly').checked=false;
     e_no.disabled=false;
+    document.getElementById('e_file').disabled=false;
     e_no.value=entries.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
     e_date.value=isoLocal(new Date());
     e_time.value=new Date().toTimeString().slice(0,8);
@@ -1462,7 +1466,7 @@ function saveEntry(e){
     pkgs:e_pkgs.value===''?null:Number(e_pkgs.value),awbBl:e_awbBl.value.trim(),
     time:e_time.value,status:e_status.value,
     containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
-  if(document.getElementById('e_billOnly').checked){rec.billOnly=true;rec.no=null;} // billing-only: no master serial
+  if(document.getElementById('e_billOnly').checked||isBillOnly(rec)){rec.billOnly=true;rec.no=null;rec.file='';} // billing-only: no serial, no FILE
   if(prevEntry&&prevEntry.mpRemark)rec.mpRemark=prevEntry.mpRemark; // MP-tab remark isn't on this form — keep it
   if(prevEntry&&prevEntry.qbInvoiced){rec.qbInvoiced=prevEntry.qbInvoiced;rec.qbInvoicedAt=prevEntry.qbInvoicedAt;} // QuickBooks "sent" flag isn't on this form — keep it
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
@@ -3893,7 +3897,7 @@ function dpNewEntry(id){
       document.getElementById('e_custHint').textContent='✓ Found in customer list';}
   }
   window.__dpAfterSave=dp.id; // saveEntry links the snap (and opens the invoice builder for admin)
-  toast('Entry pre-filled from the DO photo as 💳 Billing only (BILL serial) — check the C NO and save');
+  toast('Entry pre-filled from the DO photo as 💳 Billing only — check the C NO and save');
 }
 function dpDismiss(id){
   const dp=dosnaps.find(d=>d.id===id);if(!dp)return;
@@ -4327,7 +4331,7 @@ function renderStelcoDesk(){
     const below=wt&&wt<=50;
     return `<tr class="t-${esc(e.type)}">
       <td data-l="Date">${fmtDate(e.date)}</td>
-      <td class="num" data-l="No">${e.billOnly?esc((e.file||'BILL')+(e.fileNo?' - '+e.fileNo:'')):(e.no??'—')}</td>
+      <td class="num" data-l="No">${isBillOnly(e)?'💳':(e.no??'—')}</td>
       <td data-l="Type">${e.type?`<span class="typechip">${esc(e.type)}</span>`:'—'}</td>
       <td data-l="R No">${esc(e.rNo)||'—'}</td>
       <td data-l="AWB / BL">${esc(e.awbBl)||'—'}</td>
@@ -4747,10 +4751,15 @@ function renumberEntries(){
     return a.id<b.id?-1:a.id>b.id?1:0;
   });
   let changed=0;
-  // master NO sequence covers documentation entries only — billing-only entries carry no master serial
+  // master NO sequence covers documentation entries only — billing-only entries (incl. all STELCO)
+  // carry no master serial and no FILE/staff code (they must not consume a staff's form serial)
   let n=0;
   sorted.forEach(e=>{
-    if(e.billOnly){if(e.no!=null){e.no=null;changed++;}return;}
+    if(isBillOnly(e)){
+      if(e.no!=null){e.no=null;changed++;}
+      if(e.file){e.file='';changed++;}
+      return;
+    }
     n++;if(Number(e.no)!==n){e.no=n;changed++;}
   });
   // per-staff entry number (resets each year): walking the same chronological order, the Nth form a
