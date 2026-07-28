@@ -1014,6 +1014,7 @@ service cloud.firestore {
           <div class="field"><label>CLEARANCE LINE LABEL (custom)</label><input id="u_clear_label" placeholder="e.g. Clearance KG Above 50"></div>
         </div>
         <div class="field"><label>INVOICE EMAIL(S) — comma-separated; pre-fills the invoice's "Email to"</label><input id="u_bill_email" placeholder="billing@customer.mv, second@customer.mv"></div>
+        <div class="field"><label>QUICKBOOKS CUSTOMER NAME (exact, as in QuickBooks — prevents duplicate customers)</label><input id="u_qb_name" placeholder="e.g. State Electric Company Limited"></div>
       </div>
       <div id="u_docs" style="margin-top:12px"></div>
       <div class="actions">
@@ -3435,10 +3436,18 @@ function sendInvoice(){
     if(syncPaymentFromEntry(e))savePayments();
     syncContFromEntry(e,before,null);
   }
+  // QuickBooks display name can differ from the tracker's (e.g. "STATE ELECTRIC CO LTD" vs
+  // "State Electric Company Limited") — the Zap's Find Customer is case-sensitive and creates a
+  // DUPLICATE on mismatch. customer.qbName (Customers tab) wins when set.
+  const custRec=lookupCustomer(e.cno);
+  const atts=(e.attachments||[]).slice(0,4);
   zapierPost({
     event:'invoice_ready',
     entryId:e.id,                                  // → Zapier writes the QuickBooks-assigned number back to this entry via Firestore
-    customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
+    customerName:(custRec&&custRec.qbName)||e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
+    // supporting documents (DO / MACL bills / AWB) — the Zap's Attach File step pulls these URLs
+    attachUrls:atts.map(a=>a.url).join('\n'),
+    att1:atts[0]?atts[0].url:'',att2:atts[1]?atts[1].url:'',att3:atts[2]?atts[2].url:'',att4:atts[3]?atts[3].url:'',
     shipmentType:e.type||'',date:e.date||'',billNo:bn,
     autoNumber:bn?false:true,                      // → Zapier "Auto Generate Invoice Number" (real boolean — the string 'true' was ignored by QuickBooks)
     // invoice To address: typed/looked-up customer email, else your own — so the send step ALWAYS emails someone
@@ -4353,7 +4362,7 @@ function openCustForm(id){
     u_rate_dh.value=ar['Dhoni Charges']??'';
     u_ff_qty.value=pf.ffQty??'';u_no_dhoni.checked=!!pf.noDhoni;u_no_proc.checked=!!pf.noProc;
     u_no_ff.checked=!!pf.noFF;u_min_kg.value=pf.minKg??'';u_clear_label.value=pf.clearLabel||'';
-    u_bill_email.value=r.billEmail||'';
+    u_bill_email.value=r.billEmail||'';u_qb_name.value=r.qbName||'';
     document.getElementById('u_docs').innerHTML=
       `<button type="button" class="ghost" onclick="closeModal('overlay-cust');openAttachCust('${r.id}')">📎 Documents${r.attachments&&r.attachments.length?' ('+r.attachments.length+')':''}</button>
        <span style="font-size:12px;color:#94a3b8;margin-left:8px">ID, licences, forms — shared with the Logins tab</span>`;
@@ -4361,7 +4370,7 @@ function openCustForm(id){
     u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';
     u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;u_no_proc.checked=false;
     u_no_ff.checked=false;u_min_kg.value='';u_clear_label.value='';
-    u_bill_email.value='';
+    u_bill_email.value='';u_qb_name.value='';
     document.getElementById('u_docs').innerHTML=
       `<input type="file" id="u_docs_file" multiple style="display:none" onchange="custPickDocs(this.files)">
        <button type="button" class="ghost" onclick="document.getElementById('u_docs_file').click()">📎 Add documents</button>
@@ -4391,11 +4400,13 @@ function saveCust(e){
     if(ex){toast('C number already in list: '+ex.name);return false;}
     const rec={id:uid(),cno,name,contact,apRates,apProfile};
     if(u_bill_email.value.trim())rec.billEmail=u_bill_email.value.trim();
+    if(u_qb_name.value.trim())rec.qbName=u_qb_name.value.trim();
     customers.push(rec);toast('Customer added');
     uploadPendingCustDocs(rec); // documents picked in the Add form upload now (async, non-blocking)
   }else{
     const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;r.apRates=apRates;r.apProfile=apProfile;delete r.apFee;
     if(u_bill_email.value.trim())r.billEmail=u_bill_email.value.trim();else delete r.billEmail;
+    if(u_qb_name.value.trim())r.qbName=u_qb_name.value.trim();else delete r.qbName;
     toast('Customer updated');
   }
   saveCustomers();renderCusts();updateCounts();closeModal('overlay-cust');
@@ -4845,6 +4856,13 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
     saveCustomers();
   }
   localStorage.setItem('lion_profile_seed_v4','1');
+})();
+(()=>{ // seed v5 — STELCO's EXACT QuickBooks display name (Find Customer is case-sensitive;
+  // sending the tracker's "STATE ELECTRIC CO LTD" created a duplicate QB customer)
+  if(localStorage.getItem('lion_profile_seed_v5'))return;
+  const c=customers.find(x=>(x.name||'').toUpperCase().includes('STATE ELECTRIC'));
+  if(c&&!c.qbName){c.qbName='State Electric Company Limited';saveCustomers();}
+  localStorage.setItem('lion_profile_seed_v5','1');
 })();
 // Backfill missing C numbers on saved logins (many sheet-imported logins had none): exact,
 // unambiguous name match against the Customers list. Runs each load; already-filled rows untouched.
