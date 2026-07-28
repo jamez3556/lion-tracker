@@ -536,17 +536,21 @@
   </div>
 
   <div id="b_pane_stelco" style="display:none">
+    <div class="stats" id="b_st_stats"></div>
+    <div class="toolbar" style="justify-content:flex-end">
+      <button class="primary" onclick="stelcoNew()">＋ Add STELCO shipment</button>
+    </div>
     <div class="tablewrap m-cards">
       <div class="scroll">
-        <table style="min-width:900px">
+        <table style="min-width:980px">
           <thead><tr>
-            <th>DATE</th><th class="num">NO</th><th>R NO</th><th>AWB</th><th class="num">KG</th>
-            <th class="num">MACL</th><th class="num">DEMURRAGE</th><th>BILL NO</th><th>STATUS</th><th class="nosort actcol">BILL</th>
+            <th>DATE</th><th class="num">NO</th><th>TYPE</th><th>R NO</th><th>AWB / BL</th><th class="num">KG</th>
+            <th class="num">MACL</th><th class="num">DEMURRAGE</th><th>BILL NO</th><th>STATUS</th><th class="nosort actcol">ACTIONS</th>
           </tr></thead>
           <tbody id="b_st_tbody"></tbody>
         </table>
       </div>
-      <div class="empty" id="b_st_empty" style="display:none"><div class="big">⚡</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No STELCO air shipments yet</div></div>
+      <div class="empty" id="b_st_empty" style="display:none"><div class="big">⚡</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No STELCO shipments yet</div></div>
     </div>
   </div>
 </section>
@@ -4290,11 +4294,29 @@ async function bSnapSave(){
 }
 // ---- STELCO billing desk: every STELCO air shipment with its billing state, one tap to bill ----
 function stelcoCno(){const c=customers.find(x=>(x.name||'').toUpperCase().includes('STATE ELECTRIC'));return c?c.cno.toUpperCase():'C2873';}
-function stelcoRows(){const cno=stelcoCno();return entries.filter(e=>(e.cno||'').toUpperCase()===cno&&e.type==='AP');}
+// ALL STELCO shipments, any type — this desk is STELCO's home page (air today, sea joins later)
+function stelcoRows(){const cno=stelcoCno();return entries.filter(e=>(e.cno||'').toUpperCase()===cno);}
 function stelcoPending(){return stelcoRows().filter(e=>!e.billNo);}
+function stelcoNew(){ // add a STELCO shipment straight from the desk — pre-filled, billing-only by default
+  const cno=stelcoCno();
+  const c=customers.find(x=>(x.cno||'').toUpperCase()===cno);
+  openEntryForm(null,'AP');
+  document.getElementById('e_billOnly').checked=true;toggleBillOnly();
+  document.getElementById('e_cno').value=(c&&c.cno)||cno;
+  document.getElementById('e_customer').value=(c&&c.name)||'STATE ELECTRIC CO LTD';
+}
 function renderStelcoDesk(){
   const tb=document.getElementById('b_st_tbody');if(!tb)return;
-  const rows=stelcoRows().sort((a,b)=>(b.date||'').localeCompare(a.date||'')||((b.no||0)-(a.no||0))).slice(0,80);
+  const all=stelcoRows();
+  const toBill=all.filter(e=>!e.billNo).length;
+  const mo=isoLocal(new Date()).slice(0,7);
+  const moN=all.filter(e=>(e.date||'').slice(0,7)===mo).length;
+  const st=document.getElementById('b_st_stats');
+  if(st)st.innerHTML=`
+    <div class="card c-danger"><div class="n">${toBill}</div><div class="l">⏳ To Bill</div></div>
+    <div class="card c-info"><div class="n">${moN}</div><div class="l">This Month</div></div>
+    <div class="card c-purple"><div class="n">${all.length.toLocaleString()}</div><div class="l">All STELCO Shipments</div></div>`;
+  const rows=all.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||((b.fileNo||b.no||0)-(a.fileNo||a.no||0))).slice(0,80);
   document.getElementById('b_st_empty').style.display=rows.length?'none':'block';
   tb.innerHTML=rows.map(e=>{
     const dp=dosnaps.find(d=>d.entryId===e.id);
@@ -4303,19 +4325,24 @@ function renderStelcoDesk(){
     const dem=(dp&&dp.demur)||null;
     const wt=Number(e.grsWt)||0;
     const below=wt&&wt<=50;
-    return `<tr>
+    return `<tr class="t-${esc(e.type)}">
       <td data-l="Date">${fmtDate(e.date)}</td>
-      <td class="num" data-l="No">${e.no??'—'}</td>
+      <td class="num" data-l="No">${e.billOnly?esc((e.file||'BILL')+(e.fileNo?' - '+e.fileNo:'')):(e.no??'—')}</td>
+      <td data-l="Type">${e.type?`<span class="typechip">${esc(e.type)}</span>`:'—'}</td>
       <td data-l="R No">${esc(e.rNo)||'—'}</td>
-      <td data-l="AWB">${esc(e.awbBl)||'—'}</td>
-      <td class="num" data-l="KG">${fmtNum(e.grsWt)}${below?' <span style="font-size:10px;color:#0369a1;font-weight:700">≤50 pass-through only</span>':''}</td>
+      <td data-l="AWB / BL">${esc(e.awbBl)||'—'}</td>
+      <td class="num" data-l="KG">${fmtNum(e.grsWt)}${below&&e.type==='AP'?' <span style="font-size:10px;color:#0369a1;font-weight:700">≤50 pass-through only</span>':''}</td>
       <td class="num" data-l="MACL">${macl!=null?fmtNum(macl):'—'}</td>
       <td class="num" data-l="Demurrage">${dem!=null?fmtNum(dem):'—'}</td>
       <td data-l="Bill No">${esc(e.billNo)||'—'}</td>
       <td data-l="Status">${e.billNo?'<span style="color:#16a34a;font-weight:800">✅ Billed</span>':'<span style="color:#dc2626;font-weight:800">⏳ To bill</span>'}</td>
-      <td class="actcol">${isAdmin()?(e.billNo
-        ?`<button class="iconbtn" onclick="openInvoiceForm('${e.id}')" title="Open the invoice">✅</button>`
-        :`<button class="iconbtn" style="background:#e8730f;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="${dp?`dpBill('${dp.id}')`:`openInvoiceForm('${e.id}')`}" title="Create the QuickBooks invoice">🧾 Bill</button>`):''}</td>
+      <td class="actcol"><div class="rowact">
+        ${isAdmin()?(e.billNo
+          ?`<button class="iconbtn" onclick="openInvoiceForm('${e.id}')" title="Open the invoice">✅</button>`
+          :`<button class="iconbtn" style="background:#e8730f;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="${dp?`dpBill('${dp.id}')`:`openInvoiceForm('${e.id}')`}" title="Create the QuickBooks invoice">🧾 Bill</button>`):''}
+        <button class="iconbtn" onclick="openAttach('${e.id}')" title="Documents">📎${e.attachments&&e.attachments.length?e.attachments.length:''}</button>
+        <button class="iconbtn" onclick="openEntryForm('${e.id}')" title="Edit">✏️</button>
+      </div></td>
     </tr>`;}).join('');
 }
 
