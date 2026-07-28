@@ -654,8 +654,9 @@
 <!-- expenses: van charge -->
 <div class="overlay" id="overlay-xpvan">
   <div class="modal" style="max-width:420px">
-    <h2>🚐 Add Van Charge</h2>
+    <h2 id="xpv_title">🚐 Add Van Charge</h2>
     <form onsubmit="return saveXpVan(event)">
+      <input type="hidden" id="xpv_id">
       <div class="field"><label>VAN COMPANY (account)</label><select id="xpv_vendor"></select></div>
       <div class="field"><label>NOTE (which van / shipment)</label><input id="xpv_note" placeholder="Simer van laari" autocomplete="off"></div>
       <div class="grid2">
@@ -2779,6 +2780,7 @@ function renderXpVan(){
           <div style="display:flex;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid #f1f5f9;align-items:center">
             <input type="checkbox" style="width:17px;height:17px;margin:0" ${xpState.vsel.includes(v.id)?'checked':''} onchange="xpVanSel('${v.id}')">
             <span>${xpD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><b>${rf(v.amount)}</b>
+            <button class="ghost" style="padding:2px 7px;font-size:11px" onclick="openXpVanForm('${v.id}')" title="Edit">✎</button>
             <button class="ghost" style="padding:2px 7px;font-size:11px" onclick="xpDelVan('${v.id}')">🗑</button>
           </div>`).join('')}
         ${paidRecent.map(v=>`
@@ -2824,29 +2826,39 @@ function xpDelVendor(id){
   saveExpensesData();renderExpenses();
   toast('Account deleted');
 }
-function openXpVanForm(){
+function openXpVanForm(id){
   if(!xpGuard())return;
   const vendors=xpKind('vendor');
   if(!vendors.length){toast('Add a van account first');return;}
-  document.getElementById('xpv_vendor').innerHTML=vendors.map(v=>
-    `<option value="${esc(v.account)}">${esc(v.name||v.account)} — ${esc(v.account)}</option>`).join('');
-  document.getElementById('xpv_note').value='';
-  document.getElementById('xpv_amount').value='';
-  document.getElementById('xpv_date').value=isoLocal(new Date());
+  const v=id?xpKind('van').find(x=>x.id===id):null;
+  document.getElementById('xpv_title').textContent=v?'✎ Edit Van Charge':'🚐 Add Van Charge';
+  document.getElementById('xpv_id').value=v?v.id:'';
+  document.getElementById('xpv_vendor').innerHTML=vendors.map(x=>
+    `<option value="${esc(x.account)}" ${v&&v.vendor===x.account?'selected':''}>${esc(x.name||x.account)} — ${esc(x.account)}</option>`).join('');
+  document.getElementById('xpv_note').value=v?(v.note||''):'';
+  document.getElementById('xpv_amount').value=v?v.amount:'';
+  document.getElementById('xpv_date').value=v?v.date:isoLocal(new Date());
   showModal('overlay-xpvan');
 }
 function saveXpVan(ev){
   ev.preventDefault();
   if(!xpGuard())return false;
+  const id=document.getElementById('xpv_id').value;
   const vendor=document.getElementById('xpv_vendor').value;
   const note=document.getElementById('xpv_note').value.trim()||'van laari';
   const amount=parseInt(document.getElementById('xpv_amount').value,10);
   const date=document.getElementById('xpv_date').value;
   if(!vendor||!amount||!date)return false;
-  expensesData.push({id:uid(),kind:'van',date,vendor,note,amount,paid:false,paidAt:null});
+  const v=id?xpKind('van').find(x=>x.id===id):null;
+  if(v){
+    v.vendor=vendor;v.note=note;v.amount=amount;v.date=date;
+    toast('Updated '+note+' · '+rf(amount));
+  }else{
+    expensesData.push({id:uid(),kind:'van',date,vendor,note,amount,paid:false,paidAt:null});
+    toast('Added '+note+' · '+rf(amount));
+  }
   saveExpensesData();closeModal('overlay-xpvan');
   renderExpenses();
-  toast('Added '+note+' · '+rf(amount));
   return false;
 }
 function xpVanPayAll(vendorId){
@@ -3808,14 +3820,13 @@ function bPickLabel(slot){
 const bIsPdf=f=>f&&(f.type==='application/pdf'||/\.pdf$/i.test(f.name||''));
 function bPick(slot){
   bPickLabel(slot);
-  // DO photo picked → auto-read AWB / consignee / weight / R number (empty fields only, always amendable).
-  // PDFs skip the auto-read (OCR is image-only) — the file still attaches normally.
-  if(slot==='do'){
-    const f=document.getElementById('b_ph_do').files[0];
+  // DO or AWB document attached → auto-read AWB / consignee / weight / R number
+  // (photos AND PDFs; fills empty fields only, always amendable by hand)
+  if(slot==='do'||slot==='awb'){
+    const f=document.getElementById('b_ph_'+slot).files[0];
     if(!f)return;
     const st=document.getElementById('b_capStatus');
-    if(bIsPdf(f)){st.textContent='PDF attached — type the AWB & weight (auto-read works on photos)';return;}
-    ocrExtract(f,m=>st.textContent=m)
+    docExtract(f,m=>st.textContent=m)
       .then(p=>ocrFill(p,{awb:'b_awb',kg:'b_kg',cust:'b_cust',rno:'__bRno'},st))
       .catch(()=>st.textContent='Auto-read unavailable (offline?) — type the details');
   }
@@ -3870,21 +3881,92 @@ function ocrParse(text){
   const out={};
   const awb=t.match(/\b(\d{3})\s*[-–—]?\s*(\d{8})\b/);
   if(awb)out.awb=awb[1]+'-'+awb[2];
-  // consignee line: "CONSIGNEE : STATE ELECTRIC COMPANY"
-  const cons=t.split(/\n/).map(l=>l.trim()).find(l=>/CONSIGNEE/.test(l)&&!/AGENT/.test(l));
-  if(cons){
-    let nm=cons.replace(/.*CONSIGNEE/,'').replace(/^[\s:.\-]+/,'').replace(/[^A-Z0-9&.\-' ]+/g,' ').replace(/\s+/g,' ').trim();
-    // the OCR often merges the next column onto the same line — cut at known form labels
-    nm=nm.split(/\b(?:PCS|WGT|RECEIVED|NOTIFY|RECEIPT|CONDITION|LOCATION|SIGN|DATE|ID CARD|N ?O ?G)\b/)[0].trim().slice(0,40).trim();
+  // consignee line: "CONSIGNEE : STATE ELECTRIC COMPANY" (name may sit on the NEXT line in PDFs)
+  const lines=t.split(/\n/).map(l=>l.trim());
+  const ci=lines.findIndex(l=>/CONSIGNEE/.test(l)&&!/AGENT/.test(l));
+  if(ci>=0){
+    const clean=s=>{
+      let nm=String(s||'').replace(/.*CONSIGNEE/,'').replace(/^[\s:.\-]+/,'').replace(/[^A-Z0-9&.\-' ]+/g,' ').replace(/\s+/g,' ').trim();
+      // the OCR often merges the next column onto the same line — cut at known form labels
+      return nm.split(/\b(?:PCS|WGT|RECEIVED|NOTIFY|RECEIPT|CONDITION|LOCATION|SIGN|DATE|ID CARD|ADDRESS|ACCOUNT|N ?O ?G)\b/)[0].trim().slice(0,40).trim();
+    };
+    let nm=clean(lines[ci]);
+    if(nm.length<4)nm=clean((lines.slice(ci+1).find(l=>l.trim().length>=4))||'');
     if(nm.length>=4)out.consignee=nm;
   }
-  // weight: "PCS/WGT ON MAWB : 1/54.0" or "PCS/WGT RECEIVED : 1/54.0"
-  const wg=t.match(/WGT[^\n]*?\b\d+\s*\/\s*(\d+(?:[.,]\d+)?)/);
+  // STELCO in any form → always the canonical customer name
+  if(/STELCO|STATE\s*ELECTRIC/.test(t))out.consignee='STATE ELECTRIC COMPANY';
+  // weight: "PCS/WGT ON MAWB : 1/54.0", or HAWB "GROSS WEIGHT 54.0" / "CHARGEABLE WT"
+  const wg=t.match(/WGT[^\n]*?\b\d+\s*\/\s*(\d+(?:[.,]\d+)?)/)
+        ||t.match(/GROSS\s*(?:WEIGHT|WT)[^0-9]{0,12}(\d+(?:[.,]\d+)?)/)
+        ||t.match(/CHARGEABLE\s*(?:WEIGHT|WT)?[^0-9]{0,12}(\d+(?:[.,]\d+)?)/);
   if(wg)out.kg=Number(wg[1].replace(',','.'));
   // R number: "R= 70166"
   const rn=t.match(/\bR\s*[=\-:]\s*(\d{4,6})\b/);
   if(rn)out.rNo=rn[1];
   return out;
+}
+// PDF reading (pdf.js, lazy CDN): text-layer PDFs (e-AWBs) read instantly; scanned PDFs
+// (CamScanner) render page 1-2 to canvas and go through the same OCR as photos.
+let __pdfP=null;
+function pdfLoad(){
+  if(__pdfP)return __pdfP;
+  __pdfP=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.onload=()=>{try{window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';res(window.pdfjsLib);}catch(e){__pdfP=null;rej(e);}};
+    s.onerror=()=>{__pdfP=null;rej(new Error('PDF library failed to load'));};
+    document.head.appendChild(s);
+  });
+  return __pdfP;
+}
+async function pdfExtract(file,status){
+  const lib=await pdfLoad();
+  status('🔍 Reading PDF…');
+  const doc=await lib.getDocument({data:await file.arrayBuffer()}).promise;
+  let text='';
+  for(let i=1;i<=Math.min(doc.numPages,3);i++){
+    const tc=await (await doc.getPage(i)).getTextContent();
+    text+=tc.items.map(it=>it.str).join('\n')+'\n';
+  }
+  const p=ocrParse(text);
+  if(p.awb||p.consignee||p.kg)return p;
+  // no text layer (scanned) → OCR the rendered pages
+  const T=await tessLoad();
+  let best=null;
+  for(let i=1;i<=Math.min(doc.numPages,2);i++){
+    status('🔍 Reading scanned PDF — page '+i+'…');
+    const pg=await doc.getPage(i);
+    const base=pg.getViewport({scale:1});
+    // cap the render at ~2000px — scanned pages are already high-res and huge canvases stall the OCR
+    const vp=pg.getViewport({scale:Math.min(2,2000/Math.max(base.width,base.height))});
+    const c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;
+    await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+    try{
+      const r=await T.recognize(c,'eng');
+      const q=ocrParse(r&&r.data&&r.data.text);
+      if(q.awb)return q;
+      if(!best&&(q.consignee||q.kg))best=q;
+    }catch(e){}
+  }
+  return best;
+}
+// one entry point for any attached document: photo → OCR, PDF → text/OCR; the FILE NAME itself
+// is an AWB hint (e.g. "HAWB_125-22299535_LJU00148.pdf"). Hard 75 s timeout — some scanned PDFs
+// (CamScanner JPEG2000 images) can wedge pdf.js for minutes; better to give up and let the user type.
+async function docExtract(file,status){
+  let p=null;
+  try{
+    const work=(file.type==='application/pdf'||/\.pdf$/i.test(file.name||''))?pdfExtract(file,status):ocrExtract(file,status);
+    p=await Promise.race([work,new Promise(res=>setTimeout(()=>res(undefined),75000))]);
+    if(p===undefined)status('Reading took too long — type the details');
+  }catch(e){}
+  p=p||{};
+  if(!p.awb){
+    const m=(file.name||'').match(/(\d{3})[-_ ]?(\d{8})/);
+    if(m)p.awb=m[1]+'-'+m[2];
+  }
+  return (p.awb||p.consignee||p.kg||p.rNo)?p:null;
 }
 // tries the photo in 4 orientations until an AWB appears (phone photos are often sideways)
 async function ocrExtract(file,status){
