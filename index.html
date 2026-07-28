@@ -758,6 +758,10 @@
         <div class="field"><label>R NO</label><input id="e_rNo"></div>
       </div>
       <div class="hint" id="e_fileHint" style="margin:-8px 0 12px;color:var(--brand)"></div>
+      <label style="display:flex;align-items:center;gap:8px;margin:0 0 12px;font-weight:600;cursor:pointer">
+        <input type="checkbox" id="e_billOnly" onchange="toggleBillOnly()" style="width:auto">
+        💳 Billing only — cleared without documentation (own BILL serial, hidden from the Form Log)
+      </label>
       <div class="grid3">
         <div class="field"><label>BILL NO</label><input id="e_billNo" placeholder="L26/…"></div>
         <div class="field"><label>GRS WT (kg)</label><input id="e_grsWt" type="number" step="any" min="0"></div>
@@ -1271,8 +1275,9 @@ function updateCounts(){
 }
 
 /* ============ FORM LOG ============ */
-const eState={key:'no',dir:-1,page:1};
+const eState={key:'no',dir:-1,page:1,billView:false};
 function entriesPage(p){eState.page=p;renderEntries();}
+function toggleBillView(){eState.billView=!eState.billView;eState.page=1;renderEntries();}
 function buildEntryFilters(){
   const types=[...new Set(entries.map(r=>r.type).filter(Boolean))].sort();
   document.getElementById('e_typeFilter').innerHTML='<option value="">All types</option>'+types.map(t=>`<option>${esc(t)}</option>`).join('');
@@ -1287,6 +1292,10 @@ function filteredEntries(){
   const tf=document.getElementById('e_typeFilter').value;
   const mf=document.getElementById('e_monthFilter').value;
   let rows=entries.filter(r=>{
+    // billing-only entries are hidden from the normal Form Log (they're not documentation work);
+    // the 💳 Billing Only card toggles a view of ONLY them, and a text search always finds them
+    if(eState.billView){if(!r.billOnly)return false;}
+    else if(r.billOnly&&!q)return false;
     if(q&&![r.cno,r.customer,r.awbBl,r.billNo,r.rNo,r.file].join(' ').toLowerCase().includes(q))return false;
     if(sf&&r.status!==sf)return false;
     if(inv==='pending'&&r.billNo)return false;   // invoice pending = no BILL NO
@@ -1301,8 +1310,9 @@ function filteredEntries(){
 // Compares the entry DATE to today's local date, so the highlight clears automatically at 00:00.
 function apToday(r){return r.type==='AP'&&r.date===isoLocal(new Date());}
 function renderEntries(){
-  const pending=entries.filter(r=>r.status==='Pending').length;
-  const invPending=entries.filter(r=>!r.billNo).length; // no BILL NO = not invoiced yet
+  const pending=entries.filter(r=>r.status==='Pending'&&!r.billOnly).length; // documentation workload only
+  const invPending=entries.filter(r=>!r.billNo).length; // no BILL NO = not invoiced yet (incl. billing-only)
+  const billOnlyN=entries.filter(r=>r.billOnly).length;
   // container-derived metrics brought up to the Form Log top (click a card to open Container Status filtered)
   const todayIso=isoLocal(new Date()), tomorrowIso=addDays(todayIso,1);
   const activeC=containers.filter(r=>!isDone(r));
@@ -1316,12 +1326,13 @@ function renderEntries(){
     <div class="card c-danger" style="cursor:pointer" onclick="showInvoicePending()" title="Entries with no BILL NO — click to list them"><div class="n">${invPending.toLocaleString()}</div><div class="l">🧾 Invoice Pending</div></div>
     <div class="card c-danger" style="cursor:pointer" onclick="goToContFilter('soon')" title="Containers due within 3 days — click to view"><div class="n">${dueSoon}</div><div class="l">Due ≤ 3 Days</div></div>
     <div class="card c-info" style="cursor:pointer" onclick="goToContFilter('notedtoday')" title="Containers noted for today — click to view"><div class="n">${notedToday}</div><div class="l">Noted for Today</div></div>
-    <div class="card c-purple" style="cursor:pointer" onclick="goToContFilter('notedtomorrow')" title="Containers noted for tomorrow — click to view"><div class="n">${notedTomorrow}</div><div class="l">Noted for Tomorrow</div></div>`;
+    <div class="card c-purple" style="cursor:pointer" onclick="goToContFilter('notedtomorrow')" title="Containers noted for tomorrow — click to view"><div class="n">${notedTomorrow}</div><div class="l">Noted for Tomorrow</div></div>
+    ${billOnlyN?`<div class="card c-purple" style="cursor:pointer${eState.billView?';outline:2px solid var(--brand)':''}" onclick="toggleBillView()" title="Cleared-without-documentation shipments (BILL serial) — click to ${eState.billView?'hide':'show'} them"><div class="n">${billOnlyN}</div><div class="l">💳 Billing Only</div></div>`:''}`;
   const rows=filteredEntries();
   const slice=rows.slice((eState.page-1)*PAGE_SIZE,eState.page*PAGE_SIZE);
   document.getElementById('e_empty').style.display=rows.length===0?'block':'none';
   document.getElementById('e_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}${apToday(r)?' ap-today':''}">
-    <td class="num" data-l="No">${r.no??'—'}</td>
+    <td class="num" data-l="No" ${r.billOnly?'title="Billing only — no documentation"':''}>${r.billOnly?'💳':(r.no??'—')}</td>
     <td class="cno" data-l="C No">${esc(r.cno)}</td>
     <td data-l="Date">${fmtDate(r.date)}${r.time?`<div class="sub">${esc(r.time)}</div>`:''}</td>
     <td class="name" data-l="Customer" title="${esc(r.customer)}">${esc(r.customer)}</td>
@@ -1387,6 +1398,23 @@ function updateFileHint(){
   h.textContent=`${code} — ${mCount} form${mCount===1?'':'s'} this month · ${yCount} this year`+(!e_id.value?` · this entry: ${code} - ${yCount+1}`:'');
 }
 document.getElementById('e_file').addEventListener('change',updateFileHint);
+/* Billing-only entries (e.g. STELCO clearance jobs with no documentation): no master NO —
+   they live under the shared FILE code "BILL" whose per-year fileNo is their own serial. */
+function toggleBillOnly(){
+  const on=document.getElementById('e_billOnly').checked;
+  const noEl=document.getElementById('e_no'),sel=document.getElementById('e_file');
+  if(on){
+    if(!e_id.value)noEl.value='';
+    noEl.disabled=true;
+    if(![...sel.options].some(o=>o.value==='BILL'))sel.insertAdjacentHTML('beforeend','<option>BILL</option>');
+    sel.value='BILL';
+  }else{
+    noEl.disabled=false;
+    if(!e_id.value)noEl.value=entries.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
+    if(sel.value==='BILL')sel.value=localStorage.getItem('lion_last_file')||'';
+  }
+  updateFileHint();
+}
 function openEntryForm(id,defaultType){
   window.__dpAfterSave=null; // a fresh form open cancels any pending DO-snap link (set again by dpNewEntry)
   const t=document.getElementById('e_modalTitle');
@@ -1400,9 +1428,14 @@ function openEntryForm(id,defaultType){
     e_rNo.value=r.rNo||'';e_billNo.value=r.billNo||'';e_grsWt.value=r.grsWt??'';
     e_pkgs.value=r.pkgs??'';e_awbBl.value=r.awbBl||'';e_time.value=r.time||'';e_status.value=r.status;
     e_containerNo.value=r.containerNo||'';
+    document.getElementById('e_billOnly').checked=!!r.billOnly;
+    document.getElementById('e_no').disabled=!!r.billOnly;
+    if(r.billOnly)toggleBillOnly(); // ensure the BILL option exists in the FILE select
     toggleContBox();
   }else{
     t.textContent='Add Entry';f.reset();e_id.value='';
+    document.getElementById('e_billOnly').checked=false;
+    e_no.disabled=false;
     e_no.value=entries.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
     e_date.value=isoLocal(new Date());
     e_time.value=new Date().toTimeString().slice(0,8);
@@ -1425,6 +1458,7 @@ function saveEntry(e){
     pkgs:e_pkgs.value===''?null:Number(e_pkgs.value),awbBl:e_awbBl.value.trim(),
     time:e_time.value,status:e_status.value,
     containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
+  if(document.getElementById('e_billOnly').checked){rec.billOnly=true;rec.no=null;} // billing-only: no master serial
   if(prevEntry&&prevEntry.mpRemark)rec.mpRemark=prevEntry.mpRemark; // MP-tab remark isn't on this form — keep it
   if(prevEntry&&prevEntry.qbInvoiced){rec.qbInvoiced=prevEntry.qbInvoiced;rec.qbInvoicedAt=prevEntry.qbInvoicedAt;} // QuickBooks "sent" flag isn't on this form — keep it
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
@@ -1445,7 +1479,7 @@ function saveEntry(e){
   }
   // company-wide serial: a NEW entry must get a unique next NO. Guards the sync-race / partial-data case
   // where the local list was incomplete and produced a low, duplicate serial.
-  if(!prevEntry){
+  if(!prevEntry&&!rec.billOnly){
     const maxNo=entries.reduce((m,x)=>Math.max(m,Number(x.no)||0),0);
     if(rec.no==null||entries.some(x=>Number(x.no)===Number(rec.no)))rec.no=maxNo+1;
   }
@@ -3836,6 +3870,8 @@ function dpBill(id){
 function dpNewEntry(id){
   const dp=dosnaps.find(d=>d.id===id);if(!dp)return;
   openEntryForm(null,'AP');
+  // DO-snap jobs are cleared-without-documentation by default → billing-only (untick on the form if a form WAS filed)
+  document.getElementById('e_billOnly').checked=true;toggleBillOnly();
   document.getElementById('e_awbBl').value=dp.awb||'';
   document.getElementById('e_grsWt').value=dp.kg??'';
   if(dp.rNo)document.getElementById('e_rNo').value=dp.rNo;
@@ -3853,7 +3889,7 @@ function dpNewEntry(id){
       document.getElementById('e_custHint').textContent='✓ Found in customer list';}
   }
   window.__dpAfterSave=dp.id; // saveEntry links the snap (and opens the invoice builder for admin)
-  toast('Entry pre-filled from the DO photo — pick the C NO / FILE and save');
+  toast('Entry pre-filled from the DO photo as 💳 Billing only (BILL serial) — check the C NO and save');
 }
 function dpDismiss(id){
   const dp=dosnaps.find(d=>d.id===id);if(!dp)return;
@@ -4684,7 +4720,12 @@ function renumberEntries(){
     return a.id<b.id?-1:a.id>b.id?1:0;
   });
   let changed=0;
-  sorted.forEach((e,i)=>{if(Number(e.no)!==i+1){e.no=i+1;changed++;}});
+  // master NO sequence covers documentation entries only — billing-only entries carry no master serial
+  let n=0;
+  sorted.forEach(e=>{
+    if(e.billOnly){if(e.no!=null){e.no=null;changed++;}return;}
+    n++;if(Number(e.no)!==n){e.no=n;changed++;}
+  });
   // per-staff entry number (resets each year): walking the same chronological order, the Nth form a
   // staff code logs that year gets fileNo N → shown as "CAD - 23". Independent of the NO sequence.
   const perStaff={};
