@@ -498,13 +498,16 @@
   <div id="b_pane_snaps">
     <div class="card" id="b_capture" style="display:none;max-width:760px;margin-bottom:14px;padding:16px 18px;border:2px solid #e8730f;border-radius:14px;background:#fff7ed">
       <div style="font-weight:800;margin-bottom:10px">📸 New DO snap — clearance finished, bill it now</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Each slot takes a <b>camera photo OR a file</b> (PDF / image) — your phone offers both when you tap.</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-        <input type="file" id="b_ph_do" accept="image/*" capture="environment" style="display:none" onchange="bPick('do')">
-        <input type="file" id="b_ph_macl" accept="image/*" capture="environment" style="display:none" onchange="bPick('macl')">
-        <input type="file" id="b_ph_dem" accept="image/*" capture="environment" style="display:none" onchange="bPick('dem')">
-        <button type="button" class="ghost" id="b_btn_do" style="border:2px dashed #e8730f;color:#e8730f;font-weight:700" onclick="document.getElementById('b_ph_do').click()">📄 DO / Pick Order photo *</button>
-        <button type="button" class="ghost" id="b_btn_macl" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_macl').click()">🧾 MACL bill photo</button>
-        <button type="button" class="ghost" id="b_btn_dem" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_dem').click()">⏳ Demurrage bill photo</button>
+        <input type="file" id="b_ph_do" accept="image/*,.pdf,application/pdf" style="display:none" onchange="bPick('do')">
+        <input type="file" id="b_ph_macl" accept="image/*,.pdf,application/pdf" style="display:none" onchange="bPick('macl')">
+        <input type="file" id="b_ph_dem" accept="image/*,.pdf,application/pdf" style="display:none" onchange="bPick('dem')">
+        <input type="file" id="b_ph_awb" accept="image/*,.pdf,application/pdf" style="display:none" onchange="bPick('awb')">
+        <button type="button" class="ghost" id="b_btn_do" style="border:2px dashed #e8730f;color:#e8730f;font-weight:700" onclick="document.getElementById('b_ph_do').click()">📄 DO / Pick Order *</button>
+        <button type="button" class="ghost" id="b_btn_macl" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_macl').click()">🧾 MACL / tax invoice</button>
+        <button type="button" class="ghost" id="b_btn_dem" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_dem').click()">⏳ Demurrage bill</button>
+        <button type="button" class="ghost" id="b_btn_awb" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_awb').click()">📑 AWB / HAWB</button>
       </div>
       <div class="grid3">
         <div class="field"><label>AWB NO *</label><input id="b_awb" placeholder="e.g. 898-81050141"></div>
@@ -3678,7 +3681,11 @@ function renderDoQueue(){
   const rows=dosnaps.slice().sort((a,b)=>((a.status==='pending'?0:1)-(b.status==='pending'?0:1))||((b.u||0)-(a.u||0))).slice(0,25);
   if(!rows.length){box.innerHTML='<div style="color:#94a3b8;padding:14px 0">No DO photos yet — press <b>📸 Snap DO photo</b> above (or staff use <b>do.html</b> on their phone, same login).</div>';return;}
   box.innerHTML=rows.map(dp=>{
-    const ph=(dp.photos&&dp.photos[0])||null;
+    // thumbnail: first IMAGE in the set; PDFs get a document tile instead
+    const phs=dp.photos||[];
+    const phImg=phs.find(p=>!/\.pdf$/i.test(p.path||p.name||''));
+    const ph=phImg||phs[0]||null;
+    const phPdf=ph&&!phImg;
     const linked=dp.entryId?entries.find(x=>x.id===dp.entryId):null;
     const m=linked||dpMatch(dp);
     const billed=dp.status==='billed';
@@ -3692,7 +3699,9 @@ function renderDoQueue(){
         :`<button class="blue" style="padding:7px 14px" onclick="dpNewEntry('${dp.id}')">＋ Create entry${isAdmin()?' & bill':''}</button>`)+
       ` <button class="iconbtn del" title="Delete this snap (photo stays in the shipment if already attached)" onclick="dpDismiss('${dp.id}')">🗑️</button>`;
     return `<div style="display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;${billed?'opacity:.55':''}">
-      ${ph?`<a href="${esc(ph.url)}" target="_blank" rel="noopener" title="Open the DO photo"><img src="${esc(ph.url)}" alt="DO" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"></a>`:''}
+      ${ph?(phPdf
+        ?`<a href="${esc(ph.url)}" target="_blank" rel="noopener" title="Open the DO document" style="width:64px;height:64px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;font-size:26px;text-decoration:none">📄</a>`
+        :`<a href="${esc(ph.url)}" target="_blank" rel="noopener" title="Open the DO photo"><img src="${esc(ph.url)}" alt="DO" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"></a>`):''}
       <div style="flex:1;min-width:0;font-size:13px">
         <div style="font-weight:800;font-size:14px">${esc(dp.awb)} · ${Number(dp.kg)||'—'} kg${dp.rNo?' · R '+esc(dp.rNo):''}
           ${billed?`<span style="color:#16a34a;font-size:11.5px;font-weight:800;margin-left:6px">✅ BILLED${dp.billNo?' · '+esc(dp.billNo):''}</span>`:''}</div>
@@ -3782,8 +3791,8 @@ function bToggleCapture(){
   const opening=c.style.display==='none';
   c.style.display=opening?'':'none';
   if(opening){
-    ['b_ph_do','b_ph_macl','b_ph_dem','b_awb','b_kg','b_cust','b_macl','b_dem'].forEach(id=>{document.getElementById(id).value='';});
-    window.__bRno='';bExtras=[];bExList();['do','macl','dem'].forEach(bPickLabel);
+    ['b_ph_do','b_ph_macl','b_ph_dem','b_ph_awb','b_awb','b_kg','b_cust','b_macl','b_dem'].forEach(id=>{document.getElementById(id).value='';});
+    window.__bRno='';bExtras=[];bExList();['do','macl','dem','awb'].forEach(bPickLabel);
     document.getElementById('b_capStatus').textContent='';
     setTimeout(()=>document.getElementById('b_awb').focus(),50);
   }
@@ -3791,18 +3800,21 @@ function bToggleCapture(){
 function bPickLabel(slot){
   const f=document.getElementById('b_ph_'+slot).files[0];
   const b=document.getElementById('b_btn_'+slot);
-  const base={do:'📄 DO / Pick Order photo *',macl:'🧾 MACL bill photo',dem:'⏳ Demurrage bill photo'}[slot];
+  const base={do:'📄 DO / Pick Order *',macl:'🧾 MACL / tax invoice',dem:'⏳ Demurrage bill',awb:'📑 AWB / HAWB'}[slot];
   b.textContent=f?'✅ '+base.replace(' *',''):base;
   b.style.background=f?'#f0fdf4':'';
   b.style.borderColor=f?'#16a34a':(slot==='do'?'#e8730f':'');
 }
+const bIsPdf=f=>f&&(f.type==='application/pdf'||/\.pdf$/i.test(f.name||''));
 function bPick(slot){
   bPickLabel(slot);
-  // DO photo picked → auto-read AWB / consignee / weight / R number (empty fields only, always amendable)
+  // DO photo picked → auto-read AWB / consignee / weight / R number (empty fields only, always amendable).
+  // PDFs skip the auto-read (OCR is image-only) — the file still attaches normally.
   if(slot==='do'){
     const f=document.getElementById('b_ph_do').files[0];
     if(!f)return;
     const st=document.getElementById('b_capStatus');
+    if(bIsPdf(f)){st.textContent='PDF attached — type the AWB & weight (auto-read works on photos)';return;}
     ocrExtract(f,m=>st.textContent=m)
       .then(p=>ocrFill(p,{awb:'b_awb',kg:'b_kg',cust:'b_cust',rno:'__bRno'},st))
       .catch(()=>st.textContent='Auto-read unavailable (offline?) — type the details');
@@ -3931,17 +3943,23 @@ async function bSnapSave(){
   try{
     const id='dp'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);
     const photos=[];
-    const put=async(file,name,path)=>{
-      const blob=await bShrink(file);
+    // photos get compressed; PDFs (and anything OCR can't shrink) upload as-is
+    const put=async(file,label,base)=>{
+      let blob=file,ext='.jpg';
+      if(bIsPdf(file)){ext='.pdf';if(file.size>25*1024*1024)throw new Error(label+' PDF over 25 MB');}
+      else{try{blob=await bShrink(file);}catch(e){blob=file;ext='';}}
+      const path='dosnaps/'+id+'/'+base+ext;
       const url=await window.__att.upload(path,blob);
-      photos.push({name,path,url,size:blob.size,ts:isoLocal(new Date())});
+      photos.push({name:label+' '+awb+ext,path,url,size:blob.size,ts:isoLocal(new Date())});
     };
-    st.textContent='Uploading DO photo…';
-    await put(fDo,'DO '+awb+'.jpg','dosnaps/'+id+'/do.jpg');
+    st.textContent='Uploading DO…';
+    await put(fDo,'DO','do');
     const fM=document.getElementById('b_ph_macl').files[0];
-    if(fM){st.textContent='Uploading MACL bill…';await put(fM,'MACL bill '+awb+'.jpg','dosnaps/'+id+'/macl.jpg');}
+    if(fM){st.textContent='Uploading MACL bill…';await put(fM,'MACL bill','macl');}
     const fD=document.getElementById('b_ph_dem').files[0];
-    if(fD){st.textContent='Uploading demurrage bill…';await put(fD,'Demurrage bill '+awb+'.jpg','dosnaps/'+id+'/demurrage.jpg');}
+    if(fD){st.textContent='Uploading demurrage bill…';await put(fD,'Demurrage bill','demurrage');}
+    const fA=document.getElementById('b_ph_awb').files[0];
+    if(fA){st.textContent='Uploading AWB…';await put(fA,'AWB doc','awb');}
     dosnaps.push({id,awb,kg,rNo:window.__bRno||'',
       macl:Number(document.getElementById('b_macl').value)||null,
       demur:Number(document.getElementById('b_dem').value)||null,
