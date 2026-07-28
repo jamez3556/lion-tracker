@@ -504,10 +504,10 @@
         <input type="file" id="b_ph_macl" accept="image/*,.pdf,application/pdf" style="display:none" onchange="bPick('macl')">
         <input type="file" id="b_ph_dem" accept="image/*,.pdf,application/pdf" style="display:none" onchange="bPick('dem')">
         <input type="file" id="b_ph_awb" accept="image/*,.pdf,application/pdf" style="display:none" onchange="bPick('awb')">
-        <button type="button" class="ghost" id="b_btn_do" style="border:2px dashed #e8730f;color:#e8730f;font-weight:700" onclick="document.getElementById('b_ph_do').click()">📄 DO / Pick Order *</button>
-        <button type="button" class="ghost" id="b_btn_macl" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_macl').click()">🧾 MACL / tax invoice</button>
-        <button type="button" class="ghost" id="b_btn_dem" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_dem').click()">⏳ Demurrage bill</button>
-        <button type="button" class="ghost" id="b_btn_awb" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_awb').click()">📑 AWB / HAWB</button>
+        <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_do" style="border:2px dashed #e8730f;color:#e8730f;font-weight:700" onclick="document.getElementById('b_ph_do').click()">📄 DO / Pick Order *</button><button type="button" class="iconbtn del" id="b_clr_do" style="display:none" title="Remove this document" onclick="bClear('do')">✕</button></span>
+        <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_macl" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_macl').click()">🧾 MACL / tax invoice</button><button type="button" class="iconbtn del" id="b_clr_macl" style="display:none" title="Remove this document" onclick="bClear('macl')">✕</button></span>
+        <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_dem" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_dem').click()">⏳ Demurrage bill</button><button type="button" class="iconbtn del" id="b_clr_dem" style="display:none" title="Remove this document" onclick="bClear('dem')">✕</button></span>
+        <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_awb" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_awb').click()">📑 AWB / HAWB</button><button type="button" class="iconbtn del" id="b_clr_awb" style="display:none" title="Remove this document" onclick="bClear('awb')">✕</button></span>
       </div>
       <div class="grid3">
         <div class="field"><label>AWB NO *</label><input id="b_awb" placeholder="e.g. 898-81050141"></div>
@@ -3869,20 +3869,25 @@ function bPickLabel(slot){
   b.textContent=f?'✅ '+base.replace(' *',''):base;
   b.style.background=f?'#f0fdf4':'';
   b.style.borderColor=f?'#16a34a':(slot==='do'?'#e8730f':'');
+  const clr=document.getElementById('b_clr_'+slot);
+  if(clr)clr.style.display=f?'':'none';
+}
+function bClear(slot){
+  document.getElementById('b_ph_'+slot).value='';
+  bPickLabel(slot);
+  document.getElementById('b_capStatus').textContent='Document removed'+(slot==='do'?' — the DO is required':'');
 }
 const bIsPdf=f=>f&&(f.type==='application/pdf'||/\.pdf$/i.test(f.name||''));
 function bPick(slot){
   bPickLabel(slot);
-  // DO or AWB document attached → auto-read AWB / consignee / weight / R number
+  // ANY document attached → auto-read AWB / consignee / weight / R number
   // (photos AND PDFs; fills empty fields only, always amendable by hand)
-  if(slot==='do'||slot==='awb'){
-    const f=document.getElementById('b_ph_'+slot).files[0];
-    if(!f)return;
-    const st=document.getElementById('b_capStatus');
-    docExtract(f,m=>st.textContent=m)
-      .then(p=>ocrFill(p,{awb:'b_awb',kg:'b_kg',cust:'b_cust',rno:'__bRno'},st))
-      .catch(()=>st.textContent='Auto-read unavailable (offline?) — type the details');
-  }
+  const f=document.getElementById('b_ph_'+slot).files[0];
+  if(!f)return;
+  const st=document.getElementById('b_capStatus');
+  docExtract(f,m=>st.textContent=m)
+    .then(p=>ocrFill(p,{awb:'b_awb',kg:'b_kg',cust:'b_cust',rno:'__bRno'},st))
+    .catch(()=>st.textContent='Auto-read unavailable (offline?) — type the details');
 }
 function bExAdd(name){
   const item=name||prompt('Charge name:','');
