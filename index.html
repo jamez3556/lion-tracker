@@ -635,8 +635,9 @@
 <!-- expenses: add expense -->
 <div class="overlay" id="overlay-xpadd">
   <div class="modal" style="max-width:420px">
-    <h2>＋ Add Expense</h2>
+    <h2 id="xpa_title">＋ Add Expense</h2>
     <form onsubmit="return saveXpAdd(event)">
+      <input type="hidden" id="xpa_id">
       <div id="xpa_presets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px"></div>
       <div class="field"><label>EXPENSE</label><input id="xpa_item" required autocomplete="off"></div>
       <div class="grid2">
@@ -674,8 +675,9 @@
 <!-- expenses: oil fill -->
 <div class="overlay" id="overlay-xpfill">
   <div class="modal" style="max-width:420px">
-    <h2>⛽ Log Oil Fill</h2>
+    <h2 id="xpf_title">⛽ Log Oil Fill</h2>
     <form onsubmit="return saveXpFill(event)">
+      <input type="hidden" id="xpf_id">
       <div class="grid2">
         <div class="field"><label>LITERS</label><input id="xpf_liters" type="number" min="1" required></div>
         <div class="field"><label>COST (Rf)</label><input id="xpf_cost" type="number" min="1" required></div>
@@ -2409,7 +2411,8 @@ function renderXpExp(){
             <b style="font-size:13.5px">${rf(e.amount)}</b>
             ${e.paid
               ?`<button class="ghost" style="padding:3px 10px;font-size:11.5px;color:#16a34a;border-color:#16a34a" onclick="xpUnpay('${e.id}')" title="Paid ${e.paidAt?xpD(e.paidAt.slice(0,10)):''} — click to undo">PAID</button>`
-              :`<button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDel('${e.id}')" title="Delete">🗑</button>`}
+              :`<button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpEditExp('${e.id}')" title="Edit">✎</button>
+               <button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDel('${e.id}')" title="Delete">🗑</button>`}
           </div>`).join('')}
       </div>`;}).join('')}`;
 }
@@ -2435,11 +2438,24 @@ function xpSelDay(d){
 }
 function openXpAdd(){
   if(!xpGuard())return;
+  document.getElementById('xpa_title').textContent='＋ Add Expense';
+  document.getElementById('xpa_id').value='';
   document.getElementById('xpa_presets').innerHTML=XP_PRESETS.map((p,i)=>
     `<button type="button" class="ghost" style="padding:6px 12px;font-size:12.5px" onclick="xpPickPreset(${i})">${esc(p.label)}${p.amount?' · '+p.amount:''}</button>`).join('');
   xpPickPreset(0);
   document.getElementById('xpa_date').value=isoLocal(new Date());
   showModal('overlay-xpadd');
+}
+function xpEditExp(id){
+  if(!xpGuard())return;
+  const e=xpKind('exp').find(x=>x.id===id);if(!e)return;
+  openXpAdd();
+  document.getElementById('xpa_title').textContent='✎ Edit Expense';
+  document.getElementById('xpa_id').value=e.id;
+  document.getElementById('xpa_item').value=e.item;
+  document.getElementById('xpa_amount').value=e.amount;
+  document.getElementById('xpa_date').value=e.date;
+  document.querySelectorAll('#xpa_presets button').forEach(b=>{b.classList.remove('primary');b.classList.add('ghost');});
 }
 function xpPickPreset(i){
   const p=XP_PRESETS[i];
@@ -2453,10 +2469,21 @@ function xpPickPreset(i){
 function saveXpAdd(ev){
   ev.preventDefault();
   if(!xpGuard())return false;
+  const editId=document.getElementById('xpa_id').value;
   const item=document.getElementById('xpa_item').value.trim();
   const amount=parseInt(document.getElementById('xpa_amount').value,10);
   const date=document.getElementById('xpa_date').value;
   if(!item||!amount||amount<=0||!date)return false;
+  if(editId){ // admin edit of an existing line — just update it
+    const e=xpKind('exp').find(x=>x.id===editId);if(!e)return false;
+    const clash=xpKind('exp').find(x=>x.id!==editId&&x.date===date&&x.item.toLowerCase()===item.toLowerCase());
+    if(clash){toast(`"${item}" already has a line on ${xpD(date)} — edit that one instead`);return false;}
+    e.item=item;e.amount=amount;e.date=date;
+    saveExpensesData();closeModal('overlay-xpadd');
+    renderExpenses();updateCounts();
+    toast('Updated '+item+' · '+rf(amount));
+    return false;
+  }
   const dup=xpKind('exp').find(e=>e.date===date&&e.item.toLowerCase()===item.toLowerCase());
   if(dup){
     // Labour comes in parts through the day → same-day entries ADD UP (unless that day is already paid)
@@ -2603,7 +2630,9 @@ function renderXpDhoni(){
         <td class="num">${p.lPerTrip?p.lPerTrip.toFixed(1):'—'}</td>
         <td>${p.bill?`<a href="${esc(p.bill.url)}" target="_blank" rel="noopener" title="${esc(p.bill.name)}">🧾 bill</a>`:`<button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpAttachFill('${p.id}')" title="Attach the fuel bill">📎</button>`}</td>
         <td>${f.flag(p)?'<span style="color:#dc2626;font-weight:700;font-size:11.5px">⚠ CHECK — high usage</span>':''}</td>
-        <td class="actcol"><button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDelFill('${p.id}')">🗑</button></td>
+        <td class="actcol" style="white-space:nowrap">
+          <button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpEditFill('${p.id}')" title="Edit">✎</button>
+          <button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDelFill('${p.id}')">🗑</button></td>
       </tr>`).join('')||'<tr><td colspan="8" style="color:var(--muted)">No oil fills logged yet</td></tr>'}</tbody>
     </table></div></div>
     <div style="margin-top:12px">
@@ -2636,19 +2665,42 @@ function xpTripOther(){
 }
 function openXpFill(){
   if(!xpGuard())return;
+  document.getElementById('xpf_title').textContent='⛽ Log Oil Fill';
+  document.getElementById('xpf_id').value='';
   document.getElementById('xpf_liters').value=200;
   document.getElementById('xpf_cost').value='';
   document.getElementById('xpf_date').value=isoLocal(new Date());
   document.getElementById('xpf_toexp').checked=true;
+  document.getElementById('xpf_toexp').closest('label').style.display='';
   showModal('overlay-xpfill');
+}
+function xpEditFill(id){
+  if(!xpGuard())return;
+  const p=xpKind('fill').find(x=>x.id===id);if(!p)return;
+  openXpFill();
+  document.getElementById('xpf_title').textContent='✎ Edit Oil Fill';
+  document.getElementById('xpf_id').value=p.id;
+  document.getElementById('xpf_liters').value=p.liters;
+  document.getElementById('xpf_cost').value=p.cost;
+  document.getElementById('xpf_date').value=p.date;
+  document.getElementById('xpf_toexp').closest('label').style.display='none'; // editing never re-adds the expense line
 }
 function saveXpFill(ev){
   ev.preventDefault();
   if(!xpGuard())return false;
+  const editId=document.getElementById('xpf_id').value;
   const liters=parseInt(document.getElementById('xpf_liters').value,10);
   const cost=parseInt(document.getElementById('xpf_cost').value,10);
   const date=document.getElementById('xpf_date').value;
   if(!liters||!cost||!date)return false;
+  if(editId){
+    const p=xpKind('fill').find(x=>x.id===editId);if(!p)return false;
+    p.liters=liters;p.cost=cost;p.date=date;
+    saveExpensesData();closeModal('overlay-xpfill');
+    renderExpenses();
+    toast('Oil fill updated — '+liters+' L · '+rf(cost));
+    return false;
+  }
   expensesData.push({id:uid(),kind:'fill',date,liters,cost});
   if(document.getElementById('xpf_toexp').checked&&!xpKind('exp').some(e=>e.date===date&&e.item==='Dhoni oil'))
     expensesData.push({id:uid(),kind:'exp',date,item:'Dhoni oil',amount:cost,paid:false,paidAt:null});
@@ -2718,7 +2770,8 @@ function renderXpLabour(){
         <b style="font-size:13.5px">${rf(e.amount)}</b>
         ${e.paid
           ?`<button class="ghost" style="padding:3px 10px;font-size:11.5px;color:#16a34a;border-color:#16a34a" onclick="xpUnpay('${e.id}')" title="Paid ${e.paidAt?xpD(e.paidAt.slice(0,10)):''} — click to undo">PAID</button>`
-          :`<button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDel('${e.id}')" title="Delete">🗑</button>`}
+          :`<button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpEditExp('${e.id}')" title="Edit">✎</button>
+           <button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDel('${e.id}')" title="Delete">🗑</button>`}
       </div>`).join('')}`;
 }
 function openXpLabourAdd(){
