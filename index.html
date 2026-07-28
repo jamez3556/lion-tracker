@@ -510,6 +510,7 @@
         <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_dem" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_dem').click()">⏳ Demurrage bill</button><button type="button" class="iconbtn del" id="b_clr_dem" style="display:none" title="Remove this document" onclick="bClear('dem')">✕</button></span>
         <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_awb" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_awb').click()">📑 AWB / HAWB</button><button type="button" class="iconbtn del" id="b_clr_awb" style="display:none" title="Remove this document" onclick="bClear('awb')">✕</button></span>
       </div>
+      <div id="b_verify"></div>
       <div class="grid3">
         <div class="field"><label>AWB NO *</label><input id="b_awb" placeholder="e.g. 898-81050141"></div>
         <div class="field"><label>WEIGHT (KG) *</label><input id="b_kg" type="number" step="any" min="0" inputmode="decimal"></div>
@@ -3858,7 +3859,8 @@ function bToggleCapture(){
   c.style.display=opening?'':'none';
   if(opening){
     ['b_ph_do','b_ph_macl','b_ph_dem','b_ph_awb','b_awb','b_kg','b_cust','b_macl','b_dem'].forEach(id=>{document.getElementById(id).value='';});
-    window.__bRno='';bExtras=[];bExList();['do','macl','dem','awb'].forEach(bPickLabel);
+    window.__bRno='';window.__bReads={};bExtras=[];bExList();['do','macl','dem','awb'].forEach(bPickLabel);
+    document.getElementById('b_verify').innerHTML='';
     document.getElementById('b_capStatus').textContent='';
     setTimeout(()=>document.getElementById('b_awb').focus(),50);
   }
@@ -3876,19 +3878,59 @@ function bPickLabel(slot){
 function bClear(slot){
   document.getElementById('b_ph_'+slot).value='';
   bPickLabel(slot);
+  if(window.__bReads)delete window.__bReads[slot];
+  bVerifyDocs();
   document.getElementById('b_capStatus').textContent='Document removed'+(slot==='do'?' — the DO is required':'');
 }
 const bIsPdf=f=>f&&(f.type==='application/pdf'||/\.pdf$/i.test(f.name||''));
 function bPick(slot){
   bPickLabel(slot);
-  // ANY document attached → auto-read AWB / consignee / weight / R number / MACL / demurrage
-  // (photos AND PDFs; fills empty fields only, always amendable by hand)
+  // ANY document attached → auto-read (photos AND PDFs; fills empty fields only, always amendable).
+  // Per-slot trust: MACL/demurrage tax invoices carry the MASTER consolidator's name (e.g. SPEDICON)
+  // and the MASTER AWB — from those slots only the bill amounts fill; name/AWB/weight come from the
+  // Pick Order and the HAWB/MAWB document. Every read is kept for the cross-document AWB check.
   const f=document.getElementById('b_ph_'+slot).files[0];
   if(!f)return;
   const st=document.getElementById('b_capStatus');
+  const MAPS={
+    do:  {awb:'b_awb',kg:'b_kg',cust:'b_cust',macl:'b_macl',demur:'b_dem',rno:'__bRno'},
+    awb: {awb:'b_awb',kg:'b_kg',cust:'b_cust',rno:'__bRno'},
+    macl:{macl:'b_macl',demur:'b_dem'},
+    dem: {demur:'b_dem',macl:'b_macl'}
+  };
   docExtract(f,m=>st.textContent=m)
-    .then(p=>ocrFill(p,{awb:'b_awb',kg:'b_kg',cust:'b_cust',macl:'b_macl',demur:'b_dem',rno:'__bRno'},st))
+    .then(p=>{
+      window.__bReads=window.__bReads||{};
+      if(p)window.__bReads[slot]=p;else delete window.__bReads[slot];
+      ocrFill(p,MAPS[slot]||MAPS.do,st);
+      bVerifyDocs();
+    })
     .catch(()=>st.textContent='Auto-read unavailable (offline?) — type the details');
+}
+// Cross-check the AWB/HAWB numbers read from every attached document. House and master numbers
+// legitimately differ on consolidations, so two documents "belong together" when ANY of their
+// numbers overlap; a warning shows only when a document shares NOTHING with the others.
+function bVerifyDocs(){
+  const box=document.getElementById('b_verify');if(!box)return;
+  const reads=window.__bReads||{};
+  const label={do:'DO',awb:'AWB doc',macl:'MACL bill',dem:'Demurrage bill'};
+  const docs=[];
+  Object.keys(reads).forEach(s=>{
+    const p=reads[s];
+    const nums=[...new Set([p.awb,p.mawb,p.hawb].filter(Boolean).map(v=>String(v).replace(/\D/g,'')))].filter(d=>d.length>=6);
+    if(nums.length)docs.push({slot:s,nums});
+  });
+  const typed=(document.getElementById('b_awb').value||'').replace(/\D/g,'');
+  if(typed.length>=6)docs.push({slot:'typed',nums:[typed]});
+  if(docs.length<2){box.innerHTML='';return;}
+  const rel=(a,b)=>a===b||a.endsWith(b)||b.endsWith(a);
+  const strays=docs.filter(d=>!docs.some(o=>o!==d&&d.nums.some(n=>o.nums.some(m=>rel(n,m)))));
+  if(strays.length){
+    box.innerHTML='<div style="color:#dc2626;font-weight:700;font-size:12.5px;margin-top:4px">⚠ Document numbers do not match — check these belong to the SAME shipment:<br>'+
+      docs.map(d=>'&nbsp;• '+(label[d.slot]||d.slot)+': '+esc(d.nums.join(' / '))).join('<br>')+'</div>';
+  }else{
+    box.innerHTML='<div style="color:#16a34a;font-weight:600;font-size:12px;margin-top:4px">✓ Documents match ('+docs.length+' checked)</div>';
+  }
 }
 function bExAdd(name){
   const item=name||prompt('Charge name:','');
@@ -4035,16 +4077,17 @@ async function aiKeySetup(){
   if(window.__aiKey){try{await window.__aiKey.set(key);toast(key?'🔑 AI reader key saved for the whole team':'AI reader key removed');}catch(e){toast('Saved on this device only — cloud save failed: '+(e.code||e.message));}}
 }
 const AI_SCHEMA={type:'object',additionalProperties:false,
-  required:['awb','consignee','kg','rNo','maclTotal','demurrageTotal'],
+  required:['awb','hawb','consignee','kg','rNo','maclTotal','demurrageTotal'],
   properties:{
-    awb:{type:'string',description:'Air waybill / MAWB / HAWB number, usually 3 digits + 8 digits (e.g. 898-81050141). Empty string if not present.'},
-    consignee:{type:'string',description:'Consignee / customer name. If it refers to STELCO or State Electric in any form, return exactly STATE ELECTRIC COMPANY. Empty string if not present.'},
+    awb:{type:'string',description:'The MAIN / MASTER air waybill number on this document (AIRWAY BILL NO / MAWB), usually 3 digits + 8 digits (e.g. 898-81050141). Empty string if not present.'},
+    hawb:{type:'string',description:'The HOUSE air waybill (HAWB) number if this document shows one that is different from the master (e.g. 125-22299535). Empty string if none.'},
+    consignee:{type:'string',description:'The FINAL customer / consignee name only. NEVER return the freight agent, master consolidator (e.g. SPEDICON), airline, MACL, or notify party. On MACL tax invoices the CUSTOMER DETAILS box often shows the master consolidator — return an empty string in that case. Trust the CONSIGNEE field of a Pick Order or the consignee box of an air waybill. If it refers to STELCO or State Electric in any form, return exactly STATE ELECTRIC COMPANY. Empty string if unsure.'},
     kg:{type:'string',description:'Gross / received / chargeable weight in kg, number only (e.g. 54.0). Empty string if not present.'},
     rNo:{type:'string',description:'The R number (printed like R= 70166 on the pick order), digits only. Empty string if not present.'},
     maclTotal:{type:'string',description:'GRAND TOTAL IN MVR of a MACL airport-charges tax invoice (lines like SYSTEM ADMIN FEE-IMPORT, HANDLING CHARGES-IMPORT, STORAGE CHARGE-IMPORT). Number only. Empty string if this document is not that invoice.'},
     demurrageTotal:{type:'string',description:'GRAND TOTAL IN MVR of a MACL demurrage tax invoice (line like IMP DEMURRAGE CHARGES). Number only. Empty string if this document is not a demurrage invoice.'}
   }};
-const AI_PROMPT='This is a document from a Maldives air-cargo customs clearance: a Pick Order for Delivery (delivery order), a MACL tax invoice (airport handling charges or demurrage), or an air waybill (MAWB/HAWB). The photo may be rotated or crumpled. Extract the requested fields exactly as printed; use an empty string for anything not on this document.';
+const AI_PROMPT='This is a document from a Maldives air-cargo customs clearance: a Pick Order for Delivery (delivery order), a MACL tax invoice (airport handling charges or demurrage), or an air waybill (MAWB/HAWB). The photo may be rotated or crumpled. Extract the requested fields exactly as printed; use an empty string for anything not on this document. Shipments are often consolidated: the master consolidator (e.g. SPEDICON) is NOT the customer.';
 function b64Of(blob){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(blob);});}
 async function aiExtract(file,status){
   const key=await aiKey();
@@ -4074,10 +4117,15 @@ async function aiExtract(file,status){
     const txt=(j.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
     const raw=JSON.parse(txt);
     const out={};
-    const digits=String(raw.awb||'').replace(/\D/g,'');
-    if(digits.length===11)out.awb=digits.slice(0,3)+'-'+digits.slice(3);
-    else if((raw.awb||'').trim())out.awb=raw.awb.trim();
-    if((raw.consignee||'').trim())out.consignee=/STELCO|STATE\s*ELECTRIC/i.test(raw.consignee)?'STATE ELECTRIC COMPANY':raw.consignee.toUpperCase().replace(/[^A-Z0-9&.\-' ]+/g,' ').replace(/\s+/g,' ').trim().slice(0,40);
+    const fmtAwb=v=>{const d=String(v||'').replace(/\D/g,'');return d.length===11?d.slice(0,3)+'-'+d.slice(3):(String(v||'').trim()||'');};
+    const mawb=fmtAwb(raw.awb),hawb=fmtAwb(raw.hawb);
+    // consolidations: the HOUSE number is the shipment's AWB in the Form Log; master kept for cross-checking
+    if(hawb)out.awb=hawb;else if(mawb)out.awb=mawb;
+    if(mawb)out.mawb=mawb;
+    if(hawb)out.hawb=hawb;
+    // never accept known non-customers (master consolidator, airport, ourselves) as the customer
+    if((raw.consignee||'').trim()&&!/SPEDICON|MALDIVES\s*AIRPORTS|\bMACL\b|LION\s*LOG/i.test(raw.consignee))
+      out.consignee=/STELCO|STATE\s*ELECTRIC/i.test(raw.consignee)?'STATE ELECTRIC COMPANY':raw.consignee.toUpperCase().replace(/[^A-Z0-9&.\-' ]+/g,' ').replace(/\s+/g,' ').trim().slice(0,40);
     if(Number(raw.kg))out.kg=Number(raw.kg);
     const rn=String(raw.rNo||'').replace(/\D/g,'');
     if(rn.length>=4&&rn.length<=6)out.rNo=rn;
