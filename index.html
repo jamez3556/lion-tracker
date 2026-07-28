@@ -4864,6 +4864,15 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
   if(c&&!c.qbName){c.qbName='State Electric Company Limited';saveCustomers();}
   localStorage.setItem('lion_profile_seed_v5','1');
 })();
+(()=>{ // seed v6 — add Ahmed.LujainAli (the QB customer-record email) to STELCO's invoice To list
+  if(localStorage.getItem('lion_profile_seed_v6'))return;
+  const c=customers.find(x=>(x.name||'').toUpperCase().includes('STATE ELECTRIC'));
+  if(c&&!/LujainAli/i.test(c.billEmail||'')){
+    c.billEmail='clearance@stelco.com.mv,Azhadh.Rameez@stelco.com.mv,mohamed.afshah@stelco.com.mv,Ahmed.LujainAli@stelco.com.mv';
+    saveCustomers();toast('STELCO invoice emails updated (4 addresses)');
+  }
+  localStorage.setItem('lion_profile_seed_v6','1');
+})();
 // Backfill missing C numbers on saved logins (many sheet-imported logins had none): exact,
 // unambiguous name match against the Customers list. Runs each load; already-filled rows untouched.
 (function fillCredCnos(){
