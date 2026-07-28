@@ -307,16 +307,17 @@ async function aiKey(){
   return aiKeyCache;
 }
 const AI_SCHEMA={type:'object',additionalProperties:false,
-  required:['awb','consignee','kg','rNo','maclTotal','demurrageTotal'],
+  required:['awb','hawb','consignee','kg','rNo','maclTotal','demurrageTotal'],
   properties:{
-    awb:{type:'string',description:'Air waybill / MAWB / HAWB number, usually 3 digits + 8 digits. Empty string if not present.'},
-    consignee:{type:'string',description:'Consignee / customer name. If it refers to STELCO or State Electric in any form, return exactly STATE ELECTRIC COMPANY. Empty string if not present.'},
+    awb:{type:'string',description:'The MAIN / MASTER air waybill number (AIRWAY BILL NO / MAWB), usually 3 digits + 8 digits. Empty string if not present.'},
+    hawb:{type:'string',description:'The HOUSE air waybill (HAWB) number if shown and different from the master. Empty string if none.'},
+    consignee:{type:'string',description:'The FINAL customer / consignee name only. NEVER the freight agent, master consolidator (e.g. SPEDICON), airline, MACL, or notify party — on MACL tax invoices the CUSTOMER DETAILS box often shows the consolidator; return empty string then. If it refers to STELCO or State Electric in any form, return exactly STATE ELECTRIC COMPANY. Empty string if unsure.'},
     kg:{type:'string',description:'Gross / received / chargeable weight in kg, number only. Empty string if not present.'},
     rNo:{type:'string',description:'The R number (printed like R= 70166), digits only. Empty string if not present.'},
     maclTotal:{type:'string',description:'GRAND TOTAL IN MVR of a MACL airport-charges tax invoice (SYSTEM ADMIN FEE / HANDLING / STORAGE lines). Number only. Empty string otherwise.'},
     demurrageTotal:{type:'string',description:'GRAND TOTAL IN MVR of a MACL demurrage tax invoice (IMP DEMURRAGE CHARGES). Number only. Empty string otherwise.'}
   }};
-const AI_PROMPT='This is a document from a Maldives air-cargo customs clearance: a Pick Order for Delivery, a MACL tax invoice (handling or demurrage), or an air waybill. The photo may be rotated or crumpled. Extract the requested fields exactly as printed; empty string for anything not on this document.';
+const AI_PROMPT='This is a document from a Maldives air-cargo customs clearance: a Pick Order for Delivery, a MACL tax invoice (handling or demurrage), or an air waybill. The photo may be rotated or crumpled. Extract the requested fields exactly as printed; empty string for anything not on this document. Shipments are often consolidated: the master consolidator (e.g. SPEDICON) is NOT the customer.';
 const b64Of=blob=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(blob);});
 async function aiExtract(file,status){
   const key=await aiKey();
@@ -344,9 +345,11 @@ async function aiExtract(file,status){
     if(j.stop_reason==='refusal')return null;
     const raw=JSON.parse((j.content||[]).filter(b=>b.type==='text').map(b=>b.text).join(''));
     const out={};
-    const d=String(raw.awb||'').replace(/\D/g,'');
-    if(d.length===11)out.awb=d.slice(0,3)+'-'+d.slice(3);else if((raw.awb||'').trim())out.awb=raw.awb.trim();
-    if((raw.consignee||'').trim())out.consignee=/STELCO|STATE\s*ELECTRIC/i.test(raw.consignee)?'STATE ELECTRIC COMPANY':raw.consignee.toUpperCase().replace(/[^A-Z0-9&.\-' ]+/g,' ').replace(/\s+/g,' ').trim().slice(0,40);
+    const fmtAwb=v=>{const d=String(v||'').replace(/\D/g,'');return d.length===11?d.slice(0,3)+'-'+d.slice(3):(String(v||'').trim()||'');};
+    const mawb=fmtAwb(raw.awb),hawb=fmtAwb(raw.hawb);
+    if(hawb)out.awb=hawb;else if(mawb)out.awb=mawb; // house number wins on consolidations
+    if((raw.consignee||'').trim()&&!/SPEDICON|MALDIVES\s*AIRPORTS|\bMACL\b|LION\s*LOG/i.test(raw.consignee))
+      out.consignee=/STELCO|STATE\s*ELECTRIC/i.test(raw.consignee)?'STATE ELECTRIC COMPANY':raw.consignee.toUpperCase().replace(/[^A-Z0-9&.\-' ]+/g,' ').replace(/\s+/g,' ').trim().slice(0,40);
     if(Number(raw.kg))out.kg=Number(raw.kg);
     const rn=String(raw.rNo||'').replace(/\D/g,'');
     if(rn.length>=4&&rn.length<=6)out.rNo=rn;
