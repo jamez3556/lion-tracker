@@ -4371,6 +4371,49 @@ function stelcoToggleClear(id){
   cycleEntryStatus(id); // Pending↔Cleared toggle with the billNo guard
   renderStelcoDesk();
 }
+// type the MACL / demurrage amounts by hand (from the tax invoice) — no snap needed.
+// MACL → payment record (the invoice's DO Fee actual) + the snap if one is linked; demurrage → entry.
+function stMacl(id){
+  const e=entries.find(x=>x.id===id);if(!e)return;
+  const dp=dosnaps.find(d=>d.entryId===id);
+  const pay=payments.find(x=>x.id===payId(e)||x.entryId===id);
+  const cur=(dp&&dp.macl)||(pay&&pay.macl)||'';
+  const v=prompt('MACL total (from the MACL tax invoice), MVR:',cur);
+  if(v===null)return;
+  const n=v.trim()===''?null:Number(v);
+  if(v.trim()!==''&&(!isFinite(n)||n<0)){toast('Enter a number');return;}
+  if(dp){dp.macl=n;saveDosnaps();}
+  if(syncPaymentFromEntry(e)){/* payment row created */}
+  const p2=payments.find(x=>x.id===payId(e)||x.entryId===id);
+  if(p2){p2.macl=n;savePayments();renderPayments();}
+  renderStelcoDesk();
+  toast(n!=null?'MACL '+fmtNum(n)+' saved — the invoice DO Fee uses this actual':'MACL cleared');
+}
+function stDemur(id){
+  const e=entries.find(x=>x.id===id);if(!e)return;
+  const dp=dosnaps.find(d=>d.entryId===id);
+  const cur=(dp&&dp.demur)||e.demur||'';
+  const v=prompt('Demurrage / storage total (MVR):',cur);
+  if(v===null)return;
+  const n=v.trim()===''?null:Number(v);
+  if(v.trim()!==''&&(!isFinite(n)||n<0)){toast('Enter a number');return;}
+  if(dp){dp.demur=n;saveDosnaps();}
+  if(n==null)delete e.demur;else e.demur=n;
+  saveEntries();renderStelcoDesk();
+  toast(n!=null?'Demurrage '+fmtNum(n)+' saved — added as Storage Fee when you bill':'Demurrage cleared');
+}
+// desk Bill: with a snap → dpBill (its amounts win); without → invoice form + hand-typed demurrage line
+function stelcoBill(entryId){
+  if(!isAdmin()){toast('Billing is admin-only');return;}
+  const dp=dosnaps.find(d=>d.entryId===entryId);
+  if(dp){dpBill(dp.id);return;}
+  const e=entries.find(x=>x.id===entryId);if(!e)return;
+  openInvoiceForm(e.id);
+  if(!e.qbInvoiced&&!(e.qbLines&&e.qbLines.length)&&Number(e.demur)){
+    invAddLine({name:'Storage Fee (Air)',qty:1,rate:Number(e.demur),tax:0});
+    invCalc();
+  }
+}
 function renderStelcoDesk(){
   const tb=document.getElementById('b_st_tbody');if(!tb)return;
   const all=stelcoRows();
@@ -4390,7 +4433,7 @@ function renderStelcoDesk(){
     const dp=dosnaps.find(d=>d.entryId===e.id);
     const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
     const macl=(dp&&dp.macl)||(pay&&pay.macl)||null;
-    const dem=(dp&&dp.demur)||null;
+    const dem=(dp&&dp.demur)||e.demur||null;
     const wt=Number(e.grsWt)||0;
     const below=wt&&wt<=50;
     return `<tr class="t-${esc(e.type)}">
@@ -4400,8 +4443,8 @@ function renderStelcoDesk(){
       <td data-l="R No">${esc(e.rNo)||'—'}</td>
       <td data-l="AWB / BL">${esc(e.awbBl)||'—'}</td>
       <td class="num" data-l="KG">${fmtNum(e.grsWt)}${below&&e.type==='AP'?' <span style="font-size:10px;color:#0369a1;font-weight:700">≤50 pass-through only</span>':''}</td>
-      <td class="num" data-l="MACL">${macl!=null?fmtNum(macl):'—'}</td>
-      <td class="num" data-l="Demurrage">${dem!=null?fmtNum(dem):'—'}</td>
+      <td class="num" data-l="MACL"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stMacl('${e.id}')" title="Click to type the MACL amount from the tax invoice">${macl!=null?fmtNum(macl):'＋'}</span></td>
+      <td class="num" data-l="Demurrage"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stDemur('${e.id}')" title="Click to type the demurrage amount">${dem!=null?fmtNum(dem):'＋'}</span></td>
       <td data-l="Bill No">${esc(e.billNo)||'—'}</td>
       <td data-l="Status">${e.billNo
         ?'<span style="color:#16a34a;font-weight:800">✅ Delivered</span>'
@@ -4411,7 +4454,7 @@ function renderStelcoDesk(){
       <td class="actcol"><div class="rowact">
         ${isAdmin()?(e.billNo
           ?`<button class="iconbtn" onclick="openInvoiceForm('${e.id}')" title="Open the invoice">✅</button>`
-          :`<button class="iconbtn" style="background:#e8730f;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="${dp?`dpBill('${dp.id}')`:`openInvoiceForm('${e.id}')`}" title="Create the QuickBooks invoice">🧾 Bill</button>`):''}
+          :`<button class="iconbtn" style="background:#e8730f;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="stelcoBill('${e.id}')" title="Create the QuickBooks invoice">🧾 Bill</button>`):''}
         <button class="iconbtn" onclick="openAttach('${e.id}')" title="Documents">📎${e.attachments&&e.attachments.length?e.attachments.length:''}</button>
         <button class="iconbtn" onclick="openEntryForm('${e.id}')" title="Edit">✏️</button>
       </div></td>
