@@ -1383,7 +1383,12 @@ function staffCodes(){
 }
 function buildFileSelect(current){
   const sel=document.getElementById('e_file');
-  sel.innerHTML='<option value="">—</option>'+staffCodes().map(c=>`<option${current===c?' selected':''}>${esc(c)}</option>`).join('');
+  // Always include `current` even if the code list hasn't loaded yet (opening the form seconds
+  // after a cold start, before cloud sync fills team/entries, used to leave this dropdown EMPTY —
+  // then a save silently refused because FILE was blank).
+  let codes=staffCodes();
+  if(current&&!codes.includes(current))codes=[current,...codes];
+  sel.innerHTML='<option value="">—</option>'+codes.map(c=>`<option${current===c?' selected':''}>${esc(c)}</option>`).join('');
   if(current)sel.value=current;
 }
 function addStaffCode(){
@@ -1604,6 +1609,69 @@ function saveEntry(e){
   }
   return false;
 }
+/* ---- Programmatic logging for automation (asycuda-sad-filler skill, agents) ----
+   Driving the Add-Entry form by clicking is fragile: a form opened before cloud sync has an
+   empty FILE list, and saveEntry() then refuses with only a toast — which automation can't see,
+   so it looks like "the save silently does nothing". Worse, a save made while SIGNED OUT lands
+   in that browser's localStorage only and NEVER reaches the team cloud — the shipment appears
+   to save but nobody else ever sees it.
+   window.__trackerReady() tells you when it's safe; window.__logShipment() does it in one call
+   and ALWAYS returns a reason on failure. */
+window.__trackerReady=function(){
+  return {
+    signedIn:!!window.__userEmail,
+    email:window.__userEmail||'',
+    cloudReady:typeof window.__cloudPush==='function',
+    entriesLoaded:entries.length,
+    staffCodes:staffCodes(),
+    ok:!!window.__userEmail&&typeof window.__cloudPush==='function'&&entries.length>0
+  };
+};
+window.__logShipment=function(o){
+  try{
+    o=o||{};
+    const r=window.__trackerReady();
+    if(!r.signedIn)return{ok:false,error:'NOT SIGNED IN to the tracker — a save now would stay on this browser only and never reach the team cloud. Sign in first.'};
+    if(!r.cloudReady)return{ok:false,error:'cloud sync not ready yet (still connecting) — wait a few seconds and call __trackerReady() again.'};
+    if(!r.entriesLoaded)return{ok:false,error:'entry list has not loaded yet — wait for sync before logging (serial numbers would be wrong).'};
+    const cno=(o.cno||'').trim(), customer=(o.customer||o.name||'').trim();
+    const miss=[];if(!cno)miss.push('cno');if(!customer)miss.push('customer');
+    if(miss.length)return{ok:false,error:'missing required field(s): '+miss.join(', ')};
+    const awbKey=(o.awbBl||'').replace(/\s+/g,'').toUpperCase();
+    if(awbKey){
+      const dup=entries.find(x=>(x.awbBl||'').replace(/\s+/g,'').toUpperCase()===awbKey);
+      if(dup)return{ok:false,error:'ALREADY LOGGED — AWB/BL '+o.awbBl+' is entry NO '+(dup.no??'—')+' ('+(dup.customer||'')+', '+(dup.date||'')+'). Nothing added.',existingId:dup.id,existingNo:dup.no};
+    }
+    const file=(o.file||'').trim();
+    if(file&&!staffCodes().includes(file)){team.push({id:uid(),name:file});saveTeam();} // new operator code
+    openEntryForm(null,o.type||'AP');
+    const set=(id,v)=>{if(v!==undefined&&v!==null&&v!=='')document.getElementById(id).value=v;};
+    set('e_cno',cno);set('e_customer',customer);
+    set('e_date',o.date||isoLocal(new Date()));
+    if(file){buildFileSelect(file);document.getElementById('e_file').value=file;}
+    set('e_rNo',o.rNo);set('e_billNo',o.billNo);
+    set('e_grsWt',o.grsWt);set('e_pkgs',o.pkgs);set('e_awbBl',o.awbBl);
+    set('e_time',o.time||new Date().toTimeString().slice(0,8));
+    if(o.type==='MP'&&o.containerNo){document.getElementById('e_type').value='MP';toggleContBox();set('e_containerNo',o.containerNo);}
+    if(o.status)set('e_status',o.status);
+    updateFileHint();
+    const before=new Set(entries.map(x=>x.id));
+    saveEntry({preventDefault:function(){}});
+    const rec=entries.find(x=>!before.has(x.id));
+    if(!rec){
+      const why=(document.getElementById('e_awbHint').textContent||'').trim();
+      closeModal('overlay-entry');
+      return{ok:false,error:'save refused'+(why?': '+why:' — check required fields (C NO and CUSTOMER NAME)')};
+    }
+    if(window.__cloudPush)window.__cloudPush('entries'); // make sure it leaves this device
+    return{ok:true,id:rec.id,no:rec.no,fileNo:rec.fileNo,file:rec.file,customer:rec.customer,awbBl:rec.awbBl,date:rec.date,
+      note:'Logged and pushed to the team cloud. Confirm the ☁ chip shows "Synced".'};
+  }catch(e){
+    try{closeModal('overlay-entry');}catch(_){}
+    return{ok:false,error:'exception: '+(e&&e.message||e)};
+  }
+};
+
 // 📱 WhatsApp the customer: opens wa.me with their number and a ready-typed status message —
 // you review and press Send yourself (no API, no cost). Number from Customers → CONTACT.
 // Button appears ONLY when the customer is ticked for WhatsApp updates AND has a contact number.
