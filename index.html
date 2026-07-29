@@ -778,6 +778,7 @@
         <div class="field"><label>STATUS</label>
           <select id="e_status"><option>Pending</option><option>Cleared</option><option>Delivered</option></select></div>
       </div>
+      <div class="field"><label>📎 DOCUMENTS (tax invoice / DO / receipts)</label><div id="e_docs"></div></div>
       <div class="field" id="e_contWrap" style="display:none">
         <label>CONTAINER NUMBER(S) (MP shipment)</label><input id="e_containerNo" placeholder="e.g. TLLU5033169, SEKU5503423">
         <div class="hint">More than one container? Separate with commas. Goes straight to Container Status — not shown in the Form Log table</div>
@@ -1438,6 +1439,9 @@ function openEntryForm(id,defaultType){
     document.getElementById('e_billOnly').checked=bo;
     document.getElementById('e_no').disabled=bo;
     document.getElementById('e_file').disabled=bo;
+    entryPendingFiles=[];
+    document.getElementById('e_docs').innerHTML=
+      `<button type="button" class="ghost" onclick="closeModal('overlay-entry');openAttach('${r.id}')">📎 Documents (${(r.attachments||[]).length}) — view / add</button>`;
     toggleContBox();
   }else{
     t.textContent='Add Entry';f.reset();e_id.value='';
@@ -1449,12 +1453,39 @@ function openEntryForm(id,defaultType){
     e_time.value=new Date().toTimeString().slice(0,8);
     e_type.value=defaultType||'AP';buildFileSelect(localStorage.getItem('lion_last_file')||'LION-AB');e_status.value='Pending';
     e_containerNo.value='';
+    entryPendingFiles=[];
+    document.getElementById('e_docs').innerHTML=
+      `<input type="file" multiple accept="image/*,.pdf" onchange="entryPickDocs(this.files)" style="font-size:13px">
+       <div class="hint" id="e_docs_names">Files upload when you press Save — e.g. the tax invoice you just paid online</div>`;
     toggleContBox();
   }
   updateFileHint();
   showModal('overlay-entry');setTimeout(()=>e_cno.focus(),50);
 }
 document.getElementById('e_type').addEventListener('change',toggleContBox);
+// documents picked in the ADD form queue here and upload right after Save creates the entry
+let entryPendingFiles=[];
+function entryPickDocs(files){
+  entryPendingFiles=Array.from(files||[]);
+  const el=document.getElementById('e_docs_names');
+  if(el)el.textContent=entryPendingFiles.length?entryPendingFiles.map(f=>f.name).join(', '):'Files upload when you press Save';
+}
+async function uploadPendingEntryDocs(rec){
+  if(!entryPendingFiles.length)return;
+  const files=entryPendingFiles;entryPendingFiles=[];
+  if(!window.__att){toast('Documents NOT uploaded — no cloud storage; attach them later with 📎');return;}
+  let ok=0;
+  for(const f of files){
+    if(f.size>25*1024*1024){toast(f.name+' is over 25 MB — skipped');continue;}
+    try{
+      const path='entries/'+rec.id+'/'+Date.now()+'_'+f.name.replace(/[^\w.\-]+/g,'_');
+      const url=await window.__att.upload(path,f);
+      (rec.attachments=rec.attachments||[]).push({name:f.name,path,url,size:f.size,ts:isoLocal(new Date())});
+      ok++;
+    }catch(err){toast('Upload failed for '+f.name);}
+  }
+  if(ok){saveEntries();renderEntries();renderDoQueue();toast('📎 '+ok+' document(s) attached to the shipment');}
+}
 function saveEntry(e){
   e.preventDefault();
   const prevEntry=e_id.value?entries.find(x=>x.id===e_id.value):null;      // state before this save (for transition detection)
@@ -1469,6 +1500,10 @@ function saveEntry(e){
   if(document.getElementById('e_billOnly').checked||isBillOnly(rec)){rec.billOnly=true;rec.no=null;rec.file='';} // billing-only: no serial, no FILE
   if(prevEntry&&prevEntry.mpRemark)rec.mpRemark=prevEntry.mpRemark; // MP-tab remark isn't on this form — keep it
   if(prevEntry&&prevEntry.qbInvoiced){rec.qbInvoiced=prevEntry.qbInvoiced;rec.qbInvoicedAt=prevEntry.qbInvoicedAt;} // QuickBooks "sent" flag isn't on this form — keep it
+  // side-channel fields not on this form (documents, fetched QuickBooks invoice, payments received) — never lose them on an edit
+  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec'].forEach(k=>{
+    if(prevEntry[k]!==undefined)rec[k]=prevEntry[k];
+  });
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
   // invoice (AWB unchanged) is never blocked, even if a pre-existing duplicate exists elsewhere. When a
   // new/changed AWB matches another entry, warn and let the user confirm (intentional repeats are allowed).
@@ -1510,6 +1545,7 @@ function saveEntry(e){
   if(rec.file)localStorage.setItem('lion_last_file',rec.file); // remember this device's staff code
   if(e_id.value){entries[entries.findIndex(x=>x.id===e_id.value)]=rec;toast('Entry updated'+note);}
   else{entries.push(rec);toast('Entry added'+note);notifyZapier(rec);} // fire webhook only for brand-new shipments
+  uploadPendingEntryDocs(rec); // documents picked in the form (async — attaches as each upload lands)
   saveEntries();ensureCustomer(rec.cno,rec.customer);
   // every entry has a Payment row — create it / refresh its mirrored identity fields (incl. Bill Done)
   if(syncPaymentFromEntry(rec)){savePayments();renderPayments();}
@@ -3786,6 +3822,7 @@ function setBTab(t){
   renderDoQueue();
 }
 function renderDoQueue(){
+  autoLinkSnaps(); // pick up snaps synced in from do.html and attach them to their shipments
   renderStelcoDesk();
   const box=document.getElementById('dp_list');if(!box)return;
   const pend=dosnaps.filter(d=>d.status==='pending').length;
@@ -3847,6 +3884,23 @@ function dpLink(dp,e){
     if(pay&&pay.macl==null){pay.macl=Number(dp.macl);savePayments();renderPayments();}
   }
   if(dp.entryId!==e.id){dp.entryId=e.id;saveDosnaps();}
+}
+// Auto-link: any snap (this device OR arriving from do.html via sync) whose AWB matches an existing
+// shipment attaches itself to that shipment automatically. Billed shipment → snap marked billed with a
+// warning ("already billed"); unbilled → stays in the queue with a bill reminder. Idempotent — linked
+// snaps are skipped, so it's safe to run on every queue render.
+function autoLinkSnaps(){
+  const linkedNew=[],alreadyBilled=[];
+  dosnaps.forEach(dp=>{
+    if(dp.entryId||dp.status==='billed')return;
+    const m=dpMatch(dp);if(!m)return;
+    dpLink(dp,m);
+    if(m.billNo){dp.status='billed';dp.billNo=m.billNo;dp.billedAt=isoLocal(new Date());saveDosnaps();alreadyBilled.push((dp.awb||'')+' ('+m.billNo+')');}
+    else linkedNew.push(dp.awb||'');
+  });
+  if(alreadyBilled.length)toast('⚠ ALREADY BILLED — '+alreadyBilled.join(', ')+': documents attached, do NOT bill again');
+  else if(linkedNew.length)toast('📋 '+linkedNew.join(', ')+' attached to the shipment — ⏳ NOT billed yet');
+  return linkedNew.length+alreadyBilled.length;
 }
 function dpAttach(id){
   const dp=dosnaps.find(d=>d.id===id);if(!dp)return;
@@ -4291,8 +4345,10 @@ async function bSnapSave(){
       date:isoLocal(new Date()),time:new Date().toTimeString().slice(0,5),status:'pending',u:Date.now()});
     saveDosnaps();
     bToggleCapture();
+    // auto-attach to the matching shipment right away; its toast says "already billed" / "not billed yet"
+    const n=autoLinkSnaps();
     renderDoQueue();renderEntries();updateCounts();
-    toast('✅ Snap saved — all photos merged into one shipment, ready to bill');
+    if(!n)toast('✅ Snap saved — no shipment with this AWB yet; create it from the queue');
   }catch(e){toast('Upload failed: '+(e.code||e.message||e));st.textContent='';}
   btn.disabled=false;
 }
