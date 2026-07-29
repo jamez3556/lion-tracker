@@ -2199,6 +2199,7 @@ function renderMP(){
     <td data-l="Remark"><input class="mpremark" value="${esc(r.mpRemark)}" placeholder="Add remark…" onchange="setMpRemark('${jatt(r.id)}',this.value)"></td>
     <td class="actcol"><div class="rowact">
       <button class="iconbtn" onclick="openEntryForm('${jatt(r.id)}')" title="Edit">✏️</button>
+      <button class="iconbtn" onclick="openAttach('${jatt(r.id)}')" title="Documents (BL, DO, MPL bills, receipts…) — these go out with the invoice">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
       ${isAdmin()?`<button class="iconbtn" onclick="openInvoiceForm('${jatt(r.id)}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to open':'Create the sea QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
       <button class="iconbtn del" onclick="delEntry('${jatt(r.id)}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
