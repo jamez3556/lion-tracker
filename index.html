@@ -3363,9 +3363,11 @@ function mpExpectedLines(e,cust,pay){
   const rate=(name)=>{const v=(cust&&cust.mpRates)?cust.mpRates[name]:null;return v==null?MP_STD_RATES[name]:v;};
   const prof=(cust&&cust.mpProfile)||{};
   const L=[];
-  if(!prof.noFF)L.push({name:'Form Filling',qty:prof.ffQty!=null?prof.ffQty:1,rate:rate('Form Filling'),tax:8});
+  // qtyAny: the number of forms and the clearance units change with every sea shipment — the audit
+  // checks their RATE but never nags about the quantity.
+  if(!prof.noFF)L.push({name:'Form Filling',qty:prof.ffQty!=null?prof.ffQty:1,rate:rate('Form Filling'),tax:8,qtyAny:true});
   if(!prof.noProc)L.push({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8});
-  L.push({name:'MPL Clearance',qty:1,rate:rate('MPL Clearance'),tax:8});
+  L.push({name:'MPL Clearance',qty:1,rate:rate('MPL Clearance'),tax:8,qtyAny:true});
   // pass-throughs — MPL port charges and customs duty come straight from the Payment tab when entered
   L.push({name:'MPL Charge',qty:1,rate:(pay&&pay.mpl!=null?pay.mpl:''),tax:0,est:!(pay&&pay.mpl!=null)});
   L.push({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0,est:!(pay&&pay.duty!=null)});
@@ -3398,6 +3400,8 @@ function tmplLines(tpl,e,pay){
   const out=[];
   tpl.forEach(l=>{
     const o={name:l.name,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.tax};
+    // the number of forms changes with every shipment — audit its rate, never its quantity
+    if(/^form filling$/i.test(o.name))o.qtyAny=true;
     // {mpl} / {duty} / {macl} → the real amount from the Payment tab (blank until it's entered)
     if(typeof o.rate==='string'&&o.rate.charAt(0)==='{'){
       const k=o.rate.replace(/[{}]/g,'');
@@ -3636,7 +3640,7 @@ function invAuditHTML(e){
     if(i<0)i=act.findIndex(l=>!l._used&&norm(l.item)===norm(x.name)); // older invoices stored no description
     if(i<0){probs.push('missing “'+label(x)+'” (expected '+x.qty+' × '+x.rate+')');return;}
     const a=act[i];a._used=true;
-    if(Number(a.qty)!==Number(x.qty))probs.push(label(x)+': qty '+a.qty+' — expected '+x.qty);
+    if(!x.qtyAny&&Number(a.qty)!==Number(x.qty))probs.push(label(x)+': qty '+a.qty+' — expected '+x.qty);
     // staff round invoice totals by nudging a rate a few laari — only flag rate differences over 1
     if(!x.est&&Math.abs(Number(a.rate)-Number(x.rate))>1)probs.push(label(x)+': rate '+a.rate+' — expected '+x.rate);
   });
