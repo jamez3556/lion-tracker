@@ -865,6 +865,7 @@
       <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:560px">
         <thead><tr style="text-align:left;color:var(--muted);font-size:10.5px;letter-spacing:.03em">
           <th style="padding:4px 6px">ACTIVITY</th>
+          <th style="padding:4px 6px">DESCRIPTION</th>
           <th style="padding:4px 6px;width:72px;text-align:right">QTY</th>
           <th style="padding:4px 6px;width:96px;text-align:right">RATE</th>
           <th style="padding:4px 6px;width:52px;text-align:center">GST</th>
@@ -881,14 +882,15 @@
       <button type="button" class="ghost" onclick="invAddLine({name:'Storage Fee (Air)',qty:1,tax:0})" title="MACL demurrage pass-through — actual amount, no GST">＋ Storage/Demurrage</button>
       <button type="button" class="ghost" onclick="invAddLine({name:'',tax:8})">＋ Custom (GST)</button>
       <button type="button" class="ghost" onclick="invAddLine({name:'',tax:0})">＋ Custom (non-tax)</button>
+      <button type="button" class="ghost" id="inv_tmplBtn" onclick="saveInvTemplate()" title="Remember these lines as this customer's own invoice format — every future shipment starts from them">📋 Save as this customer's format</button>
     </div>
     <div class="grid3">
-      <div class="field"><label>SUBTOTAL</label><input id="inv_subtotal" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:600"></div>
+      <div class="field"><label id="inv_lbl_sub">SUBTOTAL</label><input id="inv_subtotal" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:600"></div>
       <div class="field"><label>GST 8% (taxable lines)</label><input id="inv_gst" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:600"></div>
-      <div class="field"><label>TOTAL</label><input id="inv_total" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:800"></div>
+      <div class="field"><label id="inv_lbl_total">TOTAL</label><input id="inv_total" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:800"></div>
     </div>
     <div class="grid3">
-      <div class="field"><label>ADVANCE PAID (MVR) — recorded as a payment</label><input id="inv_advance" type="number" step="any" min="0" oninput="invCalc()"></div>
+      <div class="field"><label id="inv_lbl_adv">ADVANCE PAID (MVR) — recorded as a payment</label><input id="inv_advance" type="number" step="any" min="0" oninput="invCalc()"></div>
       <div class="field"><label>BALANCE DUE (total − advance)</label><input id="inv_balance" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:800"></div>
       <div class="field"><label>INVOICE NO (saved as Bill No)</label><input id="inv_billNo" placeholder="L26/…" oninput="invBillNoChanged()"></div>
     </div>
@@ -1043,7 +1045,11 @@ service cloud.firestore {
       </div>
       <div style="border-top:1px solid var(--line);margin:10px 0 4px;padding-top:10px">
         <div class="field"><label>INVOICE EMAIL(S) — comma-separated; pre-fills the invoice's "Email to"</label><input id="u_bill_email" placeholder="billing@customer.mv, second@customer.mv"></div>
-        <div class="field"><label>QUICKBOOKS CUSTOMER NAME (exact, as in QuickBooks — prevents duplicate customers)</label><input id="u_qb_name" placeholder="e.g. State Electric Company Limited"></div>
+        <div class="grid2">
+          <div class="field"><label>QUICKBOOKS CUSTOMER NAME (exact — prevents duplicate customers)</label><input id="u_qb_name" placeholder="e.g. State Electric Company Limited"></div>
+          <div class="field"><label>INVOICE CURRENCY</label><select id="u_currency"><option value="MVR">MVR — Maldivian Rufiyaa</option><option value="USD">USD — US Dollar</option><option value="EUR">EUR — Euro</option></select></div>
+        </div>
+        <div id="u_tmpl_info" style="font-size:12px;color:#15803d;margin-top:2px"></div>
       </div>
       <div id="u_docs" style="margin-top:12px"></div>
       <div class="actions">
@@ -3363,6 +3369,113 @@ function mpExpectedLines(e,cust,pay){
   if(!prof.noLorry)L.push({name:'Lorry Charges',qty:1,rate:rate('Lorry Charges'),tax:0,est:true});
   return L;
 }
+// ── Per-customer invoice FORMAT ──────────────────────────────────────────────
+// Some customers are billed on their own agreed format — different items, their own descriptions,
+// even another currency (SEASIDE FINOLHU: USD, three MPL Clearance lines split by container size).
+// customer.mpTemplate / customer.apTemplate hold that format. Build it once in the invoice builder
+// and press "📋 Save as this customer's format"; every later shipment starts from those lines.
+// A rate written as {mpl} / {duty} / {macl} pulls the ACTUAL pass-through amount from the Payment tab.
+function custCurrency(cust){return (cust&&cust.currency)||'MVR';}
+// How many containers of each size this shipment has ({"20'":1,"40'":2}) — 40' HC counts as 40'.
+// null when the shipment has no container record yet (then size lines are left as the template has them).
+function contSizeCounts(e){
+  const c=containers.find(x=>x.entryId===e.id);
+  if(!c||!c.portInfo)return null;
+  const out={};let any=false;
+  Object.keys(c.portInfo).forEach(k=>{
+    let s=String(c.portInfo[k].size||'').toUpperCase().replace(/\s+/g,'');
+    if(!s)return;
+    if(s==="40'HC")s="40'";
+    out[s]=(out[s]||0)+1;any=true;
+  });
+  return any?out:null;
+}
+function tmplLines(tpl,e,pay){
+  const sizes=contSizeCounts(e);
+  const out=[];
+  tpl.forEach(l=>{
+    const o={name:l.name,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.tax};
+    // {mpl} / {duty} / {macl} → the real amount from the Payment tab (blank until it's entered)
+    if(typeof o.rate==='string'&&o.rate.charAt(0)==='{'){
+      const k=o.rate.replace(/[{}]/g,'');
+      o.rate=(pay&&pay[k]!=null)?pay[k]:'';o.est=true;
+    }
+    // "Clearance 20' / 40' / LCL" lines: qty = how many containers of that size this shipment has.
+    // Sizes the shipment doesn't have are dropped, so the invoice only lists what was actually cleared.
+    const m=/(20'|40'HC|40'|LCL)$/i.exec(o.desc.replace(/\s+/g,''));
+    if(m&&sizes){
+      let k=m[1].toUpperCase();if(k==="40'HC")k="40'";
+      const n=sizes[k]||0;
+      if(!n)return;
+      o.qty=n;
+    }
+    out.push(o);
+  });
+  return out;
+}
+// Remember the lines currently in the builder as this customer's format (per shipment type).
+function saveInvTemplate(){
+  if(!isAdmin()){toast('Billing is admin-only');return;}
+  const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
+  const cust=lookupCustomer(e.cno);
+  if(!cust){toast('Add '+(e.cno||'this customer')+' to the Customers tab first');return;}
+  const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
+  const old=cust[e.type==='MP'?'mpTemplate':'apTemplate']||[];
+  const oldRate={};old.forEach(l=>{oldRate[(l.name||'')+'|'+(l.desc||'')]=l.rate;});
+  // pass-through lines default to the Payment-tab placeholder, so a blank box never freezes as 0
+  const PASS={'mpl charge':'{mpl}','customs duty':'{duty}','macl charge':'{macl}'};
+  const tpl=[];
+  document.querySelectorAll('#inv_lines .invline').forEach(tr=>{
+    const name=tr.querySelector('.invname').value.trim();if(!name)return;
+    const desc=tr.querySelector('.invdesc').value.trim();
+    const rateVal=tr.querySelector('.invrate').value;
+    // a rate that equals the Payment-tab actual is stored as a placeholder, not a frozen number
+    let rate=rateVal===''?'':Number(rateVal);
+    if(pay){['mpl','duty','macl'].forEach(k=>{if(pay[k]!=null&&rateVal!==''&&Number(rateVal)===Number(pay[k]))rate='{'+k+'}';});}
+    if(rateVal===''){
+      // blank box: keep whatever placeholder this line already had, else use the known pass-through one
+      const prev=oldRate[name+'|'+desc];
+      rate=(typeof prev==='string'&&prev.charAt(0)==='{')?prev:(PASS[name.toLowerCase()]||'');
+    }
+    tpl.push({name:name,desc:desc,
+      qty:Number(tr.querySelector('.invqty').value)||0,rate:rate,
+      tax:tr.querySelector('.invtax').checked?8:0});
+  });
+  if(!tpl.length){toast('Nothing to save — add at least one line');return;}
+  cust[e.type==='MP'?'mpTemplate':'apTemplate']=tpl;
+  saveCustomers();
+  toast('📋 Saved — '+(cust.name||cust.cno)+"'s "+(e.type==='MP'?'sea':'air')+' invoices now start from these '+tpl.length+' lines');
+}
+function clearInvTemplate(id){
+  const c=customers.find(x=>x.id===id);if(!c)return;
+  if(!confirm('Reset '+(c.name||c.cno)+" to the standard rate card?\n\nTheir own invoice format will be forgotten."))return;
+  delete c.apTemplate;delete c.mpTemplate;saveCustomers();
+  document.getElementById('u_tmpl_info').innerHTML='';
+  toast('Reset to standard rates');
+}
+// SEASIDE FINOLHU bills on their own USD sea format (agreed rates, MPL Clearance split by container
+// size, MPL Charge passed through at cost, Liner Charge on the DO Fee item). Seeded once; edit it in
+// the invoice builder and press "📋 Save as this customer's format" to change it.
+const SEASIDE_MP_TEMPLATE=[
+  {name:'Form Filling',       desc:'Form Filling (Sea)',       qty:1,rate:2,      tax:8},
+  {name:'Processing Charges', desc:'Processing Charges (Sea)', qty:1,rate:10,     tax:8},
+  {name:'Processing Charges', desc:'Handling Charge',          qty:1,rate:10,     tax:8},
+  {name:'MPL Clearance',      desc:"Clearance 20'",            qty:1,rate:250,    tax:8},
+  {name:'MPL Clearance',      desc:"Clearance 40'",            qty:1,rate:500,    tax:8},
+  {name:'MPL Clearance',      desc:'Clearance LCL',            qty:1,rate:45,     tax:8},
+  {name:'MPL Charge',         desc:'MPL Charge',               qty:1,rate:'{mpl}',tax:0},
+  {name:'Delivery Order Fee', desc:'Liner Charge',             qty:1,rate:54,     tax:0}
+];
+function seedSeaside(){
+  const c=lookupCustomer('C27841')||customers.find(x=>/seaside\s*finolhu/i.test(x.name||''));
+  if(!c||c.mpTemplate)return 0;
+  c.mpTemplate=SEASIDE_MP_TEMPLATE.map(l=>Object.assign({},l));
+  c.currency='USD';
+  if(!c.qbName)c.qbName='Seaside Finolhu Maldives Pvt Ltd';
+  if(!c.billEmail)c.billEmail='waleed@finolhu.mv';
+  saveCustomers();
+  return 1;
+}
 // MACL airport charges (= our Delivery Order Fee, a GST-inclusive pass-through). Reverse-engineered from
 // real MACL tax invoices and exact on 6 LION invoices: total = 3.726/kg + 43.20 fixed
 // (≈ 3.45/kg handling+storage + 40.00 system admin fee, ×1.08 GST). Used as a PRE-FILL estimate when no
@@ -3427,6 +3540,7 @@ function invLineRow(o){
   const inp='padding:7px 8px;border:1px solid var(--line);border-radius:8px;font-size:13px;outline:none;width:100%';
   tr.innerHTML=
     `<td style="padding:3px 4px"><input class="invname" value="${esc(o.name||'')}" placeholder="Activity (matches a QuickBooks item)" style="${inp};min-width:120px"></td>
+     <td style="padding:3px 4px"><input class="invdesc" value="${esc(o.desc||'')}" placeholder="(same as activity)" style="${inp};min-width:130px"></td>
      <td style="padding:3px 4px"><input class="invqty" type="number" step="any" min="0" value="${o.qty==null||o.qty===''?'':o.qty}" oninput="invCalc()" style="${inp};text-align:right"></td>
      <td style="padding:3px 4px"><input class="invrate" type="number" step="any" min="0" value="${o.rate==null||o.rate===''?'':o.rate}" oninput="invCalc()" style="${inp};text-align:right"></td>
      <td style="padding:3px 4px;text-align:center"><input type="checkbox" class="invtax" ${taxed?'checked':''} onchange="invCalc()" title="GST 8% applies to this line"></td>
@@ -3460,6 +3574,9 @@ function isAdmin(){return ADMIN_EMAILS.includes((window.__userEmail||'').toLower
 function expectedLines(e){
   const cust=lookupCustomer(e.cno);
   const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
+  // a customer with their own agreed format wins over the standard rate card
+  const tpl=cust&&cust[e.type==='MP'?'mpTemplate':'apTemplate'];
+  if(tpl&&tpl.length)return tmplLines(tpl,e,pay);
   if(e.type==='MP')return mpExpectedLines(e,cust,pay);   // sea shipments bill on the port format
   const rate=(name)=>{const v=(cust&&cust.apRates)?cust.apRates[name]:null;return v==null?AP_STD_RATES[name]:v;};
   const wt=e.grsWt!=null?e.grsWt:'';
@@ -3504,16 +3621,23 @@ function invAuditHTML(e){
   const norm=n=>String(n||'').replace(/\s*\((Air|Sea)\)\s*$/i,'').trim().toLowerCase();
   const expAll=expectedLines(e); // full list — pass-throughs with no amount yet still count as "expected"
   const exp=expAll.filter(l=>Number(l.qty)>0&&Number(l.rate)>0);
-  const act=e.qbLines;
+  // one line can appear several times under the same activity with different descriptions
+  // (Seaside: MPL Clearance × Clearance 20' / 40' / LCL) — so match on activity + description
+  // and CONSUME each actual line, otherwise the duplicates all pair with the first one.
+  const label=l=>(l.desc&&String(l.desc).trim())?(l.item||l.name)+' — '+l.desc:(l.item||l.name);
+  const key=l=>norm(l.item||l.name)+'|'+String(l.desc||'').trim().toLowerCase();
+  const act=e.qbLines.map(l=>Object.assign({},l));
   const probs=[];
   exp.forEach(x=>{
-    const a=act.find(l=>norm(l.item)===norm(x.name));
-    if(!a){probs.push('missing “'+x.name+'” (expected '+x.qty+' × '+x.rate+')');return;}
-    if(Number(a.qty)!==Number(x.qty))probs.push(x.name+': qty '+a.qty+' — expected '+x.qty);
-    // staff round invoice totals by nudging a rate a few laari — only flag rate differences over MVR 1
-    if(!x.est&&Math.abs(Number(a.rate)-Number(x.rate))>1)probs.push(x.name+': rate '+a.rate+' — expected '+x.rate);
+    let i=act.findIndex(l=>!l._used&&key(l)===key(x));
+    if(i<0)i=act.findIndex(l=>!l._used&&norm(l.item)===norm(x.name)); // older invoices stored no description
+    if(i<0){probs.push('missing “'+label(x)+'” (expected '+x.qty+' × '+x.rate+')');return;}
+    const a=act[i];a._used=true;
+    if(Number(a.qty)!==Number(x.qty))probs.push(label(x)+': qty '+a.qty+' — expected '+x.qty);
+    // staff round invoice totals by nudging a rate a few laari — only flag rate differences over 1
+    if(!x.est&&Math.abs(Number(a.rate)-Number(x.rate))>1)probs.push(label(x)+': rate '+a.rate+' — expected '+x.rate);
   });
-  act.forEach(a=>{if(!expAll.find(x=>norm(x.name)===norm(a.item)))probs.push('extra line “'+a.item+'” ('+a.qty+' × '+a.rate+')');});
+  act.forEach(a=>{if(!a._used&&!expAll.find(x=>key(x)===key(a)||norm(x.name)===norm(a.item)))probs.push('extra line “'+label(a)+'” ('+a.qty+' × '+a.rate+')');});
   const src=e.qbFetchedAt?'This is the REAL invoice (from QuickBooks '+fmtDate(e.qbFetchedAt)+')':'This is the invoice as sent from the app';
   return probs.length
     ?`<div style="color:#dc2626;font-weight:700;margin-top:4px">${src} — ⚠ differs from the customer's standard charges:<br>&nbsp;• ${probs.map(esc).join('<br>&nbsp;• ')}</div>`
@@ -3533,7 +3657,7 @@ function openInvoiceForm(entryId){
   if(e.qbLines&&e.qbLines.length){
     // Already invoiced: show the lines AS LAST SENT to QuickBooks (saved at send/update time),
     // so the builder matches the real invoice instead of regenerating the default draft.
-    e.qbLines.forEach(l=>box.appendChild(invLineRow({name:l.item,qty:l.qty,rate:l.rate,tax:l.tax})));
+    e.qbLines.forEach(l=>box.appendChild(invLineRow({name:l.item,desc:l.desc,qty:l.qty,rate:l.rate,tax:l.tax})));
     // keep the pass-through rows editable even when they were 0 (zero lines aren't stored)
     const passThru=e.type==='MP'?['MPL Charge','Customs Duty','Lorry Charges']:['Delivery Order Fee','Customs Duty'];
     passThru.forEach(n=>{if(!e.qbLines.some(l=>l.item===n))box.appendChild(invLineRow({name:n,qty:1,rate:'',tax:0}));});
@@ -3571,9 +3695,16 @@ function openInvoiceForm(entryId){
   const loading=(fetching&&needLines)?`<div style="color:#0369a1;font-weight:700;margin-top:4px">⏳ Loading invoice ${esc(e.billNo)} from QuickBooks — the lines below are a draft until it appears (~15 s)…</div>`:'';
   const warn=e.qbInvoiced?`<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ Already sent to QuickBooks${e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):''} — sending again makes a duplicate invoice.</div>`:'';
   const sea=e.type==='MP';
-  document.getElementById('inv_title').textContent='🧾 Create QuickBooks Invoice — '+(sea?'Sea (MP)':'Air (AP)');
+  const cur=custCurrency(cust);
+  document.getElementById('inv_title').textContent='🧾 Create QuickBooks Invoice — '+(sea?'Sea (MP)':'Air (AP)')+(cur!=='MVR'?' · '+cur:'');
+  document.getElementById('inv_lbl_sub').textContent='SUBTOTAL ('+cur+')';
+  document.getElementById('inv_lbl_total').textContent='TOTAL ('+cur+')';
+  document.getElementById('inv_lbl_adv').textContent='ADVANCE PAID ('+cur+') — recorded as a payment';
+  const ownTpl=cust&&cust[sea?'mpTemplate':'apTemplate'];
   const ownRates=sea?(cust&&cust.mpRates&&Object.keys(cust.mpRates).length):(cust&&cust.apRates&&Object.keys(cust.apRates).length);
-  const noRates=!ownRates?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard ${sea?'sea (MP)':'air (AP)'} rates — set this customer's own rates in the Customers tab.</div>`:'';
+  const noRates=(ownTpl&&ownTpl.length)
+    ?`<div style="color:#15803d;margin-top:4px">📋 Using <b>${esc(cust.name||cust.cno)}</b>'s own ${sea?'sea':'air'} format${cur!=='MVR'?' — invoiced in <b>'+cur+'</b>':''}.</div>`
+    :(!ownRates?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard ${sea?'sea (MP)':'air (AP)'} rates — set this customer's own rates in the Customers tab.</div>`:'');
   const contRec=sea?containers.find(c=>c.entryId===e.id):null;
   const cont=contRec?(contRec.containerNo||''):'';
   document.getElementById('inv_info').innerHTML=
@@ -3589,12 +3720,15 @@ function collectInvoiceLines(e){
   const lines=[];let taxable=0,nontax=0;
   document.querySelectorAll('#inv_lines .invline').forEach(tr=>{
     const item=tr.querySelector('.invname').value.trim();
+    const desc=tr.querySelector('.invdesc').value.trim();
     const qty=Number(tr.querySelector('.invqty').value)||0;
     const rate=Number(tr.querySelector('.invrate').value)||0;
     const amt=invMoney(qty*rate);
     const taxed=tr.querySelector('.invtax').checked;
     if(item&&amt>0){
-      lines.push({item:item,description:item,qty:qty,rate:rate,amount:amt,taxable:taxed,
+      // DESCRIPTION is what prints on the invoice line. It defaults to the activity name, but can
+      // differ — Seaside bills three "MPL Clearance" lines described as Clearance 20' / 40' / LCL.
+      lines.push({item:item,description:desc||item,desc:desc,qty:qty,rate:rate,amount:amt,taxable:taxed,
         taxCode:taxed?'GST 8%':'Exempt',
         itemId:qbItemId(item,e.type),                            // QuickBooks Product/Service id (Air vs Sea)
         taxCodeId:taxed?QB_TAX_TAXABLE:QB_TAX_EXEMPT});          // 2 = Tax 8%, 3 = Non - Tax
@@ -3631,18 +3765,20 @@ function sendInvoice(){
   // Final review gate — spell out every charge and the totals before anything leaves the app.
   // Nothing is sent and the entry isn't flagged unless the user presses OK.
   const summary=invSummaryText(lines);
+  const curr=custCurrency(lookupCustomer(e.cno));
   if(!confirm(
     'SEND THIS INVOICE TO QUICKBOOKS?\n\n'+
     (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
-    'Invoice '+(bn||'(QuickBooks will assign the next number)')+'    AWB '+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
+    'Invoice '+(bn||'(QuickBooks will assign the next number)')+'    '+(e.type==='MP'?'BL ':'AWB ')+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
     'Email to: '+(document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com (no customer email)')+'\n'+
     '------------------------------------------\n'+
     summary+'\n'+
     '------------------------------------------\n'+
-    'Subtotal   '+fmtNum(subtotal)+'\n'+
-    'GST 8%     '+fmtNum(gst)+'\n'+
-    'TOTAL      '+fmtNum(total)+'\n'+
+    'Subtotal   '+curr+' '+fmtNum(subtotal)+'\n'+
+    'GST 8%     '+curr+' '+fmtNum(gst)+'\n'+
+    'TOTAL      '+curr+' '+fmtNum(total)+'\n'+
     (advance?('Advance    '+fmtNum(advance)+'\nBALANCE    '+fmtNum(invMoney(total-advance))+'\n'):'')+
+    (curr!=='MVR'?'\nThis customer is billed in '+curr+' — QuickBooks uses the currency on their customer record.\n':'')+
     '\nPress OK to create this invoice in QuickBooks.'
   ))return;
   // A TYPED number is written back onto the entry as its BILL NO — same effect as typing it in the
@@ -3668,6 +3804,7 @@ function sendInvoice(){
     attachUrls:atts.map(a=>a.url).join('\n'),
     att1:atts[0]?atts[0].url:'',att2:atts[1]?atts[1].url:'',att3:atts[2]?atts[2].url:'',att4:atts[3]?atts[3].url:'',
     shipmentType:e.type||'',date:e.date||'',billNo:bn,
+    currency:curr,                                 // MVR unless the customer is billed in another currency (Seaside = USD)
     autoNumber:bn?false:true,                      // → Zapier "Auto Generate Invoice Number" (real boolean — the string 'true' was ignored by QuickBooks)
     // invoice To address: typed/looked-up customer email, else your own — so the send step ALWAYS emails someone
     customerEmail:document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com',
@@ -3680,7 +3817,7 @@ function sendInvoice(){
   });
   e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());
   // remember what was sent, so reopening the builder shows the REAL invoice lines (not the default draft)
-  e.qbLines=lines.map(l=>({item:l.item,qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
+  e.qbLines=lines.map(l=>({item:l.item,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
   // DO snaps linked to this entry are done — the staff page flips to ✅ BILLED (number follows via qbinv if blank)
   let dpDone=false;
   dosnaps.forEach(d=>{if(d.entryId===e.id&&d.status!=='billed'){d.status='billed';if(bn)d.billNo=bn;d.billedAt=isoLocal(new Date());dpDone=true;}});
@@ -4687,6 +4824,12 @@ function openCustForm(id){
     u_mp_cl.value=mr['MPL Clearance']??'';u_mp_lorry.value=mr['Lorry Charges']??'';
     u_mp_ff_qty.value=mf.ffQty??'';u_mp_no_lorry.checked=!!mf.noLorry;
     u_bill_email.value=r.billEmail||'';u_qb_name.value=r.qbName||'';
+    document.getElementById('u_currency').value=r.currency||'MVR';
+    const tl=[];
+    if(r.apTemplate&&r.apTemplate.length)tl.push('air: '+r.apTemplate.length+' lines');
+    if(r.mpTemplate&&r.mpTemplate.length)tl.push('sea: '+r.mpTemplate.length+' lines');
+    document.getElementById('u_tmpl_info').innerHTML=tl.length
+      ?'📋 Own invoice format saved — '+tl.join(' · ')+'. <a href="#" onclick="clearInvTemplate(\''+r.id+'\');return false">reset to standard</a>':'';
     document.getElementById('u_wa').checked=!!r.wa;
     document.getElementById('u_docs').innerHTML=
       `<button type="button" class="ghost" onclick="closeModal('overlay-cust');openAttachCust('${r.id}')">📎 Documents${r.attachments&&r.attachments.length?' ('+r.attachments.length+')':''}</button>
@@ -4698,6 +4841,8 @@ function openCustForm(id){
     u_mp_ff.value='';u_mp_pc.value='';u_mp_cl.value='';u_mp_lorry.value='';
     u_mp_ff_qty.value='';u_mp_no_lorry.checked=false;
     u_bill_email.value='';u_qb_name.value='';
+    document.getElementById('u_currency').value='MVR';
+    document.getElementById('u_tmpl_info').innerHTML='';
     document.getElementById('u_wa').checked=false;
     document.getElementById('u_docs').innerHTML=
       `<input type="file" id="u_docs_file" multiple style="display:none" onchange="custPickDocs(this.files)">
@@ -4738,6 +4883,7 @@ function saveCust(e){
     if(document.getElementById('u_wa').checked)rec.wa=true;
     if(u_bill_email.value.trim())rec.billEmail=u_bill_email.value.trim();
     if(u_qb_name.value.trim())rec.qbName=u_qb_name.value.trim();
+    if(document.getElementById('u_currency').value!=='MVR')rec.currency=document.getElementById('u_currency').value;
     customers.push(rec);toast('Customer added');
     uploadPendingCustDocs(rec); // documents picked in the Add form upload now (async, non-blocking)
   }else{
@@ -4745,6 +4891,8 @@ function saveCust(e){
     if(document.getElementById('u_wa').checked)r.wa=true;else delete r.wa;
     if(u_bill_email.value.trim())r.billEmail=u_bill_email.value.trim();else delete r.billEmail;
     if(u_qb_name.value.trim())r.qbName=u_qb_name.value.trim();else delete r.qbName;
+    const cu=document.getElementById('u_currency').value;
+    if(cu!=='MVR')r.currency=cu;else delete r.currency;
     toast('Customer updated');
   }
   saveCustomers();renderCusts();updateCounts();closeModal('overlay-cust');
@@ -5204,6 +5352,11 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
     saveCustomers();
   }
   localStorage.setItem('lion_profile_seed_v4','1');
+})();
+(()=>{ // seed v9 — SEASIDE FINOLHU sea format: USD, own agreed rates, MPL Clearance per container size
+  if(localStorage.getItem('lion_profile_seed_v9'))return;
+  if(seedSeaside())toast('📋 SEASIDE FINOLHU sea invoice format loaded (USD)');
+  localStorage.setItem('lion_profile_seed_v9','1');
 })();
 (()=>{ // seed v5 — STELCO's EXACT QuickBooks display name (Find Customer is case-sensitive;
   // sending the tracker's "STATE ELECTRIC CO LTD" created a duplicate QB customer)
