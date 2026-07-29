@@ -1352,6 +1352,7 @@ function renderEntries(){
     <td class="actcol"><div class="rowact">
       ${(r.type==='AP'&&isAdmin())?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
       <button class="iconbtn" onclick="openAttach('${r.id}')" title="Documents (AWB, receipts, photos…)">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
+      <button class="iconbtn" onclick="waCustomer('${r.id}')" title="WhatsApp the customer a status update">📱</button>
       <button class="iconbtn" onclick="openEntryForm('${r.id}')" title="Edit">✏️</button>
       <button class="iconbtn del" onclick="delEntry('${r.id}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
@@ -1598,6 +1599,26 @@ function saveEntry(e){
     }
   }
   return false;
+}
+// 📱 WhatsApp the customer: opens wa.me with their number and a ready-typed status message —
+// you review and press Send yourself (no API, no cost). Number from Customers → CONTACT.
+function waCustomer(entryId){
+  const e=entries.find(x=>x.id===entryId);if(!e)return;
+  const c=lookupCustomer(e.cno);
+  let ph=((c&&c.contact)||'').replace(/\D/g,'');
+  if(!ph){toast('No contact number for '+(e.cno||'this customer')+' — add it in the Customers tab');return;}
+  if(ph.length===7)ph='960'+ph; // local Maldives number → add country code
+  const bits=[];
+  if(e.awbBl)bits.push('AWB/BL '+e.awbBl);
+  if(e.pkgs)bits.push(e.pkgs+' pkgs');
+  if(e.grsWt)bits.push(e.grsWt+' kg');
+  const what=bits.length?bits.join(', '):'your shipment';
+  let st;
+  if(e.billNo)st='has been CLEARED and delivered. Invoice '+e.billNo+(e.qbTotal?' — MVR '+Number(e.qbTotal).toLocaleString():'')+'.';
+  else if(e.status==='Cleared')st='has been CLEARED and is ready for delivery.';
+  else st='is being processed — we will update you as soon as it clears.';
+  const msg='🦁 LION Logistics\nDear '+((c&&c.name)||e.customer||'customer')+',\nYour shipment ('+what+') '+st+'\nThank you for choosing LION Logistics.';
+  window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(msg),'_blank');
 }
 function delEntry(id){
   const r=entries.find(x=>x.id===id);
@@ -4456,6 +4477,7 @@ function renderStelcoDesk(){
           ?`<button class="iconbtn" onclick="openInvoiceForm('${e.id}')" title="Open the invoice">✅</button>`
           :`<button class="iconbtn" style="background:#e8730f;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="stelcoBill('${e.id}')" title="Create the QuickBooks invoice">🧾 Bill</button>`):''}
         <button class="iconbtn" onclick="openAttach('${e.id}')" title="Documents">📎${e.attachments&&e.attachments.length?e.attachments.length:''}</button>
+        <button class="iconbtn" onclick="waCustomer('${e.id}')" title="WhatsApp the customer a status update">📱</button>
         <button class="iconbtn" onclick="openEntryForm('${e.id}')" title="Edit">✏️</button>
       </div></td>
     </tr>`;}).join('');
