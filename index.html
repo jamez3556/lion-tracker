@@ -3868,7 +3868,7 @@ function updateInvoice(){
     })}).catch(err=>console.warn('Update failed',err));
   }catch(err){console.warn('Update error',err);}
   // the amended lines are now what's on the QuickBooks invoice — remember them for the next reopen
-  e.qbLines=inv.lines.map(l=>({item:l.item,qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
+  e.qbLines=inv.lines.map(l=>({item:l.item,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
   saveEntries();
   closeModal('overlay-invoice');
   toast('✏️ Amendment sent — invoice '+bn+' will be corrected in QuickBooks');
