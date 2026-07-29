@@ -1533,7 +1533,9 @@ function saveEntry(e){
   if(prevEntry&&prevEntry.mpRemark)rec.mpRemark=prevEntry.mpRemark; // MP-tab remark isn't on this form — keep it
   if(prevEntry&&prevEntry.qbInvoiced){rec.qbInvoiced=prevEntry.qbInvoiced;rec.qbInvoicedAt=prevEntry.qbInvoicedAt;} // QuickBooks "sent" flag isn't on this form — keep it
   // side-channel fields not on this form (documents, fetched QuickBooks invoice, payments received) — never lose them on an edit
-  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec'].forEach(k=>{
+  // qbInvoiced/qbInvoicedAt MUST survive an edit — losing them removes the "already sent to
+  // QuickBooks" warning and the next press of 🧾 silently creates a DUPLICATE invoice.
+  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec','qbInvoiced','qbInvoicedAt'].forEach(k=>{
     if(prevEntry[k]!==undefined)rec[k]=prevEntry[k];
   });
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
