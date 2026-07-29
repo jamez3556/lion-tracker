@@ -857,10 +857,10 @@
 
 <div class="overlay" id="overlay-invoice">
   <div class="modal" style="max-width:840px">
-    <h2>🧾 Create QuickBooks Invoice</h2>
+    <h2 id="inv_title">🧾 Create QuickBooks Invoice</h2>
     <input type="hidden" id="inv_entryId">
     <div class="payhdr" id="inv_info"></div>
-    <div style="font-size:12px;color:var(--muted);margin:2px 0 6px">Each row is an invoice line: <b>Qty × Rate = Amount</b>. Tick GST for lines taxed at 8%; untick for pass-throughs (Delivery Order Fee, Customs Duty). Blank / zero lines are skipped.</div>
+    <div style="font-size:12px;color:var(--muted);margin:2px 0 6px">Each row is an invoice line: <b>Qty × Rate = Amount</b>. Tick GST for lines taxed at 8%; untick for pass-throughs (Delivery Order Fee / MPL Charge, Customs Duty, Lorry Charges). Blank / zero lines are skipped.</div>
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:560px">
         <thead><tr style="text-align:left;color:var(--muted);font-size:10.5px;letter-spacing:.03em">
@@ -1026,6 +1026,22 @@ service cloud.firestore {
           <div class="field"><label>BILL ONLY ABOVE (KG) — at/below: pass-throughs only</label><input id="u_min_kg" type="number" step="any" min="0" placeholder="e.g. 50 (STELCO)"></div>
           <div class="field"><label>CLEARANCE LINE LABEL (custom)</label><input id="u_clear_label" placeholder="e.g. Clearance KG Above 50"></div>
         </div>
+      </div>
+      <div style="border-top:1px solid var(--line);margin:10px 0 4px;padding-top:10px">
+        <div style="font-weight:700;font-size:12.5px;color:var(--ink)">MP (Sea) Billing Rates — this customer</div>
+        <div style="font-size:11.5px;color:var(--muted);margin:2px 0 8px">Sea invoices are flat-rate (no kg / no boxes). MPL Charge and Customs Duty come from the Payment tab; Lorry Charges is typed per shipment.</div>
+        <div class="grid2">
+          <div class="field"><label>FORM FILLING (per form)</label><input id="u_mp_ff" type="number" step="any" min="0" placeholder="std 30"></div>
+          <div class="field"><label>FORM FILLING QTY (forms)</label><input id="u_mp_ff_qty" type="number" step="1" min="0" placeholder="std 1"></div>
+          <div class="field"><label>PROCESSING CHARGES (flat)</label><input id="u_mp_pc" type="number" step="any" min="0" placeholder="std 150"></div>
+          <div class="field"><label>MPL CLEARANCE (flat, taxed)</label><input id="u_mp_cl" type="number" step="any" min="0" placeholder="std 0 — type per shipment"></div>
+          <div class="field"><label>LORRY CHARGES (flat, no GST)</label><input id="u_mp_lorry" type="number" step="any" min="0" placeholder="std 0 — type per shipment"></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);margin-top:4px;cursor:pointer">
+          <input type="checkbox" id="u_mp_no_lorry" style="width:auto"> No Lorry Charges line on this customer's sea invoices
+        </label>
+      </div>
+      <div style="border-top:1px solid var(--line);margin:10px 0 4px;padding-top:10px">
         <div class="field"><label>INVOICE EMAIL(S) — comma-separated; pre-fills the invoice's "Email to"</label><input id="u_bill_email" placeholder="billing@customer.mv, second@customer.mv"></div>
         <div class="field"><label>QUICKBOOKS CUSTOMER NAME (exact, as in QuickBooks — prevents duplicate customers)</label><input id="u_qb_name" placeholder="e.g. State Electric Company Limited"></div>
       </div>
@@ -1354,7 +1370,7 @@ function renderEntries(){
     <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
     <td class="actcol"><div class="rowact">
-      ${(r.type==='AP'&&isAdmin())?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
+      ${((r.type==='AP'||r.type==='MP')&&isAdmin())?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
       <button class="iconbtn" onclick="openAttach('${r.id}')" title="Documents (AWB, receipts, photos…)">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
       ${isAdmin()&&waEnabled(r)?`<button class="iconbtn" onclick="waCustomer('${r.id}')" title="WhatsApp the customer a status update"><svg viewBox="0 0 32 32" width="15" height="15" fill="#25D366"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.1.6 4.2 1.7 6L4 29l8.2-1.6c1.2.6 2.5.9 3.8.9 6.6 0 12-5.4 12-12S22.6 3 16 3zm0 21.8c-1.2 0-2.4-.3-3.5-.8l-.5-.3-4.9 1 1-4.7-.3-.5c-1-1.6-1.6-3.5-1.6-5.5 0-5.5 4.4-9.9 9.8-9.9s9.8 4.4 9.8 9.9-4.4 9.8-9.8 9.8zm5.4-7.3c-.3-.2-1.8-.9-2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.1-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6l.5-.5c.2-.2.2-.3.3-.5.1-.2 0-.4 0-.6l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4 0-.1-.2-.2-.5-.3z"/></svg></button>`:''}
       <button class="iconbtn" onclick="openEntryForm('${r.id}')" title="Edit">✏️</button>
@@ -2177,6 +2193,7 @@ function renderMP(){
     <td data-l="Remark"><input class="mpremark" value="${esc(r.mpRemark)}" placeholder="Add remark…" onchange="setMpRemark('${jatt(r.id)}',this.value)"></td>
     <td class="actcol"><div class="rowact">
       <button class="iconbtn" onclick="openEntryForm('${jatt(r.id)}')" title="Edit">✏️</button>
+      ${isAdmin()?`<button class="iconbtn" onclick="openInvoiceForm('${jatt(r.id)}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to open':'Create the sea QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
       <button class="iconbtn del" onclick="delEntry('${jatt(r.id)}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
   pagerHTML(document.getElementById('mp_pager'),mpState,rows.length,'mp');
@@ -3320,11 +3337,32 @@ function xpSalUnpay(payId){
   saveSalaryData();renderExpenses();
 }
 
-/* ============ QuickBooks invoice (AP) ============ */
+/* ============ QuickBooks invoice (AP + MP) ============ */
 // AP invoice = activity lines (Qty × Rate) with 8% GST on taxable lines only.
 // Standard rates below are the defaults; each customer can override them (customer.apRates).
 // Line names MUST match a Product/Service item in QuickBooks (Zapier maps by name).
 const AP_STD_RATES={'Form Filling':30,'Processing Charges':150,'Clearance KG':0.50,'Clearance Box':5,'Dhoni Charges':0.50};
+// MP (sea) standard invoice — the port format: two flat service lines + MPL Clearance (taxable),
+// then the pass-throughs (MPL Charge, Customs Duty, Lorry Charges) which carry NO GST and are typed
+// per shipment (MPL Charge and Duty pre-fill from the Payment tab). Sea is flat-rate: nothing is
+// driven by weight or packages, unlike AP. Per-customer overrides live in customer.mpRates.
+const MP_STD_RATES={'Form Filling':30,'Processing Charges':150,'MPL Clearance':0,'Lorry Charges':0};
+// Line order below MATCHES the QuickBooks sea invoice layout exactly, so a printed invoice from the
+// app is indistinguishable from one typed by hand. tax:0 = "Non - Tax", est:true = the audit won't
+// flag the rate (it's an actual cost, not a rate we set).
+function mpExpectedLines(e,cust,pay){
+  const rate=(name)=>{const v=(cust&&cust.mpRates)?cust.mpRates[name]:null;return v==null?MP_STD_RATES[name]:v;};
+  const prof=(cust&&cust.mpProfile)||{};
+  const L=[];
+  if(!prof.noFF)L.push({name:'Form Filling',qty:prof.ffQty!=null?prof.ffQty:1,rate:rate('Form Filling'),tax:8});
+  if(!prof.noProc)L.push({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8});
+  L.push({name:'MPL Clearance',qty:1,rate:rate('MPL Clearance'),tax:8});
+  // pass-throughs — MPL port charges and customs duty come straight from the Payment tab when entered
+  L.push({name:'MPL Charge',qty:1,rate:(pay&&pay.mpl!=null?pay.mpl:''),tax:0,est:!(pay&&pay.mpl!=null)});
+  L.push({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0,est:!(pay&&pay.duty!=null)});
+  if(!prof.noLorry)L.push({name:'Lorry Charges',qty:1,rate:rate('Lorry Charges'),tax:0,est:true});
+  return L;
+}
 // MACL airport charges (= our Delivery Order Fee, a GST-inclusive pass-through). Reverse-engineered from
 // real MACL tax invoices and exact on 6 LION invoices: total = 3.726/kg + 43.20 fixed
 // (≈ 3.45/kg handling+storage + 40.00 system admin fee, ×1.08 GST). Used as a PRE-FILL estimate when no
@@ -3422,6 +3460,7 @@ function isAdmin(){return ADMIN_EMAILS.includes((window.__userEmail||'').toLower
 function expectedLines(e){
   const cust=lookupCustomer(e.cno);
   const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
+  if(e.type==='MP')return mpExpectedLines(e,cust,pay);   // sea shipments bill on the port format
   const rate=(name)=>{const v=(cust&&cust.apRates)?cust.apRates[name]:null;return v==null?AP_STD_RATES[name]:v;};
   const wt=e.grsWt!=null?e.grsWt:'';
   const prof=(cust&&cust.apProfile)||{};
@@ -3496,10 +3535,8 @@ function openInvoiceForm(entryId){
     // so the builder matches the real invoice instead of regenerating the default draft.
     e.qbLines.forEach(l=>box.appendChild(invLineRow({name:l.item,qty:l.qty,rate:l.rate,tax:l.tax})));
     // keep the pass-through rows editable even when they were 0 (zero lines aren't stored)
-    if(!e.qbLines.some(l=>l.item==='Delivery Order Fee'))
-      box.appendChild(invLineRow({name:'Delivery Order Fee',qty:1,rate:'',tax:0}));
-    if(!e.qbLines.some(l=>l.item==='Customs Duty'))
-      box.appendChild(invLineRow({name:'Customs Duty',qty:1,rate:'',tax:0}));
+    const passThru=e.type==='MP'?['MPL Charge','Customs Duty','Lorry Charges']:['Delivery Order Fee','Customs Duty'];
+    passThru.forEach(n=>{if(!e.qbLines.some(l=>l.item===n))box.appendChild(invLineRow({name:n,qty:1,rate:'',tax:0}));});
   }else{
     expectedLines(e).forEach(l=>box.appendChild(invLineRow(l)));
   }
@@ -3533,10 +3570,15 @@ function openInvoiceForm(entryId){
   }
   const loading=(fetching&&needLines)?`<div style="color:#0369a1;font-weight:700;margin-top:4px">⏳ Loading invoice ${esc(e.billNo)} from QuickBooks — the lines below are a draft until it appears (~15 s)…</div>`:'';
   const warn=e.qbInvoiced?`<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ Already sent to QuickBooks${e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):''} — sending again makes a duplicate invoice.</div>`:'';
-  const noRates=!(cust&&cust.apRates&&Object.keys(cust.apRates).length)?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard rates — set this customer's own rates in the Customers tab.</div>`:'';
+  const sea=e.type==='MP';
+  document.getElementById('inv_title').textContent='🧾 Create QuickBooks Invoice — '+(sea?'Sea (MP)':'Air (AP)');
+  const ownRates=sea?(cust&&cust.mpRates&&Object.keys(cust.mpRates).length):(cust&&cust.apRates&&Object.keys(cust.apRates).length);
+  const noRates=!ownRates?`<div style="color:#0369a1;margin-top:4px">ℹ Using standard ${sea?'sea (MP)':'air (AP)'} rates — set this customer's own rates in the Customers tab.</div>`:'';
+  const contRec=sea?containers.find(c=>c.entryId===e.id):null;
+  const cont=contRec?(contRec.containerNo||''):'';
   document.getElementById('inv_info').innerHTML=
     `<div><span class="k">Customer</span><b>${esc(e.customer)||'—'}</b> <span style="color:#94a3b8">(${esc(e.cno)||'—'})</span></div>
-     <div><span class="k">R No</span><b>${esc(e.rNo)||'—'}</b> &nbsp; <span class="k">AWB</span><b>${esc(e.awbBl)||'—'}</b> &nbsp; <span class="k">Grs Wt</span><b>${fmtNum(e.grsWt)}</b></div>
+     <div><span class="k">R No</span><b>${esc(e.rNo)||'—'}</b> &nbsp; <span class="k">${sea?'BL':'AWB'}</span><b>${esc(e.awbBl)||'—'}</b> &nbsp; ${sea?`<span class="k">Container</span><b>${esc(cont)||'—'}</b>`:`<span class="k">Grs Wt</span><b>${fmtNum(e.grsWt)}</b>`}</div>
      <div><span class="k">Date</span>${fmtDate(e.date)} &nbsp; <span class="k">Bill No</span><b>${esc(e.billNo)||'—'}</b></div>${noRates}${warn}${loading}${invPaidHTML(e)}${invAuditHTML(e)}`;
   invCalc();
   showModal('overlay-invoice');
@@ -4640,6 +4682,10 @@ function openCustForm(id){
     u_rate_dh.value=ar['Dhoni Charges']??'';
     u_ff_qty.value=pf.ffQty??'';u_no_dhoni.checked=!!pf.noDhoni;u_no_proc.checked=!!pf.noProc;
     u_no_ff.checked=!!pf.noFF;u_min_kg.value=pf.minKg??'';u_clear_label.value=pf.clearLabel||'';
+    var mr=r.mpRates||{},mf=r.mpProfile||{};
+    u_mp_ff.value=mr['Form Filling']??'';u_mp_pc.value=mr['Processing Charges']??'';
+    u_mp_cl.value=mr['MPL Clearance']??'';u_mp_lorry.value=mr['Lorry Charges']??'';
+    u_mp_ff_qty.value=mf.ffQty??'';u_mp_no_lorry.checked=!!mf.noLorry;
     u_bill_email.value=r.billEmail||'';u_qb_name.value=r.qbName||'';
     document.getElementById('u_wa').checked=!!r.wa;
     document.getElementById('u_docs').innerHTML=
@@ -4649,6 +4695,8 @@ function openCustForm(id){
     u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';
     u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;u_no_proc.checked=false;
     u_no_ff.checked=false;u_min_kg.value='';u_clear_label.value='';
+    u_mp_ff.value='';u_mp_pc.value='';u_mp_cl.value='';u_mp_lorry.value='';
+    u_mp_ff_qty.value='';u_mp_no_lorry.checked=false;
     u_bill_email.value='';u_qb_name.value='';
     document.getElementById('u_wa').checked=false;
     document.getElementById('u_docs').innerHTML=
@@ -4675,17 +4723,25 @@ function saveCust(e){
   if(u_no_ff.checked)apProfile.noFF=true;
   if(u_min_kg.value!=='')apProfile.minKg=Number(u_min_kg.value);
   if(u_clear_label.value.trim())apProfile.clearLabel=u_clear_label.value.trim();
+  // sea (MP) rates — same shape, kept separate so air and sea never overwrite each other
+  const mpRates={};
+  const setM=(k,el)=>{if(el.value!=='')mpRates[k]=Number(el.value);};
+  setM('Form Filling',u_mp_ff);setM('Processing Charges',u_mp_pc);
+  setM('MPL Clearance',u_mp_cl);setM('Lorry Charges',u_mp_lorry);
+  const mpProfile={};
+  if(u_mp_ff_qty.value!=='')mpProfile.ffQty=Number(u_mp_ff_qty.value);
+  if(u_mp_no_lorry.checked)mpProfile.noLorry=true;
   if(!u_id.value){
     const ex=lookupCustomer(cno);
     if(ex){toast('C number already in list: '+ex.name);return false;}
-    const rec={id:uid(),cno,name,contact,apRates,apProfile};
+    const rec={id:uid(),cno,name,contact,apRates,apProfile,mpRates,mpProfile};
     if(document.getElementById('u_wa').checked)rec.wa=true;
     if(u_bill_email.value.trim())rec.billEmail=u_bill_email.value.trim();
     if(u_qb_name.value.trim())rec.qbName=u_qb_name.value.trim();
     customers.push(rec);toast('Customer added');
     uploadPendingCustDocs(rec); // documents picked in the Add form upload now (async, non-blocking)
   }else{
-    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;r.apRates=apRates;r.apProfile=apProfile;delete r.apFee;
+    const r=customers.find(x=>x.id===u_id.value);r.cno=cno;r.name=name;r.contact=contact;r.apRates=apRates;r.apProfile=apProfile;r.mpRates=mpRates;r.mpProfile=mpProfile;delete r.apFee;
     if(document.getElementById('u_wa').checked)r.wa=true;else delete r.wa;
     if(u_bill_email.value.trim())r.billEmail=u_bill_email.value.trim();else delete r.billEmail;
     if(u_qb_name.value.trim())r.qbName=u_qb_name.value.trim();else delete r.qbName;
