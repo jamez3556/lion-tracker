@@ -310,7 +310,7 @@
       <option value="">All statuses</option><option>Pending</option><option>Cleared</option><option>Delivered</option>
     </select>
     <select class="filter" id="e_invFilter">
-      <option value="">All invoices</option><option value="pending">🧾 Invoice pending (no bill)</option><option value="done">Invoiced (has bill)</option>
+      <option value="">All invoices</option><option value="pending">🧾 Invoice pending (no bill)</option><option value="done">Invoiced (has bill)</option><option value="stuck">⚠ Sent, no number back</option>
     </select>
     <select class="filter" id="e_typeFilter"><option value="">All types</option></select>
     <select class="filter" id="e_monthFilter"><option value="">All months</option></select>
@@ -1331,11 +1331,26 @@ function filteredEntries(){
     if(sf&&r.status!==sf)return false;
     if(inv==='pending'&&r.billNo)return false;   // invoice pending = no BILL NO
     if(inv==='done'&&!r.billNo)return false;
+    if(inv==='stuck'&&!invStuck(r))return false;
     if(tf&&r.type!==tf)return false;
     if(mf&&(r.date||'').slice(0,7)!==mf)return false;
     return true;
   });
   return sortRows(rows,eState,['no','grsWt','pkgs']);
+}
+// WATCHDOG — an invoice this app sent to QuickBooks that never got its number back.
+// The number arrives by itself (QuickBooks assigns it, the Zap writes it into the entry). If it hasn't
+// landed 10 minutes later, the Zap failed somewhere and NOBODY would otherwise know: the invoice may
+// exist in QuickBooks, unsent and unrecorded. That is exactly how L26/1391 was lost for a day.
+const INV_STUCK_MS=10*60*1000;
+function invStuck(r){
+  return !!(r.qbInvoiced&&!(r.billNo||'').trim()&&r.qbSentMs&&(Date.now()-r.qbSentMs)>INV_STUCK_MS);
+}
+function showInvoiceStuck(){
+  ['e_search','e_statusFilter','e_typeFilter','e_monthFilter'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('e_invFilter').value='stuck';
+  eState.page=1;renderEntries();
+  toast('These invoices reached QuickBooks but no number came back — check the Zap, or type the number by hand');
 }
 // AP shipment logged TODAY → dark highlight row (so the team can see what was uploaded today).
 // Compares the entry DATE to today's local date, so the highlight clears automatically at 00:00.
@@ -1351,10 +1366,12 @@ function renderEntries(){
   const notedToday=activeC.filter(r=>r.clearance===todayIso).length;
   const notedTomorrow=activeC.filter(r=>r.clearance===tomorrowIso).length;
   const dpPend=dosnaps.filter(d=>d.status==='pending').length;
+  const stuckN=entries.filter(invStuck).length;   // invoice sent, number never came back = a failed Zap
   document.getElementById('e_stats').innerHTML=`
     ${dpPend?`<div class="card c-danger" style="cursor:pointer" onclick="openDoQueue()" title="DO photos from the airport waiting to be billed — click to open the queue"><div class="n">${dpPend}</div><div class="l">📸 DO to Bill</div></div>`:''}
     <div class="card c-warn"><div class="n">${pending.toLocaleString()}</div><div class="l">Pending</div></div>
     <div class="card c-danger" style="cursor:pointer" onclick="showInvoicePending()" title="Entries with no BILL NO — click to list them"><div class="n">${invPending.toLocaleString()}</div><div class="l">🧾 Invoice Pending</div></div>
+    ${stuckN?`<div class="card c-danger" style="cursor:pointer;outline:2px solid #dc2626" onclick="showInvoiceStuck()" title="Sent to QuickBooks but no invoice number came back — the Zap failed. Click to list them."><div class="n">${stuckN}</div><div class="l">⚠ No Invoice No Back</div></div>`:''}
     <div class="card c-danger" style="cursor:pointer" onclick="goToContFilter('soon')" title="Containers due within 3 days — click to view"><div class="n">${dueSoon}</div><div class="l">Due ≤ 3 Days</div></div>
     <div class="card c-info" style="cursor:pointer" onclick="goToContFilter('notedtoday')" title="Containers noted for today — click to view"><div class="n">${notedToday}</div><div class="l">Noted for Today</div></div>
     <div class="card c-purple" style="cursor:pointer" onclick="goToContFilter('notedtomorrow')" title="Containers noted for tomorrow — click to view"><div class="n">${notedTomorrow}</div><div class="l">Noted for Tomorrow</div></div>
@@ -1535,7 +1552,7 @@ function saveEntry(e){
   // side-channel fields not on this form (documents, fetched QuickBooks invoice, payments received) — never lose them on an edit
   // qbInvoiced/qbInvoicedAt MUST survive an edit — losing them removes the "already sent to
   // QuickBooks" warning and the next press of 🧾 silently creates a DUPLICATE invoice.
-  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec','qbInvoiced','qbInvoicedAt'].forEach(k=>{
+  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec','qbInvoiced','qbInvoicedAt','qbSentMs'].forEach(k=>{
     if(prevEntry[k]!==undefined)rec[k]=prevEntry[k];
   });
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
@@ -3810,6 +3827,9 @@ function sendInvoice(){
   // with the file. None ⇒ the plain Zap. Never a filter in the middle: that halted the whole Zap.
   },(atts.length&&ZAPIER_HOOK_ATT_URL)?ZAPIER_HOOK_ATT_URL:ZAPIER_HOOK_URL);
   e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());
+  // when the invoice number is left blank QuickBooks assigns it and the Zap writes it back. Stamp the
+  // send moment so the watchdog can flag it if that never happens (invStuck / "⚠ No Invoice No Back").
+  if(bn)delete e.qbSentMs;else e.qbSentMs=Date.now();
   // remember what was sent, so reopening the builder shows the REAL invoice lines (not the default draft)
   e.qbLines=lines.map(l=>({item:l.item,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
   // DO snaps linked to this entry are done — the staff page flips to ✅ BILLED (number follows via qbinv if blank)
