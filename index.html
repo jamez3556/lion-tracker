@@ -855,6 +855,14 @@
   </div>
 </div>
 
+<div class="overlay" id="overlay-msgs">
+  <div class="modal" style="max-width:640px">
+    <h2>💬 Customer Messages</h2>
+    <div style="font-size:12.5px;color:var(--muted);margin:-6px 0 12px">Sent by customers from their status page.</div>
+    <div id="msg_list" style="max-height:60vh;overflow:auto"></div>
+    <div class="actions"><button type="button" class="ghost" onclick="closeModal('overlay-msgs')">Close</button></div>
+  </div>
+</div>
 <div class="overlay" id="overlay-invoice">
   <div class="modal" style="max-width:840px">
     <h2 id="inv_title">🧾 Create QuickBooks Invoice</h2>
@@ -1371,6 +1379,7 @@ function renderEntries(){
   const dpPend=dosnaps.filter(d=>d.status==='pending').length;
   const stuckN=entries.filter(invStuck).length;   // invoice sent, number never came back = a failed Zap
   document.getElementById('e_stats').innerHTML=`
+    ${msgUnread()?`<div class="card c-info" style="cursor:pointer;outline:2px solid #e8730f" onclick="openMsgs()" title="Messages your customers sent from their status page"><div class="n">${msgUnread()}</div><div class="l">💬 Customer Messages</div></div>`:''}
     ${dpPend?`<div class="card c-danger" style="cursor:pointer" onclick="openDoQueue()" title="DO photos from the airport waiting to be billed — click to open the queue"><div class="n">${dpPend}</div><div class="l">📸 DO to Bill</div></div>`:''}
     <div class="card c-warn"><div class="n">${pending.toLocaleString()}</div><div class="l">Pending</div></div>
     <div class="card c-danger" style="cursor:pointer" onclick="showInvoicePending()" title="Entries with no BILL NO — click to list them"><div class="n">${invPending.toLocaleString()}</div><div class="l">🧾 Invoice Pending</div></div>
@@ -4835,6 +4844,40 @@ async function uploadPendingCustDocs(rec){
   }
   if(ok){saveCustomers();renderCusts();renderCreds();toast('📎 '+ok+' document'+(ok>1?'s':'')+' attached to '+(rec.cno||rec.name));}
 }
+/* ============ CUSTOMER MESSAGES (from status.html) ============
+   Customers write on their status page; it lands in the 'portalmsg' collection and shows up here as a
+   💬 card on the Form Log. No email service, no Zapier tasks — it costs nothing to run. */
+let portalMsgs=[];
+function msgUnread(){return portalMsgs.filter(m=>!m.read).length;}
+function openMsgs(){renderMsgs();showModal('overlay-msgs');}
+function renderMsgs(){
+  const box=document.getElementById('msg_list');if(!box)return;
+  if(!portalMsgs.length){box.innerHTML='<div style="padding:22px;text-align:center;color:var(--muted)">No customer messages yet.</div>';return;}
+  box.innerHTML=portalMsgs.map(m=>{
+    const when=(m.at||'').slice(0,16).replace('T',' ');
+    return `<div style="border:1px solid var(--line);border-left:4px solid ${m.read?'var(--line)':'#e8730f'};border-radius:10px;padding:11px 13px;margin-bottom:9px;background:${m.read?'transparent':'#fff7ed'}">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div><b>${esc(m.name||m.cno||'—')}</b> <span style="color:#94a3b8">${esc(m.cno||'')}</span>
+          ${m.about?`<div style="font-size:12px;color:#0369a1;font-weight:700">${esc(m.about)}</div>`:''}</div>
+        <div style="font-size:12px;color:#94a3b8;white-space:nowrap">${esc(when)}</div>
+      </div>
+      <div style="margin-top:6px;white-space:pre-wrap;font-size:14px">${esc(m.text||'')}</div>
+      <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end">
+        ${m.read?'':`<button class="ghost" onclick="msgRead('${jatt(m.id)}')">Mark read</button>`}
+        <button class="iconbtn del" onclick="msgDelete('${jatt(m.id)}')" title="Delete">🗑️</button>
+      </div></div>`;
+  }).join('');
+}
+async function msgRead(id){
+  const m=portalMsgs.find(x=>x.id===id);if(!m)return;
+  m.read=true;renderMsgs();updateCounts();renderEntries();
+  try{await window.__msgs.read(id);}catch(e){toast('Could not update: '+((e&&e.code)||e));}
+}
+async function msgDelete(id){
+  if(!confirm('Delete this message?'))return;
+  portalMsgs=portalMsgs.filter(x=>x.id!==id);renderMsgs();updateCounts();renderEntries();
+  try{await window.__msgs.remove(id);}catch(e){toast('Could not delete: '+((e&&e.code)||e));}
+}
 /* ============ CUSTOMER STATUS PAGE (status.html) ============
    A customer with a link key gets a private page showing THEIR shipments only: where the cargo is,
    the last free date with days left, whether the DO is done, when it cleared, and the invoice number.
@@ -5831,6 +5874,22 @@ async function startSync(){
       put:async(token,data)=>{await fx.setDoc(fx.doc(db,'portal',token),data);},
       remove:async(token)=>{await fx.deleteDoc(fx.doc(db,'portal',token));}
     };
+    // Messages customers write on their status page. Live, so one arrives while the app is open.
+    window.__msgs={
+      read:async(id)=>{await fx.updateDoc(fx.doc(db,'portalmsg',id),{read:true});},
+      remove:async(id)=>{await fx.deleteDoc(fx.doc(db,'portalmsg',id));}
+    };
+    try{
+      let msgFirst=true;
+      fx.onSnapshot(fx.collection(db,'portalmsg'),s=>{
+        portalMsgs=s.docs.map(d=>Object.assign({id:d.id},d.data()))
+          .sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
+        const fresh=s.docChanges().filter(c=>c.type==='added'&&!(c.doc.data()||{}).read).length;
+        if(!msgFirst&&fresh)toast('💬 New customer message');
+        msgFirst=false;
+        try{renderEntries();renderMsgs();}catch(e){}
+      },e=>console.warn('customer messages unavailable (rule missing?)',(e&&e.code)||e));
+    }catch(e){console.warn('customer messages listener failed',e);}
     // AI document-reader key lives in Firestore settings/ai (team-shared, never in the public HTML)
     window.__aiKey={
       get:async()=>{const s=await fx.getDoc(fx.doc(db,'settings','ai'));return s.exists()?(s.data().key||''):'';},
