@@ -2395,8 +2395,8 @@ function renderPayments(){
     const inv=!has
       ? '<span style="color:#94a3b8">—</span>'
       : (r.invoicedAt
-          ? `<button class="iconbtn" style="color:#16a34a;font-weight:700" onclick="sendInvoice('${jatt(r.id)}')" title="Invoiced ${fmtDate(r.invoicedAt)} — click to re-send">✅ Sent</button>`
-          : `<button class="iconbtn" style="background:#e8730f;color:#fff;padding:3px 11px;border-radius:6px;font-weight:700" onclick="sendInvoice('${jatt(r.id)}')" title="Create a QuickBooks invoice and email it to the customer">📤 Send</button>`);
+          ? `<button class="iconbtn" style="color:#16a34a;font-weight:700" onclick="payInvoiceSend('${jatt(r.id)}')" title="Invoiced ${fmtDate(r.invoicedAt)} — click to open the invoice">✅ Sent</button>`
+          : `<button class="iconbtn" style="background:#e8730f;color:#fff;padding:3px 11px;border-radius:6px;font-weight:700" onclick="payInvoiceSend('${jatt(r.id)}')" title="Open this shipment's invoice builder">🧾 Bill</button>`);
     return `<tr id="payrow-${r.id}">
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="openPayForm('${jatt(r.id)}')" title="Enter / edit payment">✏️</button>
@@ -2452,43 +2452,17 @@ function savePay(e){
   toast('Payment saved');
   return false;
 }
-// "Send" button on a Payment row → fire a create_invoice event to Zapier (→ QuickBooks: create invoice + email
-// the customer). Customer email is looked up from the creds collection (REGISTERED EMAIL) by C-No. Marks the
-// row ✅ Sent (invoicedAt) — syncs to the team so nobody double-invoices; re-sendable with a second confirm.
-function sendInvoice(id){
+// "Send" button on a Payment row → open the SHIPMENT's invoice builder, the single billing path.
+// (This used to be a second function also called sendInvoice, which the builder's own sendInvoice()
+// silently overwrote — the button either did nothing or, if the builder had been opened earlier in the
+// session, fired an invoice for whatever shipment was still in it. It also posted a legacy
+// "create_invoice" event the Zap filters out, so it never produced an invoice.)
+function payInvoiceSend(id){
   const p=payments.find(x=>x.id===id);if(!p)return;
   if(!payHasMoney(p)){toast('Enter the charges first');return;}
-  if(!ZAPIER_HOOK_URL){toast('Zapier webhook not set up yet');return;}
-  const cust=creds.find(c=>(c.cno||'').toUpperCase()===(p.cno||'').toUpperCase());
-  const email=(cust&&cust.email)||'';
-  const resend=!!p.invoicedAt;
-  const msg=(resend?'RE-SEND invoice to ':'Create & send invoice to ')+(p.name||p.cno||'this customer')
-    +'\n\nTotal '+fmtNum(payTotal(p))+'   ·   Balance '+fmtNum(payBalance(p))
-    +'\n'+(email?('Email: '+email):'⚠ No email on file for '+(p.cno||'this C-No')+' — QuickBooks will use its own customer record if it has one.')
-    +'\n\nProceed?';
-  if(!confirm(msg))return;
-  zapierPost({
-    event:'create_invoice',
-    customerName:p.name||'',
-    cNumber:p.cno||'',
-    customerEmail:email,
-    shipmentRNumber:p.rNo||'',
-    awbBl:p.blNo||'',
-    duty:Number(p.duty)||0,
-    macl:Number(p.macl)||0,
-    mpl:Number(p.mpl)||0,
-    total:payTotal(p),
-    advance:Number(p.advance)||0,
-    balance:payBalance(p),
-    remark:p.remark||'',
-    billNo:p.billNo||'',
-    date:p.date||'',
-    no:p.no,
-    invoiceRef:'R'+(p.rNo||'')+'-'+(p.no||'')
-  });
-  p.invoicedAt=isoLocal(new Date());
-  savePayments();renderPayments();
-  toast('📤 Invoice sent to Zapier'+(resend?' (re-sent)':'')+' — QuickBooks will create & email it');
+  const e=entries.find(x=>x.id===p.entryId)||entries.find(x=>payId(x)===p.id);
+  if(!e){toast('Shipment not found for this payment row');return;}
+  openInvoiceForm(e.id);   // review the lines, then Send to QuickBooks from there
 }
 function exportPayments(){
   xlsExport('lion-payments',
