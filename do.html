@@ -93,7 +93,7 @@
         <button type="button" class="ghost" id="readBtn" style="display:none;margin-top:6px;border:1px solid #FF4F00;color:#FF4F00;font-weight:700" onclick="readPhoto()">🤖 Read this document for me</button>
       </div>
       <div class="grid2">
-        <div class="field"><label>AWB NO</label><input id="f_awb" placeholder="e.g. 926-1234 5675" required></div>
+        <div class="field"><label>AWB NO</label><input id="f_awb" placeholder="e.g. 926-1234 5675" required oninput="dupCheck()"><div id="f_dup"></div></div>
         <div class="field"><label>WEIGHT (KG)</label><input id="f_kg" type="number" step="any" min="0" inputmode="decimal" required></div>
       </div>
       <div class="grid2">
@@ -410,12 +410,26 @@ window.gotPhoto=()=>{
   document.getElementById('readBtn').style.display=f?'':'none';
   if(f)document.getElementById('ocrStatus').textContent='✅ DO attached — type the details, or tap 🤖 to have it read';
 };
+/* Same AWB twice: warn while it is typed and again before sending — never block. */
+const awbDigits=v=>String(v||'').replace(/\D/g,'');
+function dupList(awb){
+  const d=awbDigits(awb);
+  if(d.length<6)return [];
+  return data.filter(s=>awbDigits(s.awb)===d)
+    .map(s=>(s.kg?s.kg+' kg · ':'')+(s.customer||'')+' · '+(s.date||'')+' '+(s.time||'')+(s.by?' by '+s.by:'')+(s.status==='billed'?' · BILLED':''));
+}
+window.dupCheck=()=>{
+  const box=document.getElementById('f_dup');if(!box)return;
+  const hits=dupList(document.getElementById('f_awb').value);
+  box.innerHTML=hits.length?'<div style="color:#dc2626;font-weight:700;font-size:12px;margin-top:4px;line-height:1.5">⚠ This AWB was already sent:<br>'
+    +hits.slice(0,3).map(h=>'&nbsp;• '+h.replace(/[<>&]/g,'')).join('<br>')+'<br>Check before sending again.</div>':'';
+};
 window.readPhoto=async()=>{
   const f=document.getElementById('f_photo').files[0];
   if(!f){document.getElementById('ocrStatus').textContent='Attach the DO first';return;}
   const b=document.getElementById('readBtn');
   b.disabled=true;
-  try{await ocrRun(f);}finally{b.disabled=false;}
+  try{await ocrRun(f);window.dupCheck();}finally{b.disabled=false;}
 };
 window.clearPhoto=()=>{
   document.getElementById('f_photo').value='';
@@ -441,6 +455,10 @@ window.saveSnap=async ev=>{
   const kg=Number(document.getElementById('f_kg').value);
   if(!photoFile){toast('Take the DO photo first');return false;}
   if(!awb||!kg){toast('AWB and weight are required');return false;}
+  // same AWB already sent? warn, but let a human decide — sometimes a second one is deliberate
+  const dup=dupList(awb);
+  if(dup.length&&!confirm('⚠ AWB '+awb+' was already sent:\n\n'+dup.slice(0,5).map(h=>'  • '+h).join('\n')
+      +'\n\nSend it again anyway?'))return false;
   const btn=document.getElementById('sendBtn');
   btn.disabled=true;btn.textContent='Uploading…';
   try{
@@ -473,6 +491,7 @@ window.saveSnap=async ev=>{
     document.getElementById('f_awb').value='';document.getElementById('f_kg').value='';
     document.getElementById('f_customer').value='STATE ELECTRIC COMPANY';document.getElementById('f_macl').value='';
     document.getElementById('f_demur').value='';
+    window.dupCheck();
     window.gotPhoto();
     toast('✅ Sent — the office will bill it now');
   }catch(e){toast('Upload failed: '+(e.code||e.message||e));}
