@@ -1050,6 +1050,7 @@ service cloud.firestore {
           <div class="field"><label>INVOICE CURRENCY</label><select id="u_currency"><option value="MVR">MVR — Maldivian Rufiyaa</option><option value="USD">USD — US Dollar</option><option value="EUR">EUR — Euro</option></select></div>
         </div>
         <div id="u_tmpl_info" style="font-size:12px;color:#15803d;margin-top:2px"></div>
+        <div id="u_portal_info" style="font-size:12px;margin-top:6px"></div>
       </div>
       <div id="u_docs" style="margin-top:12px"></div>
       <div class="actions">
@@ -1248,10 +1249,12 @@ let team=store('lion_team_v1',[]);
 let expensesData=store('lion_expenses_v1',[]); // daily expenses / dhoni fuel (kind: exp|fill|trip) — shared with the standalone expenses page
 let salaryData=store('lion_salary_v1',[]);     // ADMIN-ONLY salary records (kind: staff|salpay) — separate collection, admin-locked rules
 let dosnaps=store('lion_dosnaps_v1',[]);       // DO photos snapped by airport staff (do.html) — the instant-billing queue
-const saveEntries=()=>{localStorage.setItem('lion_clearance_v2',JSON.stringify(entries));window.__cloudPush&&window.__cloudPush('entries');};
+const saveEntries=()=>{localStorage.setItem('lion_clearance_v2',JSON.stringify(entries));window.__cloudPush&&window.__cloudPush('entries');
+  typeof syncPortals==='function'&&syncPortals();};   // refresh any shared customer status pages
 const saveCustomers=()=>{localStorage.setItem('lion_customers_v1',JSON.stringify(customers));window.__cloudPush&&window.__cloudPush('customers');};
 const saveCreds=()=>{localStorage.setItem('lion_creds_v1',JSON.stringify(creds));window.__cloudPush&&window.__cloudPush('creds');};
-const saveContainers=()=>{localStorage.setItem('lion_containers_v1',JSON.stringify(containers));window.__cloudPush&&window.__cloudPush('containers');};
+const saveContainers=()=>{localStorage.setItem('lion_containers_v1',JSON.stringify(containers));window.__cloudPush&&window.__cloudPush('containers');
+  typeof syncPortals==='function'&&syncPortals();};   // arrival/discharge/last date changed — update the customer pages
 const savePayments=()=>{localStorage.setItem('lion_payments_v1',JSON.stringify(payments));window.__cloudPush&&window.__cloudPush('payments');};
 const saveTeam=()=>{localStorage.setItem('lion_team_v1',JSON.stringify(team));window.__cloudPush&&window.__cloudPush('team');};
 const saveExpensesData=()=>{localStorage.setItem('lion_expenses_v1',JSON.stringify(expensesData));window.__cloudPush&&window.__cloudPush('expenses');};
@@ -4802,6 +4805,7 @@ function renderCusts(){
       <td data-l="Jobs">${jc?`<span class="daysbadge d-ok">${jc} job${jc>1?'s':''}</span>`:'<span class="d-none">—</span>'}</td>
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="openAttachCust('${r.id}')" title="Customer documents (ID, licences, forms…) — shared with the Logins tab">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
+        ${isAdmin()?`<button class="iconbtn" style="${r.portalKey?'color:#15803d;font-weight:700':''}" onclick="portalShare('${r.id}')" title="${r.portalKey?'Status link is live — click to copy it again':'Give this customer a private link to track their own shipments'}">🔗</button>`:''}
         <button class="iconbtn" onclick="openCustForm('${r.id}')" title="Edit">✏️</button>
         <button class="iconbtn del" onclick="delCust('${r.id}')" title="Delete">🗑️</button>
       </div></td></tr>`;
@@ -4831,6 +4835,86 @@ async function uploadPendingCustDocs(rec){
   }
   if(ok){saveCustomers();renderCusts();renderCreds();toast('📎 '+ok+' document'+(ok>1?'s':'')+' attached to '+(rec.cno||rec.name));}
 }
+/* ============ CUSTOMER STATUS PAGE (status.html) ============
+   A customer with a link key gets a private page showing THEIR shipments only: where the cargo is,
+   the last free date with days left, whether the DO is done, when it cleared, and the invoice number.
+   It exists so customers stop ringing to ask "where is my container".
+   What leaves the office: nothing but that customer's own shipment facts — no staff codes, no rates,
+   no duty/MACL/MPL costs, no other customer, no credentials. Built here and written to the 'portal'
+   collection; status.html reads one doc by its key without signing in. */
+const PORTAL_BASE='https://jamez3556.github.io/lion-tracker/status.html';
+const PORTAL_MAX=80;               // most recent shipments per customer — keeps the doc small
+function portalToken(){
+  const a=new Uint8Array(16);(crypto.getRandomValues?crypto:window.msCrypto).getRandomValues(a);
+  return Array.from(a).map(b=>b.toString(36)).join('').slice(0,24);
+}
+// One shipment as the customer should see it. Container detail comes from the linked Container Status
+// record, using effLast() so a hand-set LAST DATE is what they're told too.
+function portalShipment(e){
+  const c=containers.find(x=>x.entryId===e.id);
+  const o={date:e.date||'',type:e.type||'',rNo:e.rNo||'',awbBl:e.awbBl||'',
+    pkgs:e.pkgs==null?'':e.pkgs,grsWt:e.grsWt==null?'':e.grsWt,
+    status:e.status||'Pending',billNo:e.billNo||''};
+  if(e.qbBalance!=null)o.balance=Number(e.qbBalance);
+  if(c){
+    const el=effLast(c);
+    o.blNo=c.blNo||'';o.doDate=c.doDate||'';o.clearance=c.clearance||'';
+    o.lastDate=el.next||'';o.ctnsLeft=c.ctnsLeft==null?'':c.ctnsLeft;
+    o.containers=contNoList(c).map(cn=>{const i=ctnInfo(c,cn);
+      return {no:cn,size:i.size||'',arrival:i.arrival||'',discharge:i.discharge||'',
+              out:i.out||'',clearance:i.clearance||''};});
+  }
+  return o;
+}
+function portalPayload(cust){
+  const mine=entries.filter(e=>(e.cno||'').toUpperCase()===(cust.cno||'').toUpperCase()&&!isBillOnly(e))
+    .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||(Number(b.no)||0)-(Number(a.no)||0))
+    .slice(0,PORTAL_MAX);
+  return {name:cust.name||'',cno:cust.cno||'',updated:isoLocal(new Date()),
+    updatedTime:new Date().toTimeString().slice(0,5),
+    shipments:mine.map(portalShipment)};
+}
+// Create (or refresh) the link and copy it. Same button later just re-copies.
+async function portalShare(id){
+  if(!isAdmin()){toast('Admin only');return;}
+  const c=customers.find(x=>x.id===id);if(!c)return;
+  if(!window.__portal){toast('Not connected to the cloud yet — try again in a moment');return;}
+  const fresh=!c.portalKey;
+  if(fresh)c.portalKey=portalToken();
+  const url=PORTAL_BASE+'#'+c.portalKey;
+  try{
+    await window.__portal.put(c.portalKey,portalPayload(c));
+  }catch(err){
+    if(fresh)delete c.portalKey;
+    toast('Could not publish: '+((err&&err.code)||err&&err.message||err)+' — the portal rule may be missing');
+    return;
+  }
+  if(fresh)saveCustomers();
+  renderCusts();
+  try{await navigator.clipboard.writeText(url);toast('🔗 Link copied — send it to '+(c.name||c.cno));}
+  catch(err){prompt('Copy this link and send it to '+(c.name||c.cno),url);}
+}
+// Keep every shared customer's page current. Debounced, and only for customers that HAVE a link —
+// normally a handful, so a shipment save costs a handful of tiny writes.
+let portalTimer=null;
+function syncPortals(){
+  if(!window.__portal||!isAdmin())return;
+  clearTimeout(portalTimer);
+  portalTimer=setTimeout(()=>{
+    customers.filter(c=>c.portalKey).forEach(c=>{
+      window.__portal.put(c.portalKey,portalPayload(c)).catch(e=>console.warn('portal refresh failed',c.cno,e));
+    });
+  },4000);
+}
+// Stop sharing: the page goes blank for anyone holding the old link.
+async function portalRevoke(id){
+  const c=customers.find(x=>x.id===id);if(!c||!c.portalKey)return;
+  if(!confirm('Stop sharing the status page with '+(c.name||c.cno)+"?\n\nTheir link stops working immediately."))return;
+  try{await window.__portal.remove(c.portalKey);}catch(e){}
+  delete c.portalKey;saveCustomers();renderCusts();
+  const box=document.getElementById('u_portal_info');if(box)box.innerHTML='';
+  toast('Status link revoked');
+}
 function openCustForm(id){
   custPendingFiles=[];
   const t=document.getElementById('u_modalTitle');
@@ -4856,6 +4940,11 @@ function openCustForm(id){
     if(r.mpTemplate&&r.mpTemplate.length)tl.push('sea: '+r.mpTemplate.length+' lines');
     document.getElementById('u_tmpl_info').innerHTML=tl.length
       ?'📋 Own invoice format saved — '+tl.join(' · ')+'. <a href="#" onclick="clearInvTemplate(\''+r.id+'\');return false">reset to standard</a>':'';
+    document.getElementById('u_portal_info').innerHTML=r.portalKey
+      ?'🔗 <b>Status page shared.</b> <span style="color:#94a3b8;word-break:break-all">'+esc(PORTAL_BASE+'#'+r.portalKey)+'</span> '
+        +'<a href="#" onclick="portalShare(\''+r.id+'\');return false">copy</a> · '
+        +'<a href="#" style="color:#dc2626" onclick="portalRevoke(\''+r.id+'\');return false">stop sharing</a>'
+      :'<span style="color:#94a3b8">No status page yet — press 🔗 on this customer\'s row to give them a private tracking link.</span>';
     document.getElementById('u_wa').checked=!!r.wa;
     document.getElementById('u_docs').innerHTML=
       `<button type="button" class="ghost" onclick="closeModal('overlay-cust');openAttachCust('${r.id}')">📎 Documents${r.attachments&&r.attachments.length?' ('+r.attachments.length+')':''}</button>
@@ -4869,6 +4958,7 @@ function openCustForm(id){
     u_bill_email.value='';u_qb_name.value='';
     document.getElementById('u_currency').value='MVR';
     document.getElementById('u_tmpl_info').innerHTML='';
+    document.getElementById('u_portal_info').innerHTML='';
     document.getElementById('u_wa').checked=false;
     document.getElementById('u_docs').innerHTML=
       `<input type="file" id="u_docs_file" multiple style="display:none" onchange="custPickDocs(this.files)">
@@ -5729,6 +5819,16 @@ async function startSync(){
         remove:async(p)=>{await stM.deleteObject(stM.ref(fst,p));}
       };
     }catch(e){console.warn('Storage unavailable',e);}
+    // CUSTOMER STATUS PAGE (status.html). One doc per shared customer in the 'portal' collection,
+    // id = that customer's random link key. It holds ONLY that customer's own shipments, already
+    // sanitised (no staff codes, no costs, no other customer). status.html reads it with a plain doc
+    // get and no sign-in, which is why the rule must be
+    //   match /portal/{token} { allow get: if true; allow list: if false; allow write: if request.auth != null; }
+    // get-only + list denied ⇒ the link is the secret and nobody can enumerate the collection.
+    window.__portal={
+      put:async(token,data)=>{await fx.setDoc(fx.doc(db,'portal',token),data);},
+      remove:async(token)=>{await fx.deleteDoc(fx.doc(db,'portal',token));}
+    };
     // AI document-reader key lives in Firestore settings/ai (team-shared, never in the public HTML)
     window.__aiKey={
       get:async()=>{const s=await fx.getDoc(fx.doc(db,'settings','ai'));return s.exists()?(s.data().key||''):'';},
