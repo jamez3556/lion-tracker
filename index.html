@@ -549,16 +549,22 @@
 
   <div id="b_pane_stelco" style="display:none">
     <div class="stats" id="b_st_stats"></div>
-    <div class="toolbar" style="justify-content:flex-end">
-      <button class="ghost" style="border:1px solid #0369a1;color:#0369a1;font-weight:700" onclick="stelcoSeaNew()">🚢 ＋ Sea shipment (BL)</button>
-      <button class="primary" onclick="stelcoNew()">＋ Add STELCO shipment</button>
+    <div class="toolbar" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;gap:8px">
+        <button id="st_md_air" class="primary" onclick="stSetMode('AIR')">✈ Air</button>
+        <button id="st_md_sea" class="ghost" onclick="stSetMode('SEA')">🚢 Sea</button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="st_add_sea" class="ghost" style="display:none;border:1px solid #0369a1;color:#0369a1;font-weight:700" onclick="stelcoSeaNew()">🚢 ＋ Sea shipment (BL)</button>
+        <button id="st_add_air" class="primary" onclick="stelcoNew()">＋ Add STELCO shipment</button>
+      </div>
     </div>
     <div class="tablewrap m-cards">
       <div class="scroll">
         <table style="min-width:980px">
           <thead><tr>
-            <th>DATE</th><th class="num">NO</th><th>TYPE</th><th>R NO</th><th>AWB / BL</th><th class="num" title="Air: weight · Sea: container sizes">KG / 📦</th>
-            <th class="num" title="Air: MACL bill · Sea: EEMAN's charge to LION">MACL / 💸</th><th class="num" title="Air: demurrage · Sea: margin (STELCO invoice − EEMAN)">DEMUR / ±</th><th>BILL NO</th><th>STATUS</th><th class="nosort actcol">ACTIONS</th>
+            <th>DATE</th><th class="num">NO</th><th>TYPE</th><th>R NO</th><th>AWB / BL</th><th class="num" id="st_th1">KG</th>
+            <th class="num" id="st_th2">MACL</th><th class="num" id="st_th3">DEMURRAGE</th><th>BILL NO</th><th>STATUS</th><th class="nosort actcol">ACTIONS</th>
           </tr></thead>
           <tbody id="b_st_tbody"></tbody>
         </table>
@@ -5279,23 +5285,38 @@ function renderSeaProfit(){
     <div class="card c-warn"><div class="n">${fmtNum(invMoney(tCost))}</div><div class="l">Paid to EEMAN</div></div>
     ${costMissing?`<div class="card c-danger"><div class="n">${costMissing}</div><div class="l">💸 EEMAN Bill Missing</div></div>`:''}`;
 }
+// Air and Sea are separate desks (user: "its better sea and air seperate") — different columns,
+// different work: air = KG/MACL/demurrage from DO snaps; sea = containers/EEMAN cost/margin.
+let stMode=localStorage.getItem('lion_st_mode')||'AIR';
+function stSetMode(m){stMode=m;try{localStorage.setItem('lion_st_mode',m);}catch(e){}renderStelcoDesk();}
 function renderStelcoDesk(){
   const tb=document.getElementById('b_st_tbody');if(!tb)return;
-  const all=stelcoRows();
+  const every=stelcoRows();
+  const all=every.filter(e=>stMode==='SEA'?e.type==='MP':e.type!=='MP');
+  const seaN=every.filter(e=>e.type==='MP').length, airN=every.length-seaN;
+  const mdA=document.getElementById('st_md_air'),mdS=document.getElementById('st_md_sea');
+  if(mdA){mdA.className=stMode==='AIR'?'primary':'ghost';mdA.textContent='✈ Air ('+airN+')';}
+  if(mdS){mdS.className=stMode==='SEA'?'primary':'ghost';mdS.textContent='🚢 Sea ('+seaN+')';}
+  const aA=document.getElementById('st_add_air'),aS=document.getElementById('st_add_sea');
+  if(aA)aA.style.display=stMode==='AIR'?'':'none';
+  if(aS)aS.style.display=stMode==='SEA'?'':'none';
+  const H=stMode==='SEA'?['📦 CONTAINERS','💸 EEMAN','MARGIN']:['KG','MACL','DEMURRAGE'];
+  ['st_th1','st_th2','st_th3'].forEach((id,i)=>{const el=document.getElementById(id);if(el)el.textContent=H[i];});
   const clearedToBill=all.filter(e=>!e.billNo&&e.status==='Cleared').length;
   const pendClear=all.filter(e=>!e.billNo&&e.status!=='Cleared').length;
   const mo=isoLocal(new Date()).slice(0,7);
   const moN=all.filter(e=>(e.date||'').slice(0,7)===mo).length;
   // sea shipments we billed STELCO for but have no outsourcer (EEMAN) charge recorded against —
   // each one is an unknown cost sitting in the margin
-  const outMissing=all.filter(e=>e.type==='MP'&&e.billNo&&!(e.outCost&&e.outCost.amt!=null)).length;
+  const outMissing=every.filter(e=>e.type==='MP'&&e.billNo&&!(e.outCost&&e.outCost.amt!=null)).length;
+  const lbl=stMode==='SEA'?'Sea':'Air';
   const st=document.getElementById('b_st_stats');
   if(st)st.innerHTML=`
     <div class="card c-warn"><div class="n">${clearedToBill}</div><div class="l">✔ Cleared — Make Bill</div></div>
     <div class="card c-danger"><div class="n">${pendClear}</div><div class="l">⏳ Pending Clearance</div></div>
-    ${outMissing?`<div class="card c-danger"><div class="n">${outMissing}</div><div class="l">💸 EEMAN Bill Missing</div></div>`:''}
+    ${stMode==='SEA'&&outMissing?`<div class="card c-danger"><div class="n">${outMissing}</div><div class="l">💸 EEMAN Bill Missing</div></div>`:''}
     <div class="card c-info"><div class="n">${moN}</div><div class="l">This Month</div></div>
-    <div class="card c-purple"><div class="n">${all.length.toLocaleString()}</div><div class="l">All STELCO Shipments</div></div>`;
+    <div class="card c-purple"><div class="n">${all.length.toLocaleString()}</div><div class="l">${lbl} STELCO Shipments</div></div>`;
   const rows=all.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||((b.fileNo||b.no||0)-(a.fileNo||a.no||0))).slice(0,80);
   document.getElementById('b_st_empty').style.display=rows.length?'none':'block';
   tb.innerHTML=rows.map(e=>{
