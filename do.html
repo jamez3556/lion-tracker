@@ -96,7 +96,7 @@
         <div class="field"><label>WEIGHT (KG)</label><input id="f_kg" type="number" step="any" min="0" inputmode="decimal" required></div>
       </div>
       <div class="grid2">
-        <div class="field"><label>CUSTOMER (optional)</label><input id="f_customer" placeholder="name on the DO"></div>
+        <div class="field"><label>CUSTOMER</label><input id="f_customer" value="STATE ELECTRIC COMPANY" placeholder="name on the DO"></div>
         <div class="field"><label>MACL BILL Rf (optional)</label><input id="f_macl" type="number" step="any" min="0" inputmode="decimal" placeholder="handling invoice total"></div>
       </div>
       <div class="field"><label>DEMURRAGE Rf (optional — the separate MACL demurrage invoice)</label><input id="f_demur" type="number" step="any" min="0" inputmode="decimal" placeholder="demurrage invoice total"></div>
@@ -404,7 +404,9 @@ window.gotPhoto=()=>{
   document.getElementById('ocrStatus').textContent='';
   document.getElementById('clrPhoto').style.display=f?'':'none';
   ocrRno='';
-  if(f)ocrRun(f); // photos AND PDFs auto-read; fills empty fields only
+  // Automatic reading is OFF here too (see the tracker): it filled wrong AWBs and blank weights off
+  // crumpled dot-matrix photos. Staff type the details. Do not re-enable without being asked.
+  if(f)document.getElementById('ocrStatus').textContent='✅ DO attached — type the details below';
 };
 window.clearPhoto=()=>{
   document.getElementById('f_photo').value='';
@@ -460,7 +462,7 @@ window.saveSnap=async ev=>{
     photoFile=null;extras=[];renderExtras();
     document.getElementById('f_photo').value='';document.getElementById('f_more').value='';
     document.getElementById('f_awb').value='';document.getElementById('f_kg').value='';
-    document.getElementById('f_customer').value='';document.getElementById('f_macl').value='';
+    document.getElementById('f_customer').value='STATE ELECTRIC COMPANY';document.getElementById('f_macl').value='';
     document.getElementById('f_demur').value='';
     window.gotPhoto();
     toast('✅ Sent — the office will bill it now');
