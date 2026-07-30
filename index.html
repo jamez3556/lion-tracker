@@ -3551,6 +3551,21 @@ function qbItemId(name,type){
   const m=QB_ITEMS[(name||'').trim().toLowerCase()];
   return m?(type==='MP'?m.sea:m.air):'';
 }
+// QuickBooks rejects an invoice whose billing-email field is longer than 100 characters — the whole
+// Zap dies with "You cannot enter more than 100 characters in the billing_email field" and the invoice
+// is never created. STELCO's four addresses came to 110. Keep WHOLE addresses that fit, in order, and
+// say which ones were left off; never send a chopped-off address.
+const QB_EMAIL_MAX=100;
+function qbEmails(raw){
+  const parts=String(raw||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean);
+  const kept=[];let len=0;
+  for(const p of parts){
+    const add=(kept.length?1:0)+p.length;
+    if(len+add>QB_EMAIL_MAX)continue;      // skip this one, a later shorter address may still fit
+    kept.push(p);len+=add;
+  }
+  return {emails:kept.join(','),dropped:parts.filter(p=>!kept.includes(p))};
+}
 function invMoney(n){return Math.round((Number(n)||0)*100)/100;}
 function invFmt(n){return Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function invLineRow(o){
@@ -3789,11 +3804,14 @@ function sendInvoice(){
   // up to 4 supporting documents ride the invoice — listed in the review box below, and they decide
   // which create-invoice Zap this goes to
   const atts=(e.attachments||[]).slice(0,4);
+  const mail=qbEmails(document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com');
+  if(!mail.emails)mail.emails='jaamiz25@gmail.com';   // every address was too long — still email someone
   if(!confirm(
     'SEND THIS INVOICE TO QUICKBOOKS?\n\n'+
     (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
     'Invoice '+(bn||'(QuickBooks will assign the next number)')+'    '+(e.type==='MP'?'BL ':'AWB ')+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
-    'Email to: '+(document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com (no customer email)')+'\n'+
+    'Email to: '+mail.emails+'\n'+
+    (mail.dropped.length?('⚠ Left off (QuickBooks allows only 100 characters of email): '+mail.dropped.join(', ')+'\n'):'')+
     (atts.length?('Attached: '+atts.map(a=>a.name).join(', ')+'   (goes out WITH the invoice email)\n')
                 :'Attached: nothing — 📎 on the row first if a document should go with it\n')+
     '------------------------------------------\n'+
@@ -3830,8 +3848,9 @@ function sendInvoice(){
     shipmentType:e.type||'',date:e.date||'',billNo:bn,
     currency:curr,                                 // MVR unless the customer is billed in another currency (Seaside = USD)
     autoNumber:bn?false:true,                      // → Zapier "Auto Generate Invoice Number" (real boolean — the string 'true' was ignored by QuickBooks)
-    // invoice To address: typed/looked-up customer email, else your own — so the send step ALWAYS emails someone
-    customerEmail:document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com',
+    // invoice To address: typed/looked-up customer email, else your own — so the send step ALWAYS emails
+    // someone. Capped to 100 characters of WHOLE addresses (QuickBooks rejects the invoice otherwise).
+    customerEmail:mail.emails,
     memo:document.getElementById('inv_memo').value.trim(),
     lines:lines,                                   // [{item, description, qty, rate, amount, taxable, taxCode}]
     taxableSubtotal:inv.taxable,nonTaxSubtotal:inv.nontax,
@@ -3885,7 +3904,7 @@ function updateInvoice(){
     fetch(ZAPIER_UPDATE_URL,{method:'POST',body:JSON.stringify({
       event:'invoice_update',billNo:bn,entryId:e.id,
       customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
-      shipmentType:e.type||'',customerEmail:document.getElementById('inv_email').value.trim(),
+      shipmentType:e.type||'',customerEmail:qbEmails(document.getElementById('inv_email').value.trim()).emails,
       memo:document.getElementById('inv_memo').value.trim(),
       lines:inv.lines,
       taxableSubtotal:inv.taxable,nonTaxSubtotal:inv.nontax,
@@ -3907,7 +3926,7 @@ function resendInvoice(){
   const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
   const bn=document.getElementById('inv_billNo').value.trim();
   if(!bn){toast('No invoice number yet — send it to QuickBooks first');document.getElementById('inv_billNo').focus();return;}
-  const em=document.getElementById('inv_email').value.trim();
+  const em=qbEmails(document.getElementById('inv_email').value.trim()).emails;
   if(!ZAPIER_RESEND_URL){toast('Resend not set up yet — the resend webhook URL is missing');return;}
   if(!confirm(
     'RESEND INVOICE '+bn+'\n\n'+
