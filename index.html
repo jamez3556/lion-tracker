@@ -515,8 +515,9 @@
         <span style="font-size:11.5px;color:var(--muted)">Optional. Fills empty boxes only — always check what it puts in.</span>
       </div>
       <div id="b_verify"></div>
+      <div id="b_dup"></div>
       <div class="grid3">
-        <div class="field"><label>AWB NO *</label><input id="b_awb" placeholder="e.g. 898-81050141"></div>
+        <div class="field"><label>AWB NO *</label><input id="b_awb" placeholder="e.g. 898-81050141" oninput="bDupCheck()"></div>
         <div class="field"><label>WEIGHT (KG) *</label><input id="b_kg" type="number" step="any" min="0" inputmode="decimal"></div>
         <div class="field"><label>CUSTOMER</label>
           <div style="display:flex;gap:6px;align-items:center">
@@ -4289,7 +4290,8 @@ function renderDoQueue(){
         :`<a href="${esc(ph.url)}" target="_blank" rel="noopener" title="Open the DO photo"><img src="${esc(ph.url)}" alt="DO" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"></a>`):''}
       <div style="flex:1;min-width:0;font-size:13px">
         <div style="font-weight:800;font-size:14px">${esc(dp.awb)} · ${Number(dp.kg)||'—'} kg${dp.rNo?' · R '+esc(dp.rNo):''}
-          ${billed?`<span style="color:#16a34a;font-size:11.5px;font-weight:800;margin-left:6px">✅ BILLED${dp.billNo?' · '+esc(dp.billNo):''}</span>`:''}</div>
+          ${billed?`<span style="color:#16a34a;font-size:11.5px;font-weight:800;margin-left:6px">✅ BILLED${dp.billNo?' · '+esc(dp.billNo):''}</span>`:''}
+          ${dosnaps.filter(o=>awbDigits(o.awb)===awbDigits(dp.awb)).length>1?`<span style="color:#dc2626;font-size:11.5px;font-weight:800;margin-left:6px" title="Another DO snap has this same AWB — check whether one should be deleted">⚠ SAME AWB TWICE</span>`:''}</div>
         <div style="color:var(--muted);margin:2px 0">${esc(dp.customer||'')}${dp.customer?' · ':''}${fmtDate(dp.date)} ${esc(dp.time||'')} · by ${esc(dp.by||'—')}${dp.macl?' · MACL <b>'+Number(dp.macl).toLocaleString()+'</b>':''}${dp.demur?' · Demurrage <b>'+Number(dp.demur).toLocaleString()+'</b>':''}${(dp.photos||[]).length>1?' · 📎 '+dp.photos.length+' photos':''}</div>
         ${extras?`<div style="color:#b45309;font-weight:600">＋ ${extras}</div>`:''}
         <div style="margin-top:3px">${matchTxt}</div>
@@ -4400,6 +4402,7 @@ function bToggleCapture(){
     document.getElementById('b_custList').style.display='none';
     window.__bRno='';window.__bReads={};bExtras=[];bExList();['do','macl','dem','awb'].forEach(bPickLabel);
     document.getElementById('b_verify').innerHTML='';
+    document.getElementById('b_dup').innerHTML='';
     document.getElementById('b_capStatus').textContent='';
     setTimeout(()=>document.getElementById('b_awb').focus(),50);
   }
@@ -4469,6 +4472,31 @@ function bPick(slot){
   const name={do:'DO / Pick Order',macl:'MACL bill',dem:'Demurrage bill',awb:'AWB'}[slot]||'Document';
   st.textContent='✅ '+name+' attached — type the details, or tap 🤖 to have them read';
 }
+/* ── SAME AWB TWICE ──────────────────────────────────────────────────────────
+   Two identical snaps a minute apart is an easy mistake on a phone (double tap, or two staff doing
+   the same DO). The app does NOT block it — sometimes the second one is deliberate — but it says so
+   while the AWB is being typed AND asks for a confirmation before saving, so a human decides. */
+const awbDigits=v=>String(v||'').replace(/\D/g,'');
+function bDupInfo(awb){
+  const d=awbDigits(awb);
+  const hits=[];
+  if(d.length<6)return hits;
+  dosnaps.filter(s=>awbDigits(s.awb)===d).forEach(s=>{
+    hits.push('DO snap · '+(s.kg?s.kg+' kg · ':'')+(s.customer||'')+' · '+fmtDate(s.date)+(s.time?' '+s.time:'')+(s.by?' by '+s.by:''));
+  });
+  entries.filter(e=>awbDigits(e.awbBl)===d).forEach(e=>{
+    hits.push('Form Log '+(e.no?'NO '+e.no:'(billing only)')+' · '+(e.customer||'')+(e.billNo?' · billed '+e.billNo:' · not billed'));
+  });
+  return hits;
+}
+function bDupCheck(){
+  const box=document.getElementById('b_dup');if(!box)return;
+  const hits=bDupInfo(document.getElementById('b_awb').value);
+  box.innerHTML=hits.length?
+    '<div style="color:#dc2626;font-weight:700;font-size:12.5px;margin:2px 0 6px;line-height:1.55">⚠ This AWB is already in the system'+(hits.length>1?' ('+hits.length+' times)':'')+':<br>'
+      +hits.slice(0,4).map(h=>'&nbsp;• '+esc(h)).join('<br>')
+      +'<br><span style="font-weight:600;color:#b45309">Check it is not the same shipment twice before saving.</span></div>':'';
+}
 // Which fields each slot is allowed to fill. MACL/demurrage tax invoices carry the MASTER
 // consolidator's name and master AWB, so only bill amounts come from those slots; the AWB, weight and
 // name come from the Pick Order and the AWB document.
@@ -4498,7 +4526,7 @@ async function bReadAll(){
       if(p)window.__bReads[s]=p;else delete window.__bReads[s];
       ocrFill(p,B_READ_MAPS[s]||B_READ_MAPS.do,st);
     }
-    bVerifyDocs();
+    bVerifyDocs();bDupCheck();
   }finally{btn.disabled=false;}
 }
 // Cross-check the AWB/HAWB numbers read from every attached document. House and master numbers
@@ -4976,6 +5004,9 @@ async function bSnapSave(){
   const fDo=document.getElementById('b_ph_do').files[0];
   if(!fDo){toast('Take the DO / Pick Order photo first');return;}
   if(!awb||!kg){toast('AWB and weight are required');return;}
+  const dup=bDupInfo(awb);
+  if(dup.length&&!confirm('⚠ AWB '+awb+' is already in the system:\n\n'+dup.slice(0,5).map(h=>'  • '+h).join('\n')
+      +'\n\nSaving now makes ANOTHER record for the same AWB.\n\nSave it anyway?'))return;
   if(!window.__att){toast('Cloud storage not ready — needs internet and sign-in');return;}
   const btn=document.getElementById('b_saveBtn'),st=document.getElementById('b_capStatus');
   btn.disabled=true;
