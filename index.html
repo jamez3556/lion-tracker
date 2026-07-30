@@ -858,7 +858,7 @@
 <div class="overlay" id="overlay-msgs">
   <div class="modal" style="max-width:640px">
     <h2>💬 Customer Messages</h2>
-    <div style="font-size:12.5px;color:var(--muted);margin:-6px 0 12px">Sent by customers from their status page.</div>
+    <div style="font-size:12.5px;color:var(--muted);margin:-6px 0 12px">Sent by customers from their status page. Read messages stay in this list until you delete them — the 💬 card on the Form Log always opens it.</div>
     <div id="msg_list" style="max-height:60vh;overflow:auto"></div>
     <div class="actions"><button type="button" class="ghost" onclick="closeModal('overlay-msgs')">Close</button></div>
   </div>
@@ -1379,7 +1379,7 @@ function renderEntries(){
   const dpPend=dosnaps.filter(d=>d.status==='pending').length;
   const stuckN=entries.filter(invStuck).length;   // invoice sent, number never came back = a failed Zap
   document.getElementById('e_stats').innerHTML=`
-    ${msgUnread()?`<div class="card c-info" style="cursor:pointer;outline:2px solid #FF4F00" onclick="openMsgs()" title="Messages your customers sent from their status page"><div class="n">${msgUnread()}</div><div class="l">💬 Customer Messages</div></div>`:''}
+    ${portalMsgs.length?`<div class="card c-info" style="cursor:pointer${msgUnread()?';outline:2px solid #FF4F00':''}" onclick="openMsgs()" title="Messages your customers sent from their status page — read ones stay here until you delete them"><div class="n">${msgUnread()||portalMsgs.length}</div><div class="l">💬 ${msgUnread()?'New Messages':'Messages'}</div></div>`:''}
     ${dpPend?`<div class="card c-danger" style="cursor:pointer" onclick="openDoQueue()" title="DO photos from the airport waiting to be billed — click to open the queue"><div class="n">${dpPend}</div><div class="l">📸 DO to Bill</div></div>`:''}
     <div class="card c-warn"><div class="n">${pending.toLocaleString()}</div><div class="l">Pending</div></div>
     <div class="card c-danger" style="cursor:pointer" onclick="showInvoicePending()" title="Entries with no BILL NO — click to list them"><div class="n">${invPending.toLocaleString()}</div><div class="l">🧾 Invoice Pending</div></div>
