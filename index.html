@@ -379,6 +379,7 @@
           <th data-k="pkgs" class="num">PKGS <span class="arrow">▲▼</span></th>
           <th data-k="awbBl">AWB / BL NO <span class="arrow">▲▼</span></th>
           <th data-k="status">STATUS <span class="arrow">▲▼</span></th>
+          <th class="num nosort mp-admin" id="mp_th_eeman" style="display:none" title="EEMAN's clearance charge to LION (internal — admin only)">💸 EEMAN</th>
           <th data-k="mpRemark">REMARK <span class="arrow">▲▼</span></th>
           <th class="nosort actcol"></th>
         </tr></thead>
@@ -2275,6 +2276,7 @@ function renderMP(){
     <div class="card c-purple"><div class="n">${billed.toLocaleString()}</div><div class="l">Billed (done)</div></div>`;
   const rows=filteredMP();
   const slice=rows.slice((mpState.page-1)*PAGE_SIZE,mpState.page*PAGE_SIZE);
+  const the=document.getElementById('mp_th_eeman');if(the)the.style.display=isAdmin()?'':'none';
   document.getElementById('mp_empty').style.display=rows.length===0?'block':'none';
   document.getElementById('mp_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}">
     <td class="num" data-l="No">${r.no??'—'}</td>
@@ -2289,6 +2291,11 @@ function renderMP(){
     <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
     <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
+    ${isAdmin()?`<td class="num" data-l="💸 EEMAN">${(r.outCost&&r.outCost.amt!=null)
+      ?`<span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stOut('${jatt(r.id)}')" title="EEMAN's charge${r.outCost.inv?' · his inv '+esc(r.outCost.inv):''} — click to change">${fmtNum(r.outCost.amt)}</span>`
+      :(r.status==='Cleared'||r.status==='Delivered'||r.billNo)
+        ?`<span style="cursor:pointer;color:#dc2626;font-weight:700;border-bottom:1px dashed #dc2626" onclick="stOut('${jatt(r.id)}')" title="Cleared, but EEMAN's charge not recorded — type it from his bill">＋ missing</span>`
+        :`<span style="cursor:pointer;color:#94a3b8;border-bottom:1px dashed #94a3b8" onclick="stOut('${jatt(r.id)}')" title="Not cleared yet — his bill is not expected">＋</span>`}</td>`:''}
     <td data-l="Remark"><input class="mpremark" value="${esc(r.mpRemark)}" placeholder="Add remark…" onchange="setMpRemark('${jatt(r.id)}',this.value)"></td>
     <td class="actcol"><div class="rowact">
       <button class="iconbtn" onclick="openEntryForm('${jatt(r.id)}')" title="Edit">✏️</button>
@@ -5185,13 +5192,13 @@ function stOut(id){ // 💸 — what EEMAN (the outsourcer) bills LION for this 
   const cur=e.outCost||{};
   const v=prompt("EEMAN's charge for this clearance, MVR (from their sheet — blank = not billed yet):",cur.amt!=null?cur.amt:'');
   if(v===null)return;
-  if(v.trim()===''){delete e.outCost;saveEntries();renderStelcoDesk();if(typeof renderSeaProfit==='function'&&bTab==='profit')renderSeaProfit();toast('Outsourcer charge cleared');return;}
+  if(v.trim()===''){delete e.outCost;saveEntries();renderStelcoDesk();renderMP();if(typeof renderSeaProfit==='function'&&bTab==='profit')renderSeaProfit();toast('Outsourcer charge cleared');return;}
   const n=Number(v.replace(/[^\d.]/g,''));
   if(!isFinite(n)||n<0){toast('Enter a number');return;}
   const inv=prompt("EEMAN's invoice / reference number (optional):",cur.inv||'');
   e.outCost={amt:n};
   if(inv&&inv.trim())e.outCost.inv=inv.trim();
-  saveEntries();renderStelcoDesk();if(typeof renderSeaProfit==='function'&&bTab==='profit')renderSeaProfit();
+  saveEntries();renderStelcoDesk();renderMP();if(typeof renderSeaProfit==='function'&&bTab==='profit')renderSeaProfit();
   toast('💸 EEMAN '+fmtNum(n)+' recorded — internal only, never on the customer invoice');
 }
 // staff button: Pending ↔ Cleared on the STELCO desk (any signed-in user).
