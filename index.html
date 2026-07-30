@@ -549,14 +549,15 @@
   <div id="b_pane_stelco" style="display:none">
     <div class="stats" id="b_st_stats"></div>
     <div class="toolbar" style="justify-content:flex-end">
+      <button class="ghost" style="border:1px solid #0369a1;color:#0369a1;font-weight:700" onclick="stelcoSeaNew()">🚢 ＋ Sea shipment (BL)</button>
       <button class="primary" onclick="stelcoNew()">＋ Add STELCO shipment</button>
     </div>
     <div class="tablewrap m-cards">
       <div class="scroll">
         <table style="min-width:980px">
           <thead><tr>
-            <th>DATE</th><th class="num">NO</th><th>TYPE</th><th>R NO</th><th>AWB / BL</th><th class="num">KG</th>
-            <th class="num">MACL</th><th class="num">DEMURRAGE</th><th>BILL NO</th><th>STATUS</th><th class="nosort actcol">ACTIONS</th>
+            <th>DATE</th><th class="num">NO</th><th>TYPE</th><th>R NO</th><th>AWB / BL</th><th class="num" title="Air: weight · Sea: container sizes">KG / 📦</th>
+            <th class="num" title="Air: MACL bill · Sea: EEMAN's charge to LION">MACL / 💸</th><th class="num" title="Air: demurrage · Sea: margin (STELCO invoice − EEMAN)">DEMUR / ±</th><th>BILL NO</th><th>STATUS</th><th class="nosort actcol">ACTIONS</th>
           </tr></thead>
           <tbody id="b_st_tbody"></tbody>
         </table>
@@ -1591,7 +1592,7 @@ function saveEntry(e){
   // side-channel fields not on this form (documents, fetched QuickBooks invoice, payments received) — never lose them on an edit
   // qbInvoiced/qbInvoicedAt MUST survive an edit — losing them removes the "already sent to
   // QuickBooks" warning and the next press of 🧾 silently creates a DUPLICATE invoice.
-  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec','qbInvoiced','qbInvoicedAt','qbSentMs'].forEach(k=>{
+  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec','qbInvoiced','qbInvoicedAt','qbSentMs','seaCont','outCost','demur'].forEach(k=>{
     if(prevEntry[k]!==undefined)rec[k]=prevEntry[k];
   });
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
@@ -3422,7 +3423,19 @@ function custCurrency(cust){return (cust&&cust.currency)||'MVR';}
 // null when the shipment has no container record yet (then size lines are left as the template has them).
 function contSizeCounts(e){
   const c=containers.find(x=>x.entryId===e.id);
-  if(!c||!c.portInfo)return null;
+  if(!c||!c.portInfo){
+    // billing-only sea shipments (STELCO desk quick-add) have no Container Status record —
+    // their sizes live on the entry itself, typed via the desk's 📦 button (stSeaCont)
+    const s=e.seaCont;
+    if(s&&(s["40'"]||s["20'"]||s.LCL)){
+      const out={};
+      if(s["40'"])out["40'"]=Number(s["40'"]);
+      if(s["20'"])out["20'"]=Number(s["20'"]);
+      if(s.LCL)out.LCL=Number(s.LCL);
+      return out;
+    }
+    return null;
+  }
   const out={};let any=false;
   Object.keys(c.portInfo).forEach(k=>{
     let s=String(c.portInfo[k].size||'').toUpperCase().replace(/\s+/g,'');
@@ -3446,9 +3459,11 @@ function tmplLines(tpl,e,pay){
     }
     // "Clearance 20' / 40' / LCL" lines: qty = how many containers of that size this shipment has.
     // Sizes the shipment doesn't have are dropped, so the invoice only lists what was actually cleared.
-    const m=/(20'|40'HC|40'|LCL)$/i.exec(o.desc.replace(/\s+/g,''));
+    const m=/(20'|40'HC|40'|LCL|20FCL|40FCL)$/i.exec(o.desc.replace(/\s+/g,''));
     if(m&&sizes){
-      let k=m[1].toUpperCase();if(k==="40'HC")k="40'";
+      let k=m[1].toUpperCase();
+      if(k==="40'HC"||k==='40FCL')k="40'";
+      if(k==='20FCL')k="20'";
       const n=sizes[k]||0;
       if(!n)return;
       o.qty=n;
@@ -3517,6 +3532,22 @@ function seedSeaside(){
   c.currency='USD';
   if(!c.qbName)c.qbName='Seaside Finolhu Maldives Pvt Ltd';
   if(!c.billEmail)c.billEmail='waleed@finolhu.mv';
+  saveCustomers();
+  return 1;
+}
+// STELCO sea bills on their agreed QuickBooks recurring-template rates ("Stelco Sea shipment"):
+// MPL Clearance per container size, 8% GST, nothing else — clearance is outsourced (no customs form),
+// so no Form Filling / Processing lines. Qty auto-fills from the shipment's container sizes (tmplLines);
+// change a rate once here — or edit in the builder and "📋 Save as this customer's format".
+const STELCO_SEA_TEMPLATE=[
+  {name:'MPL Clearance', desc:'Clearance 40 FCL', qty:1,rate:3500,tax:8},
+  {name:'MPL Clearance', desc:'Clearance 20 FCL', qty:1,rate:1000,tax:8},
+  {name:'MPL Clearance', desc:'Clearance LCL',    qty:1,rate:500, tax:8}
+];
+function seedStelcoSea(){
+  const c=lookupCustomer(stelcoCno());
+  if(!c||c.mpTemplate)return 0;
+  c.mpTemplate=STELCO_SEA_TEMPLATE.map(l=>Object.assign({},l));
   saveCustomers();
   return 1;
 }
@@ -5071,6 +5102,58 @@ function stelcoNew(){ // add a STELCO shipment straight from the desk — pre-fi
   document.getElementById('e_cno').value=(c&&c.cno)||cno;
   document.getElementById('e_customer').value=(c&&c.name)||'STATE ELECTRIC CO LTD';
 }
+/* ── STELCO SEA (outsourced clearance) ───────────────────────────────────────
+   Sea shipments are BILLING-ONLY: no customs form is filled (clearance outsourced to EEMAN), so no
+   NO / FILE serial. Add with 🚢 (BL + date), set container sizes with 📦, mark Cleared, Bill — the
+   invoice lines come from STELCO's agreed sea template (Clearance 40 FCL 3,500 / 20 FCL 1,000 /
+   LCL 500, +8% GST) with quantities from the sizes. EEMAN's charge is typed per shipment (💸) for
+   margin + "their bill is missing" tracking; it never appears on the STELCO invoice. */
+function stelcoSeaNew(){
+  const cno=stelcoCno();
+  const c=customers.find(x=>(x.cno||'').toUpperCase()===cno);
+  openEntryForm(null,'MP');
+  document.getElementById('e_billOnly').checked=true;toggleBillOnly();
+  document.getElementById('e_cno').value=(c&&c.cno)||cno;
+  document.getElementById('e_customer').value=(c&&c.name)||'STATE ELECTRIC CO LTD';
+  setTimeout(()=>{const b=document.getElementById('e_awbBl');if(b)b.focus();},60);
+  toast('Type the BL number and save — then set the container sizes with 📦 on the desk');
+}
+function seaContLabel(e){
+  const s=contSizeCounts(e);
+  if(!s)return '';
+  return ["40'","20'",'LCL'].filter(k=>s[k]).map(k=>s[k]+'×'+k).join(' + ');
+}
+function stSeaCont(id){ // 📦 — how many of each size (drives the invoice quantities)
+  const e=entries.find(x=>x.id===id);if(!e)return;
+  const cur=e.seaCont||{};
+  const ask=(label,curV)=>{
+    const v=prompt(label+' (blank = none):',curV||'');
+    if(v===null)return undefined;                       // Cancel anywhere = abort, change nothing
+    const n=v.trim()===''?0:Number(v);
+    return (isFinite(n)&&n>=0)?n:0;
+  };
+  const f40=ask("How many 40' containers?",cur["40'"]);if(f40===undefined)return;
+  const f20=ask("How many 20' containers?",cur["20'"]);if(f20===undefined)return;
+  const lcl=ask('LCL shipments? (usually 1)',cur.LCL);if(lcl===undefined)return;
+  if(!f40&&!f20&&!lcl){delete e.seaCont;}
+  else{e.seaCont={};if(f40)e.seaCont["40'"]=f40;if(f20)e.seaCont["20'"]=f20;if(lcl)e.seaCont.LCL=lcl;}
+  saveEntries();renderStelcoDesk();
+  toast(e.seaCont?('📦 '+seaContLabel(e)+' — the bill will use these quantities'):'Container sizes cleared');
+}
+function stOut(id){ // 💸 — what EEMAN (the outsourcer) bills LION for this clearance. Internal only.
+  const e=entries.find(x=>x.id===id);if(!e)return;
+  const cur=e.outCost||{};
+  const v=prompt("EEMAN's charge for this clearance, MVR (from their sheet — blank = not billed yet):",cur.amt!=null?cur.amt:'');
+  if(v===null)return;
+  if(v.trim()===''){delete e.outCost;saveEntries();renderStelcoDesk();toast('Outsourcer charge cleared');return;}
+  const n=Number(v.replace(/[^\d.]/g,''));
+  if(!isFinite(n)||n<0){toast('Enter a number');return;}
+  const inv=prompt("EEMAN's invoice / reference number (optional):",cur.inv||'');
+  e.outCost={amt:n};
+  if(inv&&inv.trim())e.outCost.inv=inv.trim();
+  saveEntries();renderStelcoDesk();
+  toast('💸 EEMAN '+fmtNum(n)+' recorded — internal only, never on the STELCO invoice');
+}
 // staff button: Pending ↔ Cleared on the STELCO desk (any signed-in user).
 // Cleared = "clearance done, ready to bill"; billing then locks it to Delivered (existing invoice rule).
 function stelcoToggleClear(id){
@@ -5114,6 +5197,8 @@ function stelcoBill(entryId){
   const dp=dosnaps.find(d=>d.entryId===entryId);
   if(dp){dpBill(dp.id);return;}
   const e=entries.find(x=>x.id===entryId);if(!e)return;
+  // sea: the sizes ARE the invoice — without them every Clearance line would bill at qty 1
+  if(e.type==='MP'&&!contSizeCounts(e)){toast('📦 Set the container sizes first — they decide the invoice');stSeaCont(e.id);if(!contSizeCounts(e))return;}
   openInvoiceForm(e.id);
   if(!e.qbInvoiced&&!(e.qbLines&&e.qbLines.length)&&Number(e.demur)){
     invAddLine({name:'Storage Fee (Air)',qty:1,rate:Number(e.demur),tax:0});
@@ -5127,10 +5212,14 @@ function renderStelcoDesk(){
   const pendClear=all.filter(e=>!e.billNo&&e.status!=='Cleared').length;
   const mo=isoLocal(new Date()).slice(0,7);
   const moN=all.filter(e=>(e.date||'').slice(0,7)===mo).length;
+  // sea shipments we billed STELCO for but have no outsourcer (EEMAN) charge recorded against —
+  // each one is an unknown cost sitting in the margin
+  const outMissing=all.filter(e=>e.type==='MP'&&e.billNo&&!(e.outCost&&e.outCost.amt!=null)).length;
   const st=document.getElementById('b_st_stats');
   if(st)st.innerHTML=`
     <div class="card c-warn"><div class="n">${clearedToBill}</div><div class="l">✔ Cleared — Make Bill</div></div>
     <div class="card c-danger"><div class="n">${pendClear}</div><div class="l">⏳ Pending Clearance</div></div>
+    ${outMissing?`<div class="card c-danger"><div class="n">${outMissing}</div><div class="l">💸 EEMAN Bill Missing</div></div>`:''}
     <div class="card c-info"><div class="n">${moN}</div><div class="l">This Month</div></div>
     <div class="card c-purple"><div class="n">${all.length.toLocaleString()}</div><div class="l">All STELCO Shipments</div></div>`;
   const rows=all.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||((b.fileNo||b.no||0)-(a.fileNo||a.no||0))).slice(0,80);
@@ -5148,9 +5237,16 @@ function renderStelcoDesk(){
       <td data-l="Type">${e.type?`<span class="typechip">${esc(e.type)}</span>`:'—'}</td>
       <td data-l="R No">${esc(e.rNo)||'—'}</td>
       <td data-l="AWB / BL">${esc(e.awbBl)||'—'}</td>
-      <td class="num" data-l="KG">${fmtNum(e.grsWt)}${below&&e.type==='AP'?' <span style="font-size:10px;color:#0369a1;font-weight:700">≤50 pass-through only</span>':''}</td>
+      ${e.type==='MP'?(()=>{
+        const cLbl=seaContLabel(e);
+        const out=(e.outCost&&e.outCost.amt!=null)?e.outCost.amt:null;
+        const margin=(out!=null&&e.qbTotal!=null)?Number(e.qbTotal)-Number(out):null;
+        return `<td data-l="Containers"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8;${cLbl?'font-weight:700':''}" onclick="stSeaCont('${e.id}')" title="Container sizes — these decide the invoice quantities">📦 ${cLbl||'set sizes'}</span></td>
+      <td class="num" data-l="EEMAN"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stOut('${e.id}')" title="EEMAN's charge to LION for this clearance (internal — never billed to STELCO)${e.outCost&&e.outCost.inv?' · their inv '+esc(e.outCost.inv):''}">💸 ${out!=null?fmtNum(out):'＋'}</span></td>
+      <td class="num" data-l="Margin">${margin!=null?`<span style="font-weight:800;color:${margin>=0?'#16a34a':'#dc2626'}" title="STELCO invoice ${fmtNum(e.qbTotal)} − EEMAN ${fmtNum(out)}">${margin>=0?'+':''}${fmtNum(margin)}</span>`:'<span class="d-none">—</span>'}</td>`;})():
+      `<td class="num" data-l="KG">${fmtNum(e.grsWt)}${below&&e.type==='AP'?' <span style="font-size:10px;color:#0369a1;font-weight:700">≤50 pass-through only</span>':''}</td>
       <td class="num" data-l="MACL"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stMacl('${e.id}')" title="Click to type the MACL amount from the tax invoice">${macl!=null?fmtNum(macl):'＋'}</span></td>
-      <td class="num" data-l="Demurrage"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stDemur('${e.id}')" title="Click to type the demurrage amount">${dem!=null?fmtNum(dem):'＋'}</span></td>
+      <td class="num" data-l="Demurrage"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stDemur('${e.id}')" title="Click to type the demurrage amount">${dem!=null?fmtNum(dem):'＋'}</span></td>`}
       <td data-l="Bill No">${esc(e.billNo)||'—'}</td>
       <td data-l="Status">${e.billNo
         ?'<span style="color:#16a34a;font-weight:800">✅ Delivered</span>'
@@ -5908,6 +6004,11 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
   if(localStorage.getItem('lion_profile_seed_v9'))return;
   if(seedSeaside())toast('📋 SEASIDE FINOLHU sea invoice format loaded (USD)');
   localStorage.setItem('lion_profile_seed_v9','1');
+})();
+(()=>{ // seed v10 — STELCO sea invoice format (agreed recurring-template rates, per container size).
+  // Flag is set ONLY on success so a device that boots before the customer list arrives retries next boot.
+  if(localStorage.getItem('lion_profile_seed_v10'))return;
+  if(seedStelcoSea()){toast('🚢 STELCO sea invoice format loaded');localStorage.setItem('lion_profile_seed_v10','1');}
 })();
 (()=>{ // seed v5 — STELCO's EXACT QuickBooks display name (Find Customer is case-sensitive;
   // sending the tracker's "STATE ELECTRIC CO LTD" created a duplicate QB customer)
