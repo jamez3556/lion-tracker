@@ -13,12 +13,13 @@
 *{box-sizing:border-box}
 body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
   background:var(--bg);color:var(--ink);-webkit-text-size-adjust:100%}
-header{background:#0f172a;color:#fff;padding:16px 18px}
-.hwrap{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.logo{width:54px;height:54px;border-radius:10px;background:#fff;display:grid;place-items:center;
-  flex:0 0 auto;padding:5px}
+header{background:#0f172a;color:#fff;padding:18px;border-bottom:5px solid var(--brand)}
+.hwrap{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.logo{width:76px;height:76px;border-radius:12px;background:#fff;display:grid;place-items:center;
+  flex:0 0 auto;padding:7px}
 .logo img{width:100%;height:100%;object-fit:contain;display:block}
-h1{font-size:17px;margin:0;font-weight:800;letter-spacing:.01em}
+h1{font-size:22px;margin:0;font-weight:800;letter-spacing:.02em}
+h1 span{color:var(--brand)}
 .sub{font-size:12px;color:#94a3b8;margin-top:1px}
 main{max-width:900px;margin:0 auto;padding:16px 14px 60px}
 .who{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
@@ -57,7 +58,8 @@ table.ctn th{text-align:left;color:var(--muted);font-size:10px;text-transform:up
 table.ctn td{padding:5px 6px;border-bottom:1px solid #f1f5f9}
 .scroll{overflow-x:auto}
 .msg{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:26px 20px;text-align:center;color:var(--muted)}
-.note{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:16px}
+.note{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--brand);
+  border-radius:12px;padding:14px 16px;margin:0 0 16px}
 .note h2{font-size:14px;margin:0 0 3px;font-weight:800}
 .note p{margin:0 0 10px;font-size:12.5px;color:var(--muted)}
 .note textarea{width:100%;min-height:78px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;
@@ -82,7 +84,7 @@ a{color:var(--brand)}
 <body>
 <header><div class="hwrap">
   <div class="logo"><img src="logo.png" alt="LION Logistics"></div>
-  <div><h1>LION LOGISTICS</h1><div class="sub">Shipment &amp; customs clearance status</div></div>
+  <div><h1>LI<span>O</span>N LOGISTICS</h1><div class="sub">Shipment &amp; customs clearance status</div></div>
 </div></header>
 <main id="main"><div class="msg">Loading your shipments…</div></main>
 <footer id="foot"></footer>
@@ -244,11 +246,10 @@ function render(d){
     ${owed>0?`<div class="who" style="border-color:#fecaca;background:#fef2f2;color:#b91c1c">
         <div class="k" style="color:#b91c1c">Outstanding balance</div><b>${money(owed)}</b>
         <div style="font-size:12.5px;margin-top:2px">across ${unpaid.length} invoice${unpaid.length===1?'':'s'}</div></div>`:''}`;
-  h+=ships.length?ships.slice().sort(sortShips).map(shipCard).join(''):'<div class="msg">No shipments on this account yet.</div>';
-  // Message box — goes straight to the LION Logistics team, no email address needed from either side
+  // Message box sits ABOVE the shipment list — at the bottom of a long list nobody ever found it
   h+=`<div class="note">
-      <h2>Send us a message</h2>
-      <p>A question or instruction about a shipment? Write it here and our team will see it.</p>
+      <h2>💬 Send us a message</h2>
+      <p>A question or instruction about a shipment? Write it here and our team will see it straight away.</p>
       <select id="m_ship"><option value="">General message — not about one shipment</option>${
         ships.slice().sort(sortShips).map(s=>`<option value="${esc(s.awbBl||s.blNo||'')}">${esc((s.type==='MP'?'BL ':'AWB ')+(s.awbBl||s.blNo||'—'))}</option>`).join('')
       }</select>
@@ -256,6 +257,7 @@ function render(d){
       <textarea id="m_text" maxlength="900" placeholder="Type your message…"></textarea>
       <div class="row"><button id="m_send" type="button">Send</button><span id="m_said"></span></div>
     </div>`;
+  h+=ships.length?ships.slice().sort(sortShips).map(shipCard).join(''):'<div class="msg">No shipments on this account yet.</div>';
   main.innerHTML=h;
   wireMessage(d);
   document.getElementById('foot').innerHTML=
