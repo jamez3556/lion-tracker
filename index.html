@@ -3835,8 +3835,12 @@ function sendInvoice(){
     'Invoice '+(bn||'(QuickBooks will assign the next number)')+'    '+(e.type==='MP'?'BL ':'AWB ')+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
     'Email to: '+mail.emails+'\n'+
     (mail.dropped.length?('⚠ Left off (QuickBooks allows only 100 characters of email): '+mail.dropped.join(', ')+'\n'):'')+
-    (atts.length?('Attached: '+atts.map(a=>a.name).join(', ')+'   (goes out WITH the invoice email)\n')
-                :'Attached: nothing — 📎 on the row first if a document should go with it\n')+
+    (atts.length
+      ?('Attached: '+atts[0].name+'   (goes out WITH the invoice email)\n'
+        +(atts.length>1?('⚠ NOT attached: '+atts.slice(1).map(a=>a.name).join(', ')+'\n'
+          +'   QuickBooks takes ONE file per invoice. Documents added together are combined into one\n'
+          +'   PDF; these came in separately, so only the first goes. Re-attach them in one go to fix.\n'):''))
+      :'Attached: nothing — 📎 on the row first if a document should go with it\n')+
     '------------------------------------------\n'+
     summary+'\n'+
     '------------------------------------------\n'+
