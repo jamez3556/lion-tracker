@@ -90,6 +90,7 @@
           <div id="ocrStatus" class="muted" style="font-weight:600;flex:1"></div>
           <button type="button" class="ghost" id="clrPhoto" style="display:none;color:#dc2626" onclick="clearPhoto()">✕ remove</button>
         </div>
+        <button type="button" class="ghost" id="readBtn" style="display:none;margin-top:6px;border:1px solid #FF4F00;color:#FF4F00;font-weight:700" onclick="readPhoto()">🤖 Read this document for me</button>
       </div>
       <div class="grid2">
         <div class="field"><label>AWB NO</label><input id="f_awb" placeholder="e.g. 926-1234 5675" required></div>
@@ -404,9 +405,17 @@ window.gotPhoto=()=>{
   document.getElementById('ocrStatus').textContent='';
   document.getElementById('clrPhoto').style.display=f?'':'none';
   ocrRno='';
-  // Automatic reading is OFF here too (see the tracker): it filled wrong AWBs and blank weights off
-  // crumpled dot-matrix photos. Staff type the details. Do not re-enable without being asked.
-  if(f)document.getElementById('ocrStatus').textContent='✅ DO attached — type the details below';
+  // Reading is no longer automatic (see the tracker): it filled wrong AWBs and blank weights off
+  // crumpled dot-matrix photos. Staff type the details, or press 🤖 to have the document read.
+  document.getElementById('readBtn').style.display=f?'':'none';
+  if(f)document.getElementById('ocrStatus').textContent='✅ DO attached — type the details, or tap 🤖 to have it read';
+};
+window.readPhoto=async()=>{
+  const f=document.getElementById('f_photo').files[0];
+  if(!f){document.getElementById('ocrStatus').textContent='Attach the DO first';return;}
+  const b=document.getElementById('readBtn');
+  b.disabled=true;
+  try{await ocrRun(f);}finally{b.disabled=false;}
 };
 window.clearPhoto=()=>{
   document.getElementById('f_photo').value='';
