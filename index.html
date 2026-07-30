@@ -3555,6 +3555,16 @@ function qbItemId(name,type){
 // Zap dies with "You cannot enter more than 100 characters in the billing_email field" and the invoice
 // is never created. STELCO's four addresses came to 110. Keep WHOLE addresses that fit, in order, and
 // say which ones were left off; never send a chopped-off address.
+// What actually goes on the invoice. A combined "Documents ….pdf" replaces the individual files it was
+// built from and is sent FIRST, so Att 1 — the only one QuickBooks attaches — carries the whole file.
+function invoiceAttachments(e){
+  const all=e.attachments||[];
+  const covered=new Set();
+  all.forEach(a=>{if(a.combined&&Array.isArray(a.of))a.of.forEach(p=>covered.add(p));});
+  return all.filter(a=>a.combined||!covered.has(a.path))
+            .sort((a,b)=>(b.combined?1:0)-(a.combined?1:0))
+            .slice(0,4);
+}
 const QB_EMAIL_MAX=100;
 function qbEmails(raw){
   const parts=String(raw||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean);
@@ -3803,7 +3813,7 @@ function sendInvoice(){
   const curr=custCurrency(lookupCustomer(e.cno));
   // up to 4 supporting documents ride the invoice — listed in the review box below, and they decide
   // which create-invoice Zap this goes to
-  const atts=(e.attachments||[]).slice(0,4);
+  const atts=invoiceAttachments(e);
   const mail=qbEmails(document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com');
   if(!mail.emails)mail.emails='jaamiz25@gmail.com';   // every address was too long — still email someone
   if(!confirm(
@@ -4645,6 +4655,56 @@ function bShrink(file){
     img.src=url;
   });
 }
+/* ── ONE PDF PER SHIPMENT ────────────────────────────────────────────────────
+   QuickBooks' "Attach File(s)" step takes ONE file per invoice, so a shipment with a DO photo, a MACL
+   bill and an AWB only ever emailed the first of them. Fix: bind the documents into a single PDF at the
+   moment they're captured — the files are still in this browser then, which matters because Firebase
+   Storage refuses cross-origin reads, so they can NEVER be merged again after upload.
+   Photos become full pages, existing PDFs are copied in page by page, and the customer receives one
+   tidy "Documents …pdf" instead of a pile of phone snaps. */
+let __pdfLib=null;
+async function pdfLib(){
+  if(__pdfLib)return __pdfLib;
+  if(!window.PDFLib){
+    await new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+      s.onload=res;s.onerror=()=>rej(new Error('PDF tool could not load'));
+      document.head.appendChild(s);
+    });
+  }
+  return (__pdfLib=window.PDFLib);
+}
+// files: [{file, label}] — returns a Blob, or null when there's nothing to merge / the tool fails
+async function mergeDocsToPdf(items){
+  const real=items.filter(i=>i&&i.file);
+  if(real.length<2)return null;                 // one document needs no binding
+  try{
+    const {PDFDocument,StandardFonts,rgb}=await pdfLib();
+    const out=await PDFDocument.create();
+    const font=await out.embedFont(StandardFonts.Helvetica);
+    for(const it of real){
+      const buf=await it.file.arrayBuffer();
+      if(bIsPdf(it.file)){
+        const src=await PDFDocument.load(buf,{ignoreEncryption:true});
+        const pages=await out.copyPages(src,src.getPageIndices());
+        pages.forEach(p=>out.addPage(p));
+        continue;
+      }
+      // image → one page sized to the picture, with its slot name printed at the top
+      let img;
+      try{img=await out.embedJpg(buf);}catch(e){img=await out.embedPng(buf);}
+      const MAXW=595,MAXH=792,HEAD=26;          // A4-ish
+      const sc=Math.min(MAXW/img.width,(MAXH-HEAD)/img.height,1);
+      const w=img.width*sc,h=img.height*sc;
+      const page=out.addPage([Math.max(w,220),h+HEAD]);
+      page.drawText(it.label||'Document',{x:8,y:h+8,size:11,font,color:rgb(0.11,0.15,0.2)});
+      page.drawImage(img,{x:(page.getWidth()-w)/2,y:0,width:w,height:h});
+    }
+    const bytes=await out.save();
+    return new Blob([bytes],{type:'application/pdf'});
+  }catch(e){console.warn('merge failed, sending documents separately',e);return null;}
+}
 async function bSnapSave(){
   const awb=document.getElementById('b_awb').value.trim();
   const kg=Number(document.getElementById('b_kg').value);
@@ -4674,6 +4734,18 @@ async function bSnapSave(){
     if(fD){st.textContent='Uploading demurrage bill…';await put(fD,'Demurrage bill','demurrage');}
     const fA=document.getElementById('b_ph_awb').files[0];
     if(fA){st.textContent='Uploading AWB…';await put(fA,'AWB doc','awb');}
+    // bind the slots into ONE pdf — this is what the customer's invoice email carries
+    const merged=await (async()=>{
+      st.textContent='Making one PDF…';
+      return mergeDocsToPdf([{file:fDo,label:'DO / Pick Order'},{file:fM,label:'MACL / tax invoice'},
+                             {file:fD,label:'Demurrage bill'},{file:fA,label:'AWB / HAWB'}]);
+    })();
+    if(merged){
+      const mp='dosnaps/'+id+'/documents.pdf';
+      const murl=await window.__att.upload(mp,merged);
+      photos.unshift({name:'Documents '+awb+'.pdf',path:mp,url:murl,size:merged.size,
+        ts:isoLocal(new Date()),combined:true,of:photos.map(p=>p.path)});
+    }
     dosnaps.push({id,awb,kg,rNo:window.__bRno||'',
       macl:Number(document.getElementById('b_macl').value)||null,
       demur:Number(document.getElementById('b_dem').value)||null,
