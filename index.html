@@ -3568,15 +3568,45 @@ function qbItemId(name,type){
 // Zap dies with "You cannot enter more than 100 characters in the billing_email field" and the invoice
 // is never created. STELCO's four addresses came to 110. Keep WHOLE addresses that fit, in order, and
 // say which ones were left off; never send a chopped-off address.
+// Bind EVERY document on the shipment into one PDF at billing time, whoever attached them and whenever.
+// This reads the files back out of Storage, which only works because the bucket allows cross-origin
+// GETs from the tracker's own address (gsutil cors set, 30 Jul 2026). Without that it throws and we
+// fall back to sending the first document, exactly as before.
+async function buildInvoicePdf(e){
+  const parts=[];
+  for(const a of (e.attachments||[])){
+    if(a.combined)continue;                     // skip an older combined file, rebuild from the originals
+    try{
+      const r=await fetch(a.url);
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const blob=await r.blob();
+      parts.push({file:new File([blob],a.name||'document',{type:blob.type||'application/octet-stream'}),label:a.name||''});
+    }catch(err){console.warn('could not read attachment for merging:',a.name,err);return null;}
+  }
+  if(parts.length<2)return null;
+  const merged=await mergeDocsToPdf(parts);
+  if(!merged)return null;
+  const path='entries/'+e.id+'/'+Date.now()+'_invoice-documents.pdf';
+  const url=await window.__att.upload(path,merged);
+  return {name:'Documents '+String(e.awbBl||e.rNo||'').replace(/[^\w.\-]+/g,'')+'.pdf',
+    path:path,url:url,size:merged.size,ts:isoLocal(new Date()),
+    combined:true,of:(e.attachments||[]).filter(a=>!a.combined).map(a=>a.path)};
+}
 // What actually goes on the invoice. A combined "Documents ….pdf" replaces the individual files it was
 // built from and is sent FIRST, so Att 1 — the only one QuickBooks attaches — carries the whole file.
 function invoiceAttachments(e){
   const all=e.attachments||[];
+  const combined=all.filter(a=>a.combined);      // newest first — each new one is unshifted
   const covered=new Set();
-  all.forEach(a=>{if(a.combined&&Array.isArray(a.of))a.of.forEach(p=>covered.add(p));});
-  return all.filter(a=>a.combined||!covered.has(a.path))
-            .sort((a,b)=>(b.combined?1:0)-(a.combined?1:0))
-            .slice(0,4);
+  combined.forEach(a=>(a.of||[]).forEach(p=>covered.add(p)));
+  const loose=all.filter(a=>!a.combined&&!covered.has(a.path));
+  return (combined.length?[combined[0]]:[]).concat(loose).slice(0,4);
+}
+// the documents a combined PDF would be built from, and whether we already have that exact one
+function invLooseDocs(e){return (e.attachments||[]).filter(a=>!a.combined);}
+function invCombinedFor(e){
+  const sig=invLooseDocs(e).map(a=>a.path).sort().join('|');
+  return (e.attachments||[]).find(a=>a.combined&&Array.isArray(a.of)&&a.of.slice().sort().join('|')===sig)||null;
 }
 const QB_EMAIL_MAX=100;
 function qbEmails(raw){
@@ -3799,7 +3829,7 @@ function collectInvoiceLines(e){
 function invSummaryText(lines){
   return lines.map(l=>'  • '+l.item+'   '+l.qty+' x '+l.rate+' = '+fmtNum(l.amount)+(l.taxable?'':'   (no GST)')).join('\n');
 }
-function sendInvoice(){
+async function sendInvoice(){
   if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
   const inv=collectInvoiceLines(e);
@@ -3826,7 +3856,8 @@ function sendInvoice(){
   const curr=custCurrency(lookupCustomer(e.cno));
   // up to 4 supporting documents ride the invoice — listed in the review box below, and they decide
   // which create-invoice Zap this goes to
-  const atts=invoiceAttachments(e);
+  const loose=invLooseDocs(e);                 // every document on the shipment, however it arrived
+  const willMerge=loose.length>1&&!invCombinedFor(e);
   const mail=qbEmails(document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com');
   if(!mail.emails)mail.emails='jaamiz25@gmail.com';   // every address was too long — still email someone
   if(!confirm(
@@ -3835,11 +3866,9 @@ function sendInvoice(){
     'Invoice '+(bn||'(QuickBooks will assign the next number)')+'    '+(e.type==='MP'?'BL ':'AWB ')+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
     'Email to: '+mail.emails+'\n'+
     (mail.dropped.length?('⚠ Left off (QuickBooks allows only 100 characters of email): '+mail.dropped.join(', ')+'\n'):'')+
-    (atts.length
-      ?('Attached: '+atts[0].name+'   (goes out WITH the invoice email)\n'
-        +(atts.length>1?('⚠ NOT attached: '+atts.slice(1).map(a=>a.name).join(', ')+'\n'
-          +'   QuickBooks takes ONE file per invoice. Documents added together are combined into one\n'
-          +'   PDF; these came in separately, so only the first goes. Re-attach them in one go to fix.\n'):''))
+    (loose.length
+      ?('Attached: '+loose.map(a=>a.name).join(', ')+'\n'
+        +(loose.length>1?'   → combined into ONE PDF and sent with the invoice\n':'   (goes out WITH the invoice email)\n'))
       :'Attached: nothing — 📎 on the row first if a document should go with it\n')+
     '------------------------------------------\n'+
     summary+'\n'+
@@ -3864,6 +3893,16 @@ function sendInvoice(){
   // QuickBooks display name can differ from the tracker's (e.g. "STATE ELECTRIC CO LTD" vs
   // "State Electric Company Limited") — the Zap's Find Customer is case-sensitive and creates a
   // DUPLICATE on mismatch. customer.qbName (Customers tab) wins when set.
+  // bind every document into one PDF now — QuickBooks attaches only the first file it is given
+  if(willMerge&&window.__att){
+    toast('Combining '+loose.length+' documents into one PDF…');
+    try{
+      const cmb=await buildInvoicePdf(e);
+      if(cmb){(e.attachments=e.attachments||[]).unshift(cmb);saveEntries();}
+      else toast('⚠ Could not combine the documents — only the first will be attached');
+    }catch(err){console.warn('combine failed',err);toast('⚠ Could not combine the documents — only the first will be attached');}
+  }
+  const atts=invoiceAttachments(e);
   const custRec=lookupCustomer(e.cno);
   zapierPost({
     event:'invoice_ready',
