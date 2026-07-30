@@ -7,7 +7,7 @@
 <style>
   :root{
     --bg:#0f172a; --panel:#ffffff; --ink:#0f172a; --muted:#64748b;
-    --line:#e2e8f0; --brand:#e8730f; --brand-dark:#c65f08; --brandbright:#f88838;
+    --line:#e2e8f0; --brand:#FF4F00; --brand-dark:#CC3F00; --brandbright:#FF7A40;
     --ok:#16a34a; --okbg:#dcfce7; --warn:#d97706; --warnbg:#fef3c7;
     --danger:#dc2626; --dangerbg:#fee2e2; --info:#0891b2; --infobg:#cffafe;
     --shadow:0 1px 3px rgba(15,23,42,.08),0 8px 24px rgba(15,23,42,.06);
@@ -493,11 +493,11 @@
     <button id="bt_stelco" class="ghost" onclick="setBTab('stelco')">⚡ STELCO</button>
     <span style="flex:1"></span>
     <button class="ghost" onclick="aiKeySetup()" title="Admin: paste the Anthropic API key that powers the AI document reader">🔑 AI</button>
-    <button class="primary" id="b_snapBtn" onclick="bToggleCapture()" style="background:#e8730f">📸 Snap DO photo</button>
+    <button class="primary" id="b_snapBtn" onclick="bToggleCapture()" style="background:#FF4F00">📸 Snap DO photo</button>
   </div>
 
   <div id="b_pane_snaps">
-    <div class="card" id="b_capture" style="display:none;max-width:760px;margin-bottom:14px;padding:16px 18px;border:2px solid #e8730f;border-radius:14px;background:#fff7ed">
+    <div class="card" id="b_capture" style="display:none;max-width:760px;margin-bottom:14px;padding:16px 18px;border:2px solid #FF4F00;border-radius:14px;background:#fff7ed">
       <div style="font-weight:800;margin-bottom:10px">📸 New DO snap — clearance finished, bill it now</div>
       <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">Each slot takes a <b>camera photo OR a file</b> (PDF / image) — your phone offers both when you tap.</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
@@ -505,7 +505,7 @@
         <input type="file" id="b_ph_macl" accept="image/*,.pdf,application/pdf" style="display:none" onchange="bPick('macl')">
         <input type="file" id="b_ph_dem" accept="image/*,.pdf,application/pdf" style="display:none" onchange="bPick('dem')">
         <input type="file" id="b_ph_awb" accept="image/*,.pdf,application/pdf" style="display:none" onchange="bPick('awb')">
-        <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_do" style="border:2px dashed #e8730f;color:#e8730f;font-weight:700" onclick="document.getElementById('b_ph_do').click()">📄 DO / Pick Order *</button><button type="button" class="iconbtn del" id="b_clr_do" style="display:none" title="Remove this document" onclick="bClear('do')">✕</button></span>
+        <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_do" style="border:2px dashed #FF4F00;color:#FF4F00;font-weight:700" onclick="document.getElementById('b_ph_do').click()">📄 DO / Pick Order *</button><button type="button" class="iconbtn del" id="b_clr_do" style="display:none" title="Remove this document" onclick="bClear('do')">✕</button></span>
         <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_macl" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_macl').click()">🧾 MACL / tax invoice</button><button type="button" class="iconbtn del" id="b_clr_macl" style="display:none" title="Remove this document" onclick="bClear('macl')">✕</button></span>
         <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_dem" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_dem').click()">⏳ Demurrage bill</button><button type="button" class="iconbtn del" id="b_clr_dem" style="display:none" title="Remove this document" onclick="bClear('dem')">✕</button></span>
         <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_awb" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_awb').click()">📑 AWB / HAWB</button><button type="button" class="iconbtn del" id="b_clr_awb" style="display:none" title="Remove this document" onclick="bClear('awb')">✕</button></span>
@@ -1379,7 +1379,7 @@ function renderEntries(){
   const dpPend=dosnaps.filter(d=>d.status==='pending').length;
   const stuckN=entries.filter(invStuck).length;   // invoice sent, number never came back = a failed Zap
   document.getElementById('e_stats').innerHTML=`
-    ${msgUnread()?`<div class="card c-info" style="cursor:pointer;outline:2px solid #e8730f" onclick="openMsgs()" title="Messages your customers sent from their status page"><div class="n">${msgUnread()}</div><div class="l">💬 Customer Messages</div></div>`:''}
+    ${msgUnread()?`<div class="card c-info" style="cursor:pointer;outline:2px solid #FF4F00" onclick="openMsgs()" title="Messages your customers sent from their status page"><div class="n">${msgUnread()}</div><div class="l">💬 Customer Messages</div></div>`:''}
     ${dpPend?`<div class="card c-danger" style="cursor:pointer" onclick="openDoQueue()" title="DO photos from the airport waiting to be billed — click to open the queue"><div class="n">${dpPend}</div><div class="l">📸 DO to Bill</div></div>`:''}
     <div class="card c-warn"><div class="n">${pending.toLocaleString()}</div><div class="l">Pending</div></div>
     <div class="card c-danger" style="cursor:pointer" onclick="showInvoicePending()" title="Entries with no BILL NO — click to list them"><div class="n">${invPending.toLocaleString()}</div><div class="l">🧾 Invoice Pending</div></div>
@@ -2432,7 +2432,7 @@ function renderPayments(){
       ? '<span style="color:#94a3b8">—</span>'
       : (r.invoicedAt
           ? `<button class="iconbtn" style="color:#16a34a;font-weight:700" onclick="payInvoiceSend('${jatt(r.id)}')" title="Invoiced ${fmtDate(r.invoicedAt)} — click to open the invoice">✅ Sent</button>`
-          : `<button class="iconbtn" style="background:#e8730f;color:#fff;padding:3px 11px;border-radius:6px;font-weight:700" onclick="payInvoiceSend('${jatt(r.id)}')" title="Open this shipment's invoice builder">🧾 Bill</button>`);
+          : `<button class="iconbtn" style="background:#FF4F00;color:#fff;padding:3px 11px;border-radius:6px;font-weight:700" onclick="payInvoiceSend('${jatt(r.id)}')" title="Open this shipment's invoice builder">🧾 Bill</button>`);
     return `<tr id="payrow-${r.id}">
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="openPayForm('${jatt(r.id)}')" title="Enter / edit payment">✏️</button>
@@ -4294,7 +4294,7 @@ function bPickLabel(slot){
   const base={do:'📄 DO / Pick Order *',macl:'🧾 MACL / tax invoice',dem:'⏳ Demurrage bill',awb:'📑 AWB / HAWB'}[slot];
   b.textContent=f?'✅ '+base.replace(' *',''):base;
   b.style.background=f?'#f0fdf4':'';
-  b.style.borderColor=f?'#16a34a':(slot==='do'?'#e8730f':'');
+  b.style.borderColor=f?'#16a34a':(slot==='do'?'#FF4F00':'');
   const clr=document.getElementById('b_clr_'+slot);
   if(clr)clr.style.display=f?'':'none';
 }
@@ -4770,7 +4770,7 @@ function renderStelcoDesk(){
       <td class="actcol"><div class="rowact">
         ${isAdmin()?(e.billNo
           ?`<button class="iconbtn" onclick="openInvoiceForm('${e.id}')" title="Open the invoice">✅</button>`
-          :`<button class="iconbtn" style="background:#e8730f;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="stelcoBill('${e.id}')" title="Create the QuickBooks invoice">🧾 Bill</button>`):''}
+          :`<button class="iconbtn" style="background:#FF4F00;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="stelcoBill('${e.id}')" title="Create the QuickBooks invoice">🧾 Bill</button>`):''}
         <button class="iconbtn" onclick="openAttach('${e.id}')" title="Documents">📎${e.attachments&&e.attachments.length?e.attachments.length:''}</button>
         ${isAdmin()&&waEnabled(e)?`<button class="iconbtn" onclick="waCustomer('${e.id}')" title="WhatsApp the customer a status update"><svg viewBox="0 0 32 32" width="15" height="15" fill="#25D366"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.1.6 4.2 1.7 6L4 29l8.2-1.6c1.2.6 2.5.9 3.8.9 6.6 0 12-5.4 12-12S22.6 3 16 3zm0 21.8c-1.2 0-2.4-.3-3.5-.8l-.5-.3-4.9 1 1-4.7-.3-.5c-1-1.6-1.6-3.5-1.6-5.5 0-5.5 4.4-9.9 9.8-9.9s9.8 4.4 9.8 9.9-4.4 9.8-9.8 9.8zm5.4-7.3c-.3-.2-1.8-.9-2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.1-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6l.5-.5c.2-.2.2-.3.3-.5.1-.2 0-.4 0-.6l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4 0-.1-.2-.2-.5-.3z"/></svg></button>`:''}
         <button class="iconbtn" onclick="openEntryForm('${e.id}')" title="Edit">✏️</button>
@@ -4855,7 +4855,7 @@ function renderMsgs(){
   if(!portalMsgs.length){box.innerHTML='<div style="padding:22px;text-align:center;color:var(--muted)">No customer messages yet.</div>';return;}
   box.innerHTML=portalMsgs.map(m=>{
     const when=(m.at||'').slice(0,16).replace('T',' ');
-    return `<div style="border:1px solid var(--line);border-left:4px solid ${m.read?'var(--line)':'#e8730f'};border-radius:10px;padding:11px 13px;margin-bottom:9px;background:${m.read?'transparent':'#fff7ed'}">
+    return `<div style="border:1px solid var(--line);border-left:4px solid ${m.read?'var(--line)':'#FF4F00'};border-radius:10px;padding:11px 13px;margin-bottom:9px;background:${m.read?'transparent':'#fff7ed'}">
       <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
         <div><b>${esc(m.name||m.cno||'—')}</b> <span style="color:#94a3b8">${esc(m.cno||'')}</span>
           ${m.about?`<div style="font-size:12px;color:#0369a1;font-weight:700">${esc(m.about)}</div>`:''}</div>
