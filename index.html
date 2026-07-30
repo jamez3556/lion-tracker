@@ -1337,7 +1337,9 @@ function filteredEntries(){
     // billing-only entries are hidden from the normal Form Log (they're not documentation work);
     // the 💳 Billing Only card toggles a view of ONLY them, and a text search always finds them
     if(eState.billView){if(!isBillOnly(r))return false;}
-    else if(isBillOnly(r)&&!q)return false;
+    // billing-only entries are normally hidden here — but never when hunting a stuck invoice, or the
+    // ⚠ card counts one the list refuses to show (STELCO desk shipments are billing-only and DO get billed)
+    else if(isBillOnly(r)&&!q&&inv!=='stuck')return false;
     if(q&&![r.cno,r.customer,r.awbBl,r.billNo,r.rNo,r.file].join(' ').toLowerCase().includes(q))return false;
     if(sf&&r.status!==sf)return false;
     if(inv==='pending'&&r.billNo)return false;   // invoice pending = no BILL NO
@@ -1359,6 +1361,7 @@ function invStuck(r){
 }
 function showInvoiceStuck(){
   ['e_search','e_statusFilter','e_typeFilter','e_monthFilter'].forEach(id=>document.getElementById(id).value='');
+  eState.billView=false;   // the stuck list shows normal AND billing-only shipments together
   document.getElementById('e_invFilter').value='stuck';
   eState.page=1;renderEntries();
   toast('These invoices reached QuickBooks but no number came back — check the Zap, or type the number by hand');
