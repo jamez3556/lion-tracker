@@ -3554,11 +3554,14 @@ function mpExpectedLines(e,cust,pay){
 function custCurrency(cust){return (cust&&cust.currency)||'MVR';}
 // How many containers of each size this shipment has ({"20'":1,"40'":2}) — 40' HC counts as 40'.
 // null when the shipment has no container record yet (then size lines are left as the template has them).
+/* Invoice quantities per size. FCL sizes (20'/40') = HOW MANY CONTAINERS (qty × rate).
+   LCL = the CBM VALUE (sea billing is CBM × rate — e.g. 8.96 CBM × 500). */
 function contSizeCounts(e){
   const c=containers.find(x=>x.entryId===e.id);
   if(!c||!c.portInfo){
     // billing-only sea shipments (STELCO desk quick-add) have no Container Status record —
-    // their sizes live on the entry itself, typed via the desk's 📦 button (stSeaCont)
+    // their sizes live on the entry itself, typed via the desk's 📦 button (stSeaCont).
+    // seaCont.LCL holds the CBM value directly.
     const s=e.seaCont;
     if(s&&(s["40'"]||s["20'"]||s.LCL)){
       const out={};
@@ -3569,13 +3572,17 @@ function contSizeCounts(e){
     }
     return null;
   }
-  const out={};let any=false;
+  const out={};let any=false,lclCbm=0,lclN=0;
   Object.keys(c.portInfo).forEach(k=>{
-    let s=String(c.portInfo[k].size||'').toUpperCase().replace(/\s+/g,'');
+    const pi=c.portInfo[k];
+    let s=String(pi.size||'').toUpperCase().replace(/\s+/g,'');
     if(!s)return;
     if(s==="40'HC")s="40'";
-    out[s]=(out[s]||0)+1;any=true;
+    any=true;
+    if(s==='LCL'){lclN++;lclCbm+=Number(pi.cbm)||0;return;}
+    out[s]=(out[s]||0)+1;
   });
+  if(lclN)out.LCL=lclCbm>0?lclCbm:lclN;   // CBM when known; container count as a last resort
   return any?out:null;
 }
 function tmplLines(tpl,e,pay){
@@ -5260,9 +5267,13 @@ function stelcoSeaNew(){
 function seaContLabel(e){
   const s=contSizeCounts(e);
   if(!s)return '';
-  return ["40'","20'",'LCL'].filter(k=>s[k]).map(k=>s[k]+'×'+k).join(' + ');
+  const parts=[];
+  if(s["40'"])parts.push(s["40'"]+"×40'");
+  if(s["20'"])parts.push(s["20'"]+"×20'");
+  if(s.LCL)parts.push('LCL '+s.LCL+' CBM');
+  return parts.join(' + ');
 }
-function stSeaCont(id){ // 📦 — how many of each size (drives the invoice quantities)
+function stSeaCont(id){ // 📦 — FCL container counts + LCL CBM (these ARE the invoice quantities)
   const e=entries.find(x=>x.id===id);if(!e)return;
   const cur=e.seaCont||{};
   const ask=(label,curV)=>{
@@ -5273,7 +5284,7 @@ function stSeaCont(id){ // 📦 — how many of each size (drives the invoice qu
   };
   const f40=ask("How many 40' containers?",cur["40'"]);if(f40===undefined)return;
   const f20=ask("How many 20' containers?",cur["20'"]);if(f20===undefined)return;
-  const lcl=ask('LCL shipments? (usually 1)',cur.LCL);if(lcl===undefined)return;
+  const lcl=ask('LCL — how many CBM? (from the BL, e.g. 8.96 — bills CBM × rate)',cur.LCL);if(lcl===undefined)return;
   if(!f40&&!f20&&!lcl){delete e.seaCont;}
   else{e.seaCont={};if(f40)e.seaCont["40'"]=f40;if(f20)e.seaCont["20'"]=f20;if(lcl)e.seaCont.LCL=lcl;}
   saveEntries();renderStelcoDesk();
