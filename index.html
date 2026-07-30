@@ -575,17 +575,25 @@
 
   <div id="b_pane_profit" style="display:none">
     <div class="stats" id="b_pr_stats"></div>
+    <div class="toolbar" style="gap:8px;flex-wrap:wrap">
+      <input id="b_pr_search" placeholder="🔍 Check EEMAN's bill — search BL / customer / invoice…" style="flex:1;min-width:240px" oninput="renderSeaProfit()">
+      <select id="b_pr_filter" onchange="renderSeaProfit()">
+        <option value="">All sea shipments</option>
+        <option value="missing">💸 EEMAN not recorded</option>
+        <option value="done">✓ EEMAN recorded</option>
+      </select>
+    </div>
     <div class="tablewrap m-cards">
       <div class="scroll">
-        <table style="min-width:900px">
+        <table style="min-width:1020px">
           <thead><tr>
-            <th>DATE</th><th>BL</th><th>📦 CONTAINERS</th><th>BILL NO</th>
+            <th>DATE</th><th>CUSTOMER</th><th>BL</th><th>📦</th><th>BILL NO</th>
             <th class="num">BILLED (MVR)</th><th class="num">EEMAN (MVR)</th><th class="num">PROFIT</th><th class="num">%</th>
           </tr></thead>
           <tbody id="b_pr_tbody"></tbody>
         </table>
       </div>
-      <div class="empty" id="b_pr_empty" style="display:none"><div class="big">💰</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No billed sea shipments yet</div><div style="color:var(--muted);font-size:13px;margin-top:4px">Profit appears here after a sea shipment is billed (🧾) and EEMAN's charge is typed (💸).</div></div>
+      <div class="empty" id="b_pr_empty" style="display:none"><div class="big">💰</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No sea shipments match</div><div style="color:var(--muted);font-size:13px;margin-top:4px">Every MP shipment (all customers) appears here — type EEMAN's charge on its row when his bill arrives.</div></div>
     </div>
   </div>
 </section>
@@ -5177,14 +5185,14 @@ function stOut(id){ // 💸 — what EEMAN (the outsourcer) bills LION for this 
   const cur=e.outCost||{};
   const v=prompt("EEMAN's charge for this clearance, MVR (from their sheet — blank = not billed yet):",cur.amt!=null?cur.amt:'');
   if(v===null)return;
-  if(v.trim()===''){delete e.outCost;saveEntries();renderStelcoDesk();toast('Outsourcer charge cleared');return;}
+  if(v.trim()===''){delete e.outCost;saveEntries();renderStelcoDesk();if(typeof renderSeaProfit==='function'&&bTab==='profit')renderSeaProfit();toast('Outsourcer charge cleared');return;}
   const n=Number(v.replace(/[^\d.]/g,''));
   if(!isFinite(n)||n<0){toast('Enter a number');return;}
   const inv=prompt("EEMAN's invoice / reference number (optional):",cur.inv||'');
   e.outCost={amt:n};
   if(inv&&inv.trim())e.outCost.inv=inv.trim();
-  saveEntries();renderStelcoDesk();
-  toast('💸 EEMAN '+fmtNum(n)+' recorded — internal only, never on the STELCO invoice');
+  saveEntries();renderStelcoDesk();if(typeof renderSeaProfit==='function'&&bTab==='profit')renderSeaProfit();
+  toast('💸 EEMAN '+fmtNum(n)+' recorded — internal only, never on the customer invoice');
 }
 // staff button: Pending ↔ Cleared on the STELCO desk (any signed-in user).
 // Cleared = "clearance done, ready to bill"; billing then locks it to Delivered (existing invoice rule).
@@ -5255,28 +5263,54 @@ function seaInvTotal(e){
   }
   return null;
 }
+/* The Sea Profit tab is also the EEMAN VERIFICATION DESK: EVERY sea (MP) shipment of EVERY customer
+   is listed, because every sea clearance is outsourced to EEMAN and he bills in one big bundle.
+   When his bundle arrives, search each of his bill lines by BL: found → type his amount on the row
+   (＋). NOT found → he is billing for a shipment we never had — query it, don't pay it. Cleared
+   shipments with no amount recorded = his bill hasn't come yet (the red card counts them). */
 function renderSeaProfit(){
   const tb=document.getElementById('b_pr_tbody');if(!tb)return;
-  const rows=stelcoRows().filter(e=>e.type==='MP'&&(e.billNo||(e.outCost&&e.outCost.amt!=null)))
-    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const q=((document.getElementById('b_pr_search')||{}).value||'').trim().toLowerCase();
+  const f=((document.getElementById('b_pr_filter')||{}).value||'');
+  const all=entries.filter(e=>e.type==='MP').sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const rows=all.filter(e=>{
+    const has=e.outCost&&e.outCost.amt!=null;
+    if(f==='missing'&&has)return false;
+    if(f==='done'&&!has)return false;
+    if(q&&![e.awbBl,e.customer,e.cno,e.billNo,e.rNo,(e.outCost&&e.outCost.inv)||''].join(' ').toLowerCase().includes(q))return false;
+    return true;
+  });
   document.getElementById('b_pr_empty').style.display=rows.length?'none':'block';
   const mo=isoLocal(new Date()).slice(0,7);
-  let tBill=0,tCost=0,mBill=0,mCost=0,anyEst=false,costMissing=0;
-  tb.innerHTML=rows.map(e=>{
+  let tBill=0,tCost=0,mBill=0,mCost=0,anyEst=false;
+  // totals always come from EVERY sea shipment, not the filtered view
+  all.forEach(e=>{
     const inv=seaInvTotal(e);
     const cost=(e.outCost&&e.outCost.amt!=null)?Number(e.outCost.amt):null;
     if(inv){tBill+=inv.amt;if((e.date||'').startsWith(mo))mBill+=inv.amt;if(inv.est)anyEst=true;}
     if(cost!=null){tCost+=cost;if((e.date||'').startsWith(mo))mCost+=cost;}
-    else if(e.billNo)costMissing++;
+  });
+  // "after clearance, did EEMAN bill?" — cleared/delivered/billed but no amount recorded yet
+  const isCl=e=>e.billNo||e.status==='Cleared'||e.status==='Delivered';
+  const costMissing=all.filter(e=>isCl(e)&&!(e.outCost&&e.outCost.amt!=null)).length;
+  tb.innerHTML=rows.slice(0,200).map(e=>{
+    const inv=seaInvTotal(e);
+    const cost=(e.outCost&&e.outCost.amt!=null)?Number(e.outCost.amt):null;
     const profit=(inv&&cost!=null)?invMoney(inv.amt-cost):null;
     const pct=(profit!=null&&inv.amt)?Math.round(profit/inv.amt*100):null;
+    const eemanCell=cost!=null
+      ?`<span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stOut('${e.id}')" title="EEMAN's charge${e.outCost.inv?' · his inv '+esc(e.outCost.inv):''} — click to change">${fmtNum(cost)}</span>`
+      :isCl(e)
+        ?`<span style="cursor:pointer;color:#dc2626;font-weight:700;border-bottom:1px dashed #dc2626" onclick="stOut('${e.id}')" title="Cleared, but EEMAN's charge not recorded — type it from his bill">＋ missing</span>`
+        :`<span style="cursor:pointer;color:#94a3b8;border-bottom:1px dashed #94a3b8" onclick="stOut('${e.id}')" title="Not cleared yet — his bill is not expected">＋</span>`;
     return `<tr>
       <td data-l="Date">${fmtDate(e.date)}</td>
+      <td data-l="Customer" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.customer)}">${esc(e.customer)||'—'}</td>
       <td data-l="BL">${esc(e.awbBl)||'—'}</td>
-      <td data-l="Containers">${esc(seaContLabel(e))||'—'}</td>
+      <td data-l="📦">${esc(seaContLabel(e))||'—'}</td>
       <td data-l="Bill No">${esc(e.billNo)||'<span style="color:#b45309">not billed</span>'}</td>
       <td class="num" data-l="Billed">${inv?(inv.est?'≈ ':'')+fmtNum(inv.amt):'—'}</td>
-      <td class="num" data-l="EEMAN">${cost!=null?fmtNum(cost):`<span style="cursor:pointer;color:#dc2626;font-weight:700;border-bottom:1px dashed #dc2626" onclick="stOut('${e.id}')" title="Type EEMAN's charge from their bill">＋ missing</span>`}</td>
+      <td class="num" data-l="EEMAN">${eemanCell}</td>
       <td class="num" data-l="Profit">${profit!=null?`<span style="font-weight:800;color:${profit>=0?'#16a34a':'#dc2626'}">${profit>=0?'+':''}${fmtNum(profit)}</span>`:'—'}</td>
       <td class="num" data-l="%">${pct!=null?pct+'%':'—'}</td>
     </tr>`;}).join('');
@@ -5284,9 +5318,9 @@ function renderSeaProfit(){
   if(st)st.innerHTML=`
     <div class="card c-info"><div class="n">${fmtNum(invMoney(mBill-mCost))}</div><div class="l">💰 Profit · ${new Date().toLocaleDateString('en-GB',{month:'short'})}</div></div>
     <div class="card ${tBill-tCost>=0?'c-blue':'c-danger'}"><div class="n">${anyEst?'≈ ':''}${fmtNum(invMoney(tBill-tCost))}</div><div class="l">Profit · All Time</div></div>
-    <div class="card c-purple"><div class="n">${fmtNum(invMoney(tBill))}</div><div class="l">Billed to STELCO</div></div>
+    <div class="card c-purple"><div class="n">${fmtNum(invMoney(tBill))}</div><div class="l">Billed to Customers</div></div>
     <div class="card c-warn"><div class="n">${fmtNum(invMoney(tCost))}</div><div class="l">Paid to EEMAN</div></div>
-    ${costMissing?`<div class="card c-danger"><div class="n">${costMissing}</div><div class="l">💸 EEMAN Bill Missing</div></div>`:''}`;
+    ${costMissing?`<div class="card c-danger" style="cursor:pointer" onclick="document.getElementById('b_pr_filter').value='missing';renderSeaProfit()"><div class="n">${costMissing}</div><div class="l">💸 EEMAN Not Recorded</div></div>`:''}`;
 }
 // Air and Sea are separate desks (user: "its better sea and air seperate") — different columns,
 // different work: air = KG/MACL/demurrage from DO snaps; sea = containers/EEMAN cost/margin.
