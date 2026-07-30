@@ -4017,6 +4017,12 @@ async function sendInvoice(){
   const inv=collectInvoiceLines(e);
   const lines=inv.lines;
   if(!lines.length){toast('Add at least one line with a quantity and rate');return;}
+  // The AWB / BL NO on the QuickBooks invoice comes from the entry — and it is a MUST: an invoice
+  // without it can't be matched to the shipment later. Hard stop, not a warning.
+  if(!(e.awbBl||'').trim()){
+    toast('⛔ No '+(e.type==='MP'?'BL':'AWB')+' number on this shipment — add it (✏️ edit) before invoicing');
+    return;
+  }
   // Blank invoice no ⇒ QuickBooks assigns the next number in ITS sequence (covers manual billing too).
   // A typed number is forced onto the invoice — must then be unique across the Form Log.
   const bn=document.getElementById('inv_billNo').value.trim();
