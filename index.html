@@ -510,6 +510,10 @@
         <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_dem" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_dem').click()">⏳ Demurrage bill</button><button type="button" class="iconbtn del" id="b_clr_dem" style="display:none" title="Remove this document" onclick="bClear('dem')">✕</button></span>
         <span style="display:inline-flex;align-items:center;gap:2px"><button type="button" class="ghost" id="b_btn_awb" style="border:1px dashed var(--line)" onclick="document.getElementById('b_ph_awb').click()">📑 AWB / HAWB</button><button type="button" class="iconbtn del" id="b_clr_awb" style="display:none" title="Remove this document" onclick="bClear('awb')">✕</button></span>
       </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <button type="button" class="ghost" id="b_readBtn" onclick="bReadAll()" style="border:1px solid #FF4F00;color:#FF4F00;font-weight:700">🤖 Read the documents for me</button>
+        <span style="font-size:11.5px;color:var(--muted)">Optional. Fills empty boxes only — always check what it puts in.</span>
+      </div>
       <div id="b_verify"></div>
       <div class="grid3">
         <div class="field"><label>AWB NO *</label><input id="b_awb" placeholder="e.g. 898-81050141"></div>
@@ -4453,17 +4457,49 @@ function bClear(slot){
   document.getElementById('b_capStatus').textContent='Document removed'+(slot==='do'?' — the DO is required':'');
 }
 const bIsPdf=f=>f&&(f.type==='application/pdf'||/\.pdf$/i.test(f.name||''));
-/* Documents are ATTACHED, never read. Automatic reading of these documents (AI and OCR alike) kept
-   putting wrong air waybill numbers and weights into the form off crumpled, dot-matrix, sideways
-   photos, and a wrong number that looks filled-in is worse than an empty box. Staff type the details;
-   the photos ride along to the customer as before. Do not re-enable auto-read without being asked. */
+/* Attaching a document does NOT read it. Reading happened automatically before and kept putting wrong
+   air waybill numbers and weights into the form off crumpled, sideways, dot-matrix photos — a wrong
+   number that looks filled-in is worse than an empty box. So typing is the normal way, and the reader
+   is a BUTTON (bReadAll) the staff press when they want it. Do not make it automatic again. */
 function bPick(slot){
   bPickLabel(slot);
   const f=document.getElementById('b_ph_'+slot).files[0];
   if(!f)return;
   const st=document.getElementById('b_capStatus');
   const name={do:'DO / Pick Order',macl:'MACL bill',dem:'Demurrage bill',awb:'AWB'}[slot]||'Document';
-  st.textContent='✅ '+name+' attached — type the details below';
+  st.textContent='✅ '+name+' attached — type the details, or tap 🤖 to have them read';
+}
+// Which fields each slot is allowed to fill. MACL/demurrage tax invoices carry the MASTER
+// consolidator's name and master AWB, so only bill amounts come from those slots; the AWB, weight and
+// name come from the Pick Order and the AWB document.
+const B_READ_MAPS={
+  do:  {awb:'b_awb',kg:'b_kg',cust:'b_cust',macl:'b_macl',demur:'b_dem',rno:'__bRno'},
+  awb: {awb:'b_awb',kg:'b_kg',cust:'b_cust',rno:'__bRno'},
+  macl:{macl:'b_macl',demur:'b_dem'},
+  dem: {demur:'b_dem',macl:'b_macl'}
+};
+// The 🤖 button: read every attached document on demand, with the BEST model (opus) — this is a
+// deliberate, once-per-snap action, so it is worth the extra cost over the cheap model.
+async function bReadAll(){
+  const st=document.getElementById('b_capStatus');
+  const btn=document.getElementById('b_readBtn');
+  const slots=['do','awb','macl','dem'].filter(s=>document.getElementById('b_ph_'+s).files[0]);
+  if(!slots.length){st.textContent='Attach a document first';return;}
+  if(!(await aiKey())){st.textContent='No AI key on this device — tap 🔑 AI in the toolbar, or type the details';return;}
+  btn.disabled=true;
+  const label={do:'DO',awb:'AWB doc',macl:'MACL bill',dem:'Demurrage bill'};
+  try{
+    window.__bReads=window.__bReads||{};
+    for(const s of slots){
+      const f=document.getElementById('b_ph_'+s).files[0];
+      st.textContent='🤖 Reading the '+label[s]+'…';
+      let p=null;
+      try{p=await docExtract(f,m=>st.textContent=label[s]+': '+m,'best');}catch(e){}
+      if(p)window.__bReads[s]=p;else delete window.__bReads[s];
+      ocrFill(p,B_READ_MAPS[s]||B_READ_MAPS.do,st);
+    }
+    bVerifyDocs();
+  }finally{btn.disabled=false;}
 }
 // Cross-check the AWB/HAWB numbers read from every attached document. House and master numbers
 // legitimately differ on consolidations, so two documents "belong together" when ANY of their
@@ -4787,10 +4823,12 @@ async function aiOnce(key,model,src){
     return aiNorm(JSON.parse(txt));
   }catch(e){clearTimeout(timer);console.warn('AI read failed:',e);return null;}
 }
-async function aiExtract(file,status){
+// force: 'best' | 'fast' — set when the user asks for a read on purpose (the 🤖 button), which
+// overrides the saved mode, including "off": pressing the button IS the decision to spend.
+async function aiExtract(file,status,force){
   const key=await aiKey();
   if(!key)return null;
-  const mode=await aiMode();
+  const mode=force||await aiMode();
   if(mode==='off')return null;                      // paid reading switched off — free OCR takes over
   const model=(AI_MODES[mode]||AI_MODES.fast).model;
   status('🤖 Reading the document twice and comparing…');
@@ -4809,9 +4847,9 @@ async function aiExtract(file,status){
 // PDF → text/OCR; the FILE NAME itself is an AWB hint (e.g. "HAWB_125-22299535_LJU00148.pdf").
 // Hard 75 s timeout on the OCR path — some scanned PDFs (CamScanner JPEG2000 images) can wedge
 // pdf.js for minutes; better to give up and let the user type.
-async function docExtract(file,status){
+async function docExtract(file,status,force){
   let p=null;
-  try{p=await aiExtract(file,status);}catch(e){}
+  try{p=await aiExtract(file,status,force);}catch(e){}
   // The free OCR also runs whenever the AI read came back MISSING the AWB or the weight — it costs
   // nothing and it used to sit idle in exactly the case the user notices ("weight not take").
   if(!p||!p.awb||!p.kg)try{
