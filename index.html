@@ -4644,10 +4644,10 @@ const AI_SCHEMA={type:'object',additionalProperties:false,
     consignee:{type:'string',description:'The FINAL customer / consignee name only. NEVER return the freight agent, master consolidator (e.g. SPEDICON), airline, MACL, or notify party. On MACL tax invoices the CUSTOMER DETAILS box often shows the master consolidator — return an empty string in that case. Trust the CONSIGNEE field of a Pick Order or the consignee box of an air waybill. If it refers to STELCO or State Electric in any form, return exactly STATE ELECTRIC COMPANY. Empty string if unsure.'},
     kg:{type:'string',description:'Gross / received / chargeable weight in kg, number only (e.g. 54.0). Empty string if not present.'},
     rNo:{type:'string',description:'The R number (printed like R= 70166 on the pick order), digits only. Empty string if not present.'},
-    maclTotal:{type:'string',description:'GRAND TOTAL IN MVR of a MACL airport-charges tax invoice (lines like SYSTEM ADMIN FEE-IMPORT, HANDLING CHARGES-IMPORT, STORAGE CHARGE-IMPORT). Number only. Empty string if this document is not that invoice.'},
-    demurrageTotal:{type:'string',description:'GRAND TOTAL IN MVR of a MACL demurrage tax invoice (line like IMP DEMURRAGE CHARGES). Number only. Empty string if this document is not a demurrage invoice.'}
+    maclTotal:{type:'string',description:'GRAND TOTAL IN MVR of a MACL airport-charges tax invoice (lines like SYSTEM ADMIN FEE-IMPORT, HANDLING CHARGES-IMPORT, STORAGE CHARGE-IMPORT). This is the figure printed after GRAND TOTAL IN MVR at the very bottom, AFTER GST — copy it exactly as printed INCLUDING the decimal point and the two decimals (e.g. 2556.04, never 25550 or 2556). If you cannot read every digit with certainty, return an empty string. Empty string if this document is not that invoice.'},
+    demurrageTotal:{type:'string',description:'GRAND TOTAL IN MVR of a MACL demurrage tax invoice (line like IMP DEMURRAGE CHARGES). Copy exactly as printed including the decimal point and two decimals. If any digit is unclear, return an empty string. Empty string if this document is not a demurrage invoice.'}
   }};
-const AI_PROMPT='This is a document from a Maldives air-cargo customs clearance: a Pick Order for Delivery (delivery order), a MACL tax invoice (airport handling charges or demurrage), or an air waybill (MAWB/HAWB). The photo may be rotated or crumpled. Extract the requested fields exactly as printed; use an empty string for anything not on this document. Shipments are often consolidated: the master consolidator (e.g. SPEDICON) is NOT the customer.';
+const AI_PROMPT='This is a document from a Maldives air-cargo customs clearance: a Pick Order for Delivery (delivery order), a MACL tax invoice (airport handling charges or demurrage), or an air waybill (MAWB/HAWB). The photo is often ROTATED 90 degrees, crumpled, or printed on a dot-matrix printer — read it in whatever orientation it is in, and take your time over the small print. Read every number DIGIT BY DIGIT from the page. Never complete, round, or reconstruct a number from what it looks like it should be: a total of 2556.04 is 2556.04, not 25550; an air waybill 125-22299535 is not 898-82293555. If any digit of a number is not clearly legible, return an empty string for that field instead of guessing — a blank field is corrected in two seconds, a wrong one goes onto an invoice. Extract the requested fields exactly as printed; use an empty string for anything not on this document. Shipments are often consolidated: the master consolidator (e.g. SPEDICON) is NOT the customer.';
 function b64Of(blob){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(blob);});}
 async function aiExtract(file,status){
   const key=await aiKey();
@@ -4659,7 +4659,9 @@ async function aiExtract(file,status){
   const isPdf=bIsPdf(file);
   let mediaType,data;
   if(isPdf){mediaType='application/pdf';data=await b64Of(file);}
-  else{const blob=await bShrink(file).catch(()=>file);mediaType='image/jpeg';data=await b64Of(blob);}
+  // Send the reader a HIGH-RESOLUTION copy at full quality — the 1600px/0.8 storage copy loses the
+  // small print on MACL bills and dot-matrix invoices, which is where misreads come from.
+  else{const blob=await bShrink(file,2400,0.95).catch(()=>file);mediaType='image/jpeg';data=await b64Of(blob);}
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),90000);
   try{
@@ -4746,18 +4748,21 @@ function ocrFill(p,map,statusEl){
   if(map.rno&&p.rNo){window[map.rno]=p.rNo;got.push('R '+p.rNo);}
   statusEl.textContent=got.length?('✓ Auto-read: '+got.join(', ')+' — please check & amend if wrong'):'Photo read, nothing new found — type the details';
 }
-// canvas-compress a photo to max 1600px JPEG (~150-400 KB) before upload
-function bShrink(file){
+// canvas-compress a photo to JPEG before upload. 1600px is plenty for storage; the AI reader gets a
+// bigger copy (see aiExtract) because dot-matrix invoices and MACL bills lose their small print when
+// they're squeezed down — that is what made the reader misread 2,556.04 as 25550.
+function bShrink(file,MAX,quality){
+  MAX=MAX||1600;
   return new Promise((res,rej)=>{
     const url=URL.createObjectURL(file);
     const img=new Image();
     img.onload=()=>{
-      const MAX=1600;let w=img.naturalWidth,h=img.naturalHeight;
+      let w=img.naturalWidth,h=img.naturalHeight;
       const sc=Math.min(1,MAX/Math.max(w,h));w=Math.round(w*sc);h=Math.round(h*sc);
       const c=document.createElement('canvas');c.width=w;c.height=h;
       c.getContext('2d').drawImage(img,0,0,w,h);
       URL.revokeObjectURL(url);
-      c.toBlob(b=>b?res(b):rej(new Error('compress failed')),'image/jpeg',0.8);
+      c.toBlob(b=>b?res(b):rej(new Error('compress failed')),'image/jpeg',quality||0.8);
     };
     img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('not an image'));};
     img.src=url;
