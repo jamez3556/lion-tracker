@@ -1658,10 +1658,15 @@ function saveEntry(e){
     if(key!==prevKey){
       const dup=entries.find(x=>x.id!==rec.id&&(x.awbBl||'').replace(/\s+/g,'').toUpperCase()===key);
       if(dup){
-        // warn, never block (user: "if BL number repeat warn it") — a human decides, same as DO snaps
         const msg='⚠ AWB / BL "'+rec.awbBl+'" already entered — NO '+(dup.no??'—')+', R NO '+(dup.rNo||'—')+' ('+(dup.customer||'—')+', '+fmtDate(dup.date)+')'+(dup.billNo?' · already billed '+dup.billNo:'');
         awbHint.textContent=msg;
-        if(!confirm(msg+'\n\nSaving makes a SECOND entry with the same AWB / BL.\n\nSave it anyway?')){e_awbBl.focus();return false;}
+        if(isBillOnly(rec)){
+          // STELCO / billing-only (not in the Form Log): warn, let a human decide — same as DO snaps
+          if(!confirm(msg+'\n\nSaving makes a SECOND entry with the same AWB / BL.\n\nSave it anyway?')){e_awbBl.focus();return false;}
+        }else{
+          // documented Form Log shipment: a duplicate is always a mistake — hard block stays
+          toast(msg);e_awbBl.focus();return false;
+        }
       }
     }
   }
