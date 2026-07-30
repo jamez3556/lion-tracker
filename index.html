@@ -4855,7 +4855,9 @@ function portalShipment(e){
   const o={date:e.date||'',type:e.type||'',rNo:e.rNo||'',awbBl:e.awbBl||'',
     pkgs:e.pkgs==null?'':e.pkgs,grsWt:e.grsWt==null?'':e.grsWt,
     status:e.status||'Pending',billNo:e.billNo||''};
+  // invoice money, only when QuickBooks has actually told us — never guess a customer's paid status
   if(e.qbBalance!=null)o.balance=Number(e.qbBalance);
+  if(e.qbTotal!=null)o.total=Number(e.qbTotal);
   if(c){
     const el=effLast(c);
     o.blNo=c.blNo||'';o.doDate=c.doDate||'';o.clearance=c.clearance||'';
