@@ -1548,6 +1548,19 @@ async function uploadPendingEntryDocs(rec){
       ok++;
     }catch(err){toast('Upload failed for '+f.name);}
   }
+  // more than one document picked in the Add-Entry form → bind them into one PDF for the invoice
+  if(ok>1){
+    const merged=await mergeDocsToPdf(files.map(f=>({file:f,label:f.name})));
+    if(merged){
+      try{
+        const mp='entries/'+rec.id+'/'+Date.now()+'_documents.pdf';
+        const murl=await window.__att.upload(mp,merged);
+        rec.attachments.unshift({name:'Documents '+(rec.awbBl||rec.rNo||'').replace(/[^\w.\-]+/g,'')+'.pdf',
+          path:mp,url:murl,size:merged.size,ts:isoLocal(new Date()),combined:true,
+          of:rec.attachments.map(a=>a.path)});
+      }catch(err){console.warn('combined PDF failed',err);}
+    }
+  }
   if(ok){saveEntries();renderEntries();renderDoQueue();toast('📎 '+ok+' document(s) attached to the shipment');}
 }
 function saveEntry(e){
@@ -4015,6 +4028,22 @@ window.attUpload=async function(files){
       const url=await window.__att.upload(path,f);
       (e.attachments=e.attachments||[]).push({name:f.name,path:path,url:url,size:f.size,ts:isoLocal(new Date())});
     }catch(err){toast('Upload failed: '+(err.code||err.message||err));}
+  }
+  // several files picked at once on a SHIPMENT → also bind them into one PDF, because the invoice can
+  // only carry a single attachment. Files added in a separate batch can't join it: once uploaded they
+  // are unreadable to the browser (Storage blocks cross-origin reads).
+  if(attRef.list==='entries'&&Array.from(files).length>1){
+    st.textContent='Making one PDF…';
+    const merged=await mergeDocsToPdf(Array.from(files).map(f=>({file:f,label:f.name})));
+    if(merged){
+      try{
+        const mp='entries/'+e.id+'/'+Date.now()+'_documents.pdf';
+        const murl=await window.__att.upload(mp,merged);
+        const covered=(e.attachments||[]).slice(-Array.from(files).length).map(a=>a.path);
+        e.attachments.unshift({name:'Documents '+(e.awbBl||e.rNo||'').replace(/[^\w.\-]+/g,'')+'.pdf',
+          path:mp,url:murl,size:merged.size,ts:isoLocal(new Date()),combined:true,of:covered});
+      }catch(err){toast('Combined PDF failed — the files are attached individually');}
+    }
   }
   st.textContent='';
   document.getElementById('att_file').value='';
