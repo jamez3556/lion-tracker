@@ -3874,7 +3874,19 @@ function resendInvoice(){
       entryId:e.id,customerName:e.customer||'',cNumber:e.cno||''
     })}).catch(err=>console.warn('Resend failed',err));
   }catch(err){console.warn('Resend error',err);}
-  toast('📧 Resend requested — invoice '+bn+' will be emailed again');
+  // A number typed here is also saved as the shipment's BILL NO — same as typing it in the Form Log
+  // (status → Delivered, Payment shows Bill Done, MP list drops it). Resend used to email the invoice
+  // and leave the tracker blank, so an invoice billed by hand in QuickBooks never got recorded.
+  let saved=false;
+  if(bn!==(e.billNo||'')){
+    const before={...e};
+    e.billNo=bn;e.status='Delivered';
+    if(syncPaymentFromEntry(e))savePayments();
+    syncContFromEntry(e,before,null);
+    saveEntries();renderEntries();renderMP();renderPayments();updateCounts();
+    saved=true;
+  }
+  toast('📧 Resend requested — invoice '+bn+' will be emailed again'+(saved?' · BILL NO saved':''));
 }
 // Shipment documents (all staff): files live in Firebase Storage (entries/<id>/…), the metadata list
 // syncs on the entry itself so every device sees the same attachments. Deleting an entry leaves the
