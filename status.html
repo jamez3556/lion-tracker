@@ -129,6 +129,29 @@ function billState(s){
   return Number(s.balance)<=0?{k:'b-paid',t:'Paid'}:{k:'b-due',t:'Payment due'};
 }
 
+// Page order — what needs watching is at the top, finished business at the bottom:
+//   1. booked for clearance      → earliest clearance date first
+//   2. still in port, not booked → least time left first (overdue at the very top of the group)
+//   3. cleared, invoice to come
+//   4. invoiced                  → newest first, at the bottom
+function shipRank(s){
+  if(s.billNo)return 3;
+  if(isCleared(s))return 2;
+  return s.clearance?0:1;
+}
+function sortShips(a,b){
+  const ra=shipRank(a),rb=shipRank(b);
+  if(ra!==rb)return ra-rb;
+  if(ra===0)return String(a.clearance||'9999-99-99').localeCompare(String(b.clearance||'9999-99-99'));
+  if(ra===1){
+    const na=a.lastDate?daysLeft(a.lastDate):null, nb=b.lastDate?daysLeft(b.lastDate):null;
+    if(na===null&&nb===null)return String(b.date||'').localeCompare(String(a.date||''));
+    if(na===null)return 1;      // no free-date information — after the ones we can measure
+    if(nb===null)return -1;
+    return na-nb;
+  }
+  return String(b.date||'').localeCompare(String(a.date||''));   // newest first
+}
 function shipCard(s){
   const sea=s.type==='MP';
   const ref=(sea?'BL ':'AWB ')+(s.awbBl||s.blNo||'—');
@@ -200,7 +223,7 @@ function render(d){
     ${owed>0?`<div class="who" style="border-color:#fecaca;background:#fef2f2;color:#b91c1c">
         <div class="k" style="color:#b91c1c">Outstanding balance</div><b>${money(owed)}</b>
         <div style="font-size:12.5px;margin-top:2px">across ${unpaid.length} invoice${unpaid.length===1?'':'s'}</div></div>`:''}`;
-  h+=ships.length?ships.map(shipCard).join(''):'<div class="msg">No shipments on this account yet.</div>';
+  h+=ships.length?ships.slice().sort(sortShips).map(shipCard).join(''):'<div class="msg">No shipments on this account yet.</div>';
   main.innerHTML=h;
   document.getElementById('foot').innerHTML=
     `Updated ${fmt(d.updated)}${d.updatedTime?' at '+esc(d.updatedTime):''} · LION Logistics Pvt Ltd, Malé, Maldives<br>
