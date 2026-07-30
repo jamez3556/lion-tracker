@@ -14,7 +14,9 @@
 body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
   background:var(--bg);color:var(--ink);-webkit-text-size-adjust:100%}
 header{background:#0f172a;color:#fff;padding:18px;border-bottom:5px solid var(--brand)}
-.hwrap{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.hwrap{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}
+.hwrap:active{opacity:.7}
 .logo{width:76px;height:76px;border-radius:12px;background:#fff;display:grid;place-items:center;
   flex:0 0 auto;padding:7px}
 .logo img{width:100%;height:100%;object-fit:contain;display:block}
@@ -81,9 +83,10 @@ a{color:var(--brand)}
 </style>
 </head>
 <body>
-<header><div class="hwrap">
+<header><div class="hwrap" id="hdr" title="Tap to refresh">
   <div class="logo"><img src="logo.png" alt="LION Logistics"></div>
-  <div><h1>LI<span>O</span>N LOGISTICS</h1><div class="sub">Shipment &amp; customs clearance status</div></div>
+  <div><h1>LI<span>O</span>N LOGISTICS</h1>
+    <div class="sub" id="hdr_sub">Shipment &amp; customs clearance status</div></div>
 </div></header>
 <main id="main"><div class="msg">Loading your shipments…</div></main>
 <footer id="foot"></footer>
@@ -294,21 +297,35 @@ function wireMessage(d){
   });
 }
 
-(async()=>{
-  const key=(location.hash||'').replace(/^#/,'').trim();
-  PORTAL_KEY=key;
+// Tapping the logo or the company name re-reads the shipments — the natural thing to do on a phone
+// when you want to know whether anything has moved.
+const sub=document.getElementById('hdr_sub');
+const SUBTITLE='Shipment &amp; customs clearance status';
+let loading=false;
+async function load(){
+  const key=PORTAL_KEY;
   if(!key){main.innerHTML='<div class="msg">This link is incomplete. Please use the full link sent to you by LION Logistics.</div>';return;}
+  if(loading)return;
+  loading=true;sub.textContent='Updating…';
   try{
     const snap=await getDoc(doc(db,'portal',key));
     if(!snap.exists()){
-      main.innerHTML='<div class="msg">This tracking link is no longer active.<br>Please contact LION Logistics for a new one.</div>';return;
+      main.innerHTML='<div class="msg">This tracking link is no longer active.<br>Please contact LION Logistics for a new one.</div>';
+    }else{
+      render(snap.data());
+      window.scrollTo({top:0,behavior:'smooth'});
     }
-    render(snap.data());
+    sub.innerHTML=SUBTITLE;
   }catch(err){
     console.error(err);
     main.innerHTML='<div class="msg">Could not load your shipments right now. Please try again shortly.</div>';
+    sub.innerHTML=SUBTITLE;
   }
-})();
+  loading=false;
+}
+document.getElementById('hdr').addEventListener('click',load);
+PORTAL_KEY=(location.hash||'').replace(/^#/,'').trim();
+load();
 </script>
 </body>
 </html>
