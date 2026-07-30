@@ -514,7 +514,13 @@
       <div class="grid3">
         <div class="field"><label>AWB NO *</label><input id="b_awb" placeholder="e.g. 898-81050141"></div>
         <div class="field"><label>WEIGHT (KG) *</label><input id="b_kg" type="number" step="any" min="0" inputmode="decimal"></div>
-        <div class="field"><label>CUSTOMER</label><input id="b_cust" placeholder="name on the DO"></div>
+        <div class="field"><label>CUSTOMER</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="b_cust" placeholder="name on the DO" style="flex:1;min-width:0">
+            <button type="button" class="ghost" title="Choose another customer" onclick="bCustOpen()" style="padding:0 13px;font-weight:800;font-size:17px;line-height:2">＋</button>
+          </div>
+          <div id="b_custList" style="display:none;border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px;margin-top:6px;max-height:260px;overflow:auto"></div>
+        </div>
       </div>
       <div class="grid3">
         <div class="field"><label>MACL BILL Rf (actual)</label><input id="b_macl" type="number" step="any" min="0" inputmode="decimal" placeholder="handling invoice total"></div>
@@ -4386,11 +4392,48 @@ function bToggleCapture(){
   c.style.display=opening?'':'none';
   if(opening){
     ['b_ph_do','b_ph_macl','b_ph_dem','b_ph_awb','b_awb','b_kg','b_cust','b_macl','b_dem'].forEach(id=>{document.getElementById(id).value='';});
+    document.getElementById('b_cust').value=B_DEF_CUST;   // nearly every snap is STELCO — ＋ changes it
+    document.getElementById('b_custList').style.display='none';
     window.__bRno='';window.__bReads={};bExtras=[];bExList();['do','macl','dem','awb'].forEach(bPickLabel);
     document.getElementById('b_verify').innerHTML='';
     document.getElementById('b_capStatus').textContent='';
     setTimeout(()=>document.getElementById('b_awb').focus(),50);
   }
+}
+/* ── Customer on a DO snap ───────────────────────────────────────────────────
+   Defaults to STELCO because that is what nearly every snap is; ＋ opens the full customer list
+   (searchable) and staff can also just type a name that isn't on it. */
+const B_DEF_CUST='STATE ELECTRIC COMPANY';
+function bCustOpen(){
+  const box=document.getElementById('b_custList');
+  if(box.style.display!=='none'){box.style.display='none';return;}
+  box.style.display='';
+  box.innerHTML='<input id="b_custQ" placeholder="Search customer or C number…" oninput="bCustFill()" style="width:100%;margin-bottom:8px">'
+               +'<div id="b_custRows"></div>';
+  bCustFill();
+  setTimeout(()=>{const q=document.getElementById('b_custQ');if(q)q.focus();},30);
+}
+function bCustFill(){
+  const q=((document.getElementById('b_custQ')||{}).value||'').toUpperCase().trim();
+  const rows=customers
+    .filter(c=>/[A-Za-z]/.test(c.name||''))              // skip junk rows (a stray "`" sits in the list)
+    .filter(c=>!q||((c.name||'')+' '+(c.cno||'')).toUpperCase().includes(q))
+    .sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')))
+    .slice(0,80);
+  document.getElementById('b_custRows').innerHTML=
+    (rows.length?rows.map(c=>'<div class="bcustrow" data-name="'+esc(c.name||'')+'" onclick="bCustSet(this.dataset.name)" '
+      +'style="padding:9px 8px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13.5px">'
+      +'<b>'+esc(c.name||'—')+'</b> <span style="color:var(--muted)">'+esc(c.cno||'')+'</span></div>').join('')
+     :'<div style="padding:8px;color:var(--muted);font-size:13px">No customer matches — type the name in the box instead.</div>')
+    +'<div onclick="bCustTypeNew()" style="padding:9px 8px;margin-top:4px;cursor:pointer;color:#FF4F00;font-weight:700;font-size:13.5px">＋ Type a name that is not on the list</div>';
+}
+function bCustSet(name){
+  document.getElementById('b_cust').value=name||'';
+  document.getElementById('b_custList').style.display='none';
+}
+function bCustTypeNew(){
+  document.getElementById('b_custList').style.display='none';
+  const i=document.getElementById('b_cust');i.value='';i.focus();
 }
 function bPickLabel(slot){
   const f=document.getElementById('b_ph_'+slot).files[0];
@@ -4410,29 +4453,17 @@ function bClear(slot){
   document.getElementById('b_capStatus').textContent='Document removed'+(slot==='do'?' — the DO is required':'');
 }
 const bIsPdf=f=>f&&(f.type==='application/pdf'||/\.pdf$/i.test(f.name||''));
+/* Documents are ATTACHED, never read. Automatic reading of these documents (AI and OCR alike) kept
+   putting wrong air waybill numbers and weights into the form off crumpled, dot-matrix, sideways
+   photos, and a wrong number that looks filled-in is worse than an empty box. Staff type the details;
+   the photos ride along to the customer as before. Do not re-enable auto-read without being asked. */
 function bPick(slot){
   bPickLabel(slot);
-  // ANY document attached → auto-read (photos AND PDFs; fills empty fields only, always amendable).
-  // Per-slot trust: MACL/demurrage tax invoices carry the MASTER consolidator's name (e.g. SPEDICON)
-  // and the MASTER AWB — from those slots only the bill amounts fill; name/AWB/weight come from the
-  // Pick Order and the HAWB/MAWB document. Every read is kept for the cross-document AWB check.
   const f=document.getElementById('b_ph_'+slot).files[0];
   if(!f)return;
   const st=document.getElementById('b_capStatus');
-  const MAPS={
-    do:  {awb:'b_awb',kg:'b_kg',cust:'b_cust',macl:'b_macl',demur:'b_dem',rno:'__bRno'},
-    awb: {awb:'b_awb',kg:'b_kg',cust:'b_cust',rno:'__bRno'},
-    macl:{macl:'b_macl',demur:'b_dem'},
-    dem: {demur:'b_dem',macl:'b_macl'}
-  };
-  docExtract(f,m=>st.textContent=m)
-    .then(p=>{
-      window.__bReads=window.__bReads||{};
-      if(p)window.__bReads[slot]=p;else delete window.__bReads[slot];
-      ocrFill(p,MAPS[slot]||MAPS.do,st);
-      bVerifyDocs();
-    })
-    .catch(()=>st.textContent='Auto-read unavailable (offline?) — type the details');
+  const name={do:'DO / Pick Order',macl:'MACL bill',dem:'Demurrage bill',awb:'AWB'}[slot]||'Document';
+  st.textContent='✅ '+name+' attached — type the details below';
 }
 // Cross-check the AWB/HAWB numbers read from every attached document. House and master numbers
 // legitimately differ on consolidations, so two documents "belong together" when ANY of their
