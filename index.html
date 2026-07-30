@@ -349,6 +349,26 @@
 
 <!-- ==================== MP SHIPMENTS VIEW ==================== -->
 <section class="view" id="view-mp">
+  <div class="toolbar" style="margin-bottom:10px">
+    <button id="mpt_ship" class="primary" onclick="setMpTab('ship')">🚢 Shipments</button>
+    <button id="mpt_eeman" class="ghost" style="display:none" onclick="setMpTab('eeman')">💸 EEMAN Account</button>
+  </div>
+  <div id="mp_eeman_pane" style="display:none">
+    <div class="stats" id="me_stats"></div>
+    <div class="toolbar" style="justify-content:flex-end">
+      <button class="primary" onclick="eemanPayAdd()">＋ Record payment to EEMAN</button>
+    </div>
+    <div class="tablewrap m-cards">
+      <div class="scroll">
+        <table style="min-width:640px">
+          <thead><tr><th>DATE</th><th class="num">PAID (MVR)</th><th>NOTE</th><th class="nosort actcol"></th></tr></thead>
+          <tbody id="me_tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="me_empty" style="display:none"><div class="big">💸</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No payments recorded yet</div><div style="color:var(--muted);font-size:13px;margin-top:4px">Every transfer to EEMAN goes here — outstanding = his recorded charges − payments.</div></div>
+    </div>
+  </div>
+  <div id="mp_ship_pane">
   <div class="stats" id="mp_stats"></div>
   <div class="toolbar">
     <div class="search">
@@ -389,6 +409,7 @@
     <div class="empty" id="mp_empty" style="display:none"><div class="big">🛳️</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No MP shipments awaiting a bill</div><div style="margin-top:4px">MP shipments appear here until a Bill No is entered for them in the Form Log.</div></div>
     <div class="pager" id="mp_pager"></div>
   </div>
+  </div><!-- /mp_ship_pane -->
 </section>
 
 <!-- ==================== CONTAINERS VIEW ==================== -->
@@ -2277,6 +2298,8 @@ function renderMP(){
   const rows=filteredMP();
   const slice=rows.slice((mpState.page-1)*PAGE_SIZE,mpState.page*PAGE_SIZE);
   const the=document.getElementById('mp_th_eeman');if(the)the.style.display=isAdmin()?'':'none';
+  const mte=document.getElementById('mpt_eeman');if(mte)mte.style.display=isAdmin()?'':'none';
+  if(mpTab==='eeman'&&isAdmin())renderEemanAcct();
   document.getElementById('mp_empty').style.display=rows.length===0?'block':'none';
   document.getElementById('mp_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}">
     <td class="num" data-l="No">${r.no??'—'}</td>
@@ -2304,6 +2327,75 @@ function renderMP(){
       <button class="iconbtn del" onclick="delEntry('${jatt(r.id)}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
   pagerHTML(document.getElementById('mp_pager'),mpState,rows.length,'mp');
+}
+/* ── EEMAN ACCOUNT (admin only, inside MP Shipments) ─────────────────────────
+   EEMAN bills per shipment (outCost on each MP entry) and LION pays him LUMP SUMS on account —
+   exactly the TOTAL / Paid / Pending shape of his own ledger sheet. Payments live in Firestore
+   settings/eeman (same collection as the AI key, so no rules change): {pays:[{d,amt,note}],u}.
+   Outstanding = Σ recorded charges − Σ payments. Honest caveat shown when charges are missing:
+   old shipments without a recorded charge make the outstanding look SMALLER than reality. */
+let mpTab='ship', eemanPays=null; // null = not loaded yet
+function setMpTab(t){
+  if(t==='eeman'&&!isAdmin())t='ship';
+  mpTab=t;
+  document.getElementById('mpt_ship').className=t==='ship'?'primary':'ghost';
+  document.getElementById('mpt_eeman').className=t==='eeman'?'primary':'ghost';
+  document.getElementById('mp_ship_pane').style.display=t==='ship'?'':'none';
+  document.getElementById('mp_eeman_pane').style.display=t==='eeman'?'':'none';
+  if(t==='eeman')renderEemanAcct();
+}
+async function eemanLoad(){
+  if(eemanPays)return eemanPays;
+  try{eemanPays=(window.__eeman&&(await window.__eeman.get()).pays)||[];}
+  catch(e){eemanPays=[];toast('Could not load EEMAN payments (offline?)');}
+  return eemanPays;
+}
+async function eemanSave(){
+  try{await window.__eeman.set({pays:eemanPays,u:Date.now()});}
+  catch(e){toast('⚠ Payment NOT saved to the cloud: '+(e.code||e.message));}
+}
+async function renderEemanAcct(){
+  const tb=document.getElementById('me_tbody');if(!tb)return;
+  await eemanLoad();
+  const pays=eemanPays.slice().sort((a,b)=>String(b.d||'').localeCompare(String(a.d||'')));
+  const mp=entries.filter(e=>e.type==='MP');
+  const billed=mp.reduce((s,e)=>s+((e.outCost&&e.outCost.amt!=null)?Number(e.outCost.amt):0),0);
+  const missing=mp.filter(e=>(e.billNo||e.status==='Cleared'||e.status==='Delivered')&&!(e.outCost&&e.outCost.amt!=null)).length;
+  const paid=pays.reduce((s,p)=>s+(Number(p.amt)||0),0);
+  const out=invMoney(billed-paid);
+  document.getElementById('me_stats').innerHTML=`
+    <div class="card c-purple"><div class="n">${fmtNum(invMoney(billed))}</div><div class="l">EEMAN Charges Recorded</div></div>
+    <div class="card c-blue"><div class="n">${fmtNum(invMoney(paid))}</div><div class="l">Paid to EEMAN</div></div>
+    <div class="card ${out>0?'c-danger':'c-info'}"><div class="n">${fmtNum(out)}</div><div class="l">${out>=0?'Outstanding to EEMAN':'Overpaid / Advance'}</div></div>
+    ${missing?`<div class="card c-warn" style="cursor:pointer" onclick="setMpTab('ship');document.getElementById('mp_search').focus()"><div class="n">${missing}</div><div class="l">⚠ Charges Not Recorded — outstanding shows less than reality</div></div>`:''}`;
+  document.getElementById('me_empty').style.display=pays.length?'none':'block';
+  tb.innerHTML=pays.map((p,i)=>`<tr>
+    <td data-l="Date">${fmtDate(p.d)}</td>
+    <td class="num" data-l="Paid" style="font-weight:700">${fmtNum(p.amt)}</td>
+    <td data-l="Note">${esc(p.note)||'—'}</td>
+    <td class="actcol"><button class="iconbtn del" onclick="eemanPayDel(${i})" title="Delete this payment">🗑️</button></td>
+  </tr>`).join('');
+}
+async function eemanPayAdd(){
+  if(!isAdmin())return;
+  await eemanLoad();
+  const amt=Number(String(prompt('Amount paid to EEMAN (MVR):','')||'').replace(/[^\d.]/g,''));
+  if(!amt||amt<=0)return;
+  let d=prompt('Date paid (YYYY-MM-DD):',isoLocal(new Date()));
+  if(d===null)return;
+  d=d.trim()||isoLocal(new Date());
+  const note=(prompt('Note (transfer ref / which account):','')||'').trim();
+  eemanPays.push({d,amt,note});
+  await eemanSave();renderEemanAcct();
+  toast('💸 Paid '+fmtNum(amt)+' recorded');
+}
+async function eemanPayDel(i){
+  await eemanLoad();
+  const sorted=eemanPays.slice().sort((a,b)=>String(b.d||'').localeCompare(String(a.d||'')));
+  const p=sorted[i];if(!p)return;
+  if(!confirm('Delete the payment of '+fmtNum(p.amt)+' on '+fmtDate(p.d)+'?'))return;
+  eemanPays.splice(eemanPays.indexOf(p),1);
+  await eemanSave();renderEemanAcct();
 }
 function setMpRemark(id,val){
   const r=entries.find(x=>x.id===id);if(!r)return;
@@ -6530,6 +6622,11 @@ async function startSync(){
       // reading quality/cost: 'fast' (haiku, ~5× cheaper) | 'best' (opus) | 'off' (free OCR only)
       mode:async()=>{const s=await fx.getDoc(fx.doc(db,'settings','ai'));return s.exists()?(s.data().mode||''):'';},
       setMode:async(m)=>{await fx.setDoc(fx.doc(db,'settings','ai'),{mode:m||'fast',u:Date.now()},{merge:true});}
+    };
+    // EEMAN payment ledger (admin's 💸 EEMAN Account inside MP Shipments) — same settings collection
+    window.__eeman={
+      get:async()=>{const s=await fx.getDoc(fx.doc(db,'settings','eeman'));return s.exists()?s.data():{pays:[]};},
+      set:async(d)=>{await fx.setDoc(fx.doc(db,'settings','eeman'),d,{merge:false});}
     };
     fx.onAuthStateChanged(auth,user=>{
       if(user){
