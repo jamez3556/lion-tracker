@@ -1341,7 +1341,7 @@ document.querySelectorAll('#nav button').forEach(b=>{
 });
 function updateCounts(){
   document.getElementById('cnt-entries').textContent=entries.length.toLocaleString();
-  document.getElementById('cnt-mp').textContent=entries.filter(e=>e.type==='MP'&&!e.billNo).length.toLocaleString();
+  document.getElementById('cnt-mp').textContent=entries.filter(e=>e.type==='MP'&&!e.billNo&&!isBillOnly(e)).length.toLocaleString();
   document.getElementById('cnt-containers').textContent=containers.length.toLocaleString();
   document.getElementById('cnt-payments').textContent=payments.length.toLocaleString();
   document.getElementById('cnt-customers').textContent=customers.length.toLocaleString();
@@ -2242,6 +2242,7 @@ function filteredMP(){
   const mf=document.getElementById('mp_monthFilter').value;
   let rows=entries.filter(r=>{
     if(r.type!=='MP')return false;
+    if(isBillOnly(r))return false;            // STELCO-desk sea (billing-only) lives on its own desk, never here
     if(r.billNo)return false;                 // billed → leaves the MP list (invoice entered in Form Log)
     if(q&&![r.cno,r.customer,r.awbBl,r.rNo,r.file,r.mpRemark].join(' ').toLowerCase().includes(q))return false;
     if(sf&&r.status!==sf)return false;
@@ -2252,7 +2253,9 @@ function filteredMP(){
 }
 function renderMP(){
   buildMpMonthFilter();
-  const mp=entries.filter(e=>e.type==='MP');
+  // billing-only sea (STELCO desk) stays OFF this tab — same rule as STELCO air and the Form Log.
+  // This tab is the worklist for normal documented MP clearances only.
+  const mp=entries.filter(e=>e.type==='MP'&&!isBillOnly(e));
   const unbilled=mp.filter(r=>!r.billNo);            // the list shown here (billed ones drop off)
   const notCleared=unbilled.filter(r=>r.status!=='Cleared').length;
   const clearedNoBill=unbilled.filter(r=>r.status==='Cleared').length;
