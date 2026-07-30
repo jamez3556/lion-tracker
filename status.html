@@ -115,13 +115,16 @@ function pill(s){
   const label=s==='Delivered'?'Completed':s;
   return `<span class="pill ${k}">${esc(label)}</span>`;
 }
-function field(k,v){return `<div class="f"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`;}
+function field(k,v,red){return `<div class="f"><div class="k">${esc(k)}</div><div class="v"${red?' style="color:var(--danger)"':''}>${v}</div></div>`;}
 function money(n){return Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+// CLEARED means the shipment's own status says so. The container's "clearance" field is the date the
+// cargo is BOOKED to be cleared (noted) — a shipment can have one and still be sitting in port, so it
+// must never be read as proof the job is finished.
+function isCleared(s){return s.status==='Cleared'||s.status==='Delivered';}
 // Billing state, said plainly and never guessed. "Paid"/"Payment due" only appear when QuickBooks has
 // actually reported the balance; with an invoice but no balance figure we just say "Invoiced".
 function billState(s){
-  const cleared=!!(s.clearance||s.status==='Cleared'||s.status==='Delivered');
-  if(!s.billNo)return cleared?{k:'b-none',t:'Not billed yet'}:null;
+  if(!s.billNo)return isCleared(s)?{k:'b-none',t:'Not billed yet'}:null;
   if(s.balance==null)return {k:'b-inv',t:'Invoiced'};
   return Number(s.balance)<=0?{k:'b-paid',t:'Paid'}:{k:'b-due',t:'Payment due'};
 }
@@ -129,8 +132,14 @@ function billState(s){
 function shipCard(s){
   const sea=s.type==='MP';
   const ref=(sea?'BL ':'AWB ')+(s.awbBl||s.blNo||'—');
-  const done=s.status==='Delivered'||s.status==='Cleared';
   const bs=billState(s);
+  const cleared=isCleared(s);
+  const noted=!!s.clearance;                       // booked for clearance = under control
+  const left=s.lastDate?daysLeft(s.lastDate):null; // working days, Fridays excluded
+  // RED means someone should act: a clearance date that hasn't happened yet, or a free period running
+  // out on cargo nobody has booked in. Once the shipment is cleared, both go back to normal.
+  const clearRed=!cleared;
+  const lastRed=!cleared&&!noted&&left!==null&&left<=3;
   let out=`<div class="ship"><div class="ship-top">
       <div><div class="ref">${esc(ref)}</div>
         <div class="meta">${sea?'Sea freight':'Air freight'} · logged ${fmt(s.date)}${s.rNo?' · Ref '+esc(s.rNo):''}</div></div>
@@ -139,23 +148,25 @@ function shipCard(s){
   if(s.pkgs!=='')out+=field('Packages',esc(s.pkgs));
   if(s.grsWt!=='')out+=field('Gross weight',esc(s.grsWt)+' kg');
   if(s.doDate)out+=field('Delivery order',fmt(s.doDate));
-  if(s.lastDate)out+=field('Last free date',fmt(s.lastDate));
-  if(s.clearance)out+=field('Cleared',fmt(s.clearance));
+  if(s.lastDate)out+=field('Last free date',fmt(s.lastDate),lastRed);
+  if(s.clearance)out+=field(cleared?'Cleared on':'Clearance booked',fmt(s.clearance),clearRed);
   if(s.billNo)out+=field('Invoice',esc(s.billNo));
   if(s.total!=null)out+=field('Invoice total',money(s.total));
   if(s.balance!=null&&Number(s.balance)>0)out+=field('Balance due',money(s.balance));
   out+='</div>';
-  if(bs&&bs.k==='b-none')out+=`<div class="warnbox w-soon">Cleared — your invoice is being prepared.</div>`;
+  if(bs&&bs.k==='b-none')out+=`<div class="warnbox w-ok">Customs clearance complete — your invoice is being prepared.</div>`;
   if(bs&&bs.k==='b-due')out+=`<div class="warnbox w-late">Payment due: ${money(s.balance)} against invoice ${esc(s.billNo)}.</div>`;
-  // free-period warning, only while the cargo is still in port
-  if(s.lastDate&&!s.clearance&&!done){
-    const n=daysLeft(s.lastDate);
+  // free-period countdown — only while the cargo sits in port with no clearance booked
+  if(s.lastDate&&!noted&&!cleared){
+    const n=left;
     if(n!==null){
       if(n<0)out+=`<div class="warnbox w-late">⚠ Free period ended ${Math.abs(n)} working day${Math.abs(n)===1?'':'s'} ago — storage charges may apply.</div>`;
       else if(n===0)out+=`<div class="warnbox w-late">⚠ Last free day is today.</div>`;
       else if(n<=3)out+=`<div class="warnbox w-soon">${n} working day${n===1?'':'s'} left before storage charges start.</div>`;
       else out+=`<div class="warnbox w-ok">${n} working days left in the free period.</div>`;
     }
+  }else if(noted&&!cleared){
+    out+=`<div class="warnbox w-soon">Booked for clearance on ${fmt(s.clearance)} — not completed yet.</div>`;
   }
   if(s.containers&&s.containers.length){
     out+='<div class="scroll"><table class="ctn"><thead><tr><th>Container</th><th>Size</th><th>Arrived</th><th>Discharged</th><th>Out of port</th></tr></thead><tbody>';
@@ -169,9 +180,9 @@ function shipCard(s){
 
 function render(d){
   const ships=d.shipments||[];
-  const active=ships.filter(s=>s.status!=='Delivered').length;
-  const inPort=ships.filter(s=>s.lastDate&&!s.clearance&&s.status!=='Delivered').length;
-  const due=ships.filter(s=>{if(!s.lastDate||s.clearance||s.status==='Delivered')return false;
+  const active=ships.filter(s=>!isCleared(s)).length;
+  // urgent = still not cleared, nothing booked, and the free period is nearly (or already) gone
+  const due=ships.filter(s=>{if(!s.lastDate||s.clearance||isCleared(s))return false;
     const n=daysLeft(s.lastDate);return n!==null&&n<=3;}).length;
   const states=ships.map(billState);
   const notBilled=states.filter(b=>b&&b.k==='b-none').length;
@@ -181,9 +192,8 @@ function render(d){
       <div class="meta" style="font-size:12.5px;color:var(--muted)">Customer number ${esc(d.cno||'—')}</div></div>
     <div class="stats">
       <div class="stat"><div class="n">${ships.length}</div><div class="l">Shipments</div></div>
-      <div class="stat"><div class="n">${active}</div><div class="l">In progress</div></div>
-      <div class="stat"><div class="n">${inPort}</div><div class="l">Awaiting clearance</div></div>
-      <div class="stat" style="${due?'outline:2px solid var(--danger)':''}"><div class="n" style="${due?'color:var(--danger)':''}">${due}</div><div class="l">Due within 3 days</div></div>
+      <div class="stat"><div class="n">${active}</div><div class="l">Awaiting clearance</div></div>
+      <div class="stat" style="${due?'outline:2px solid var(--danger)':''}"><div class="n" style="${due?'color:var(--danger)':''}">${due}</div><div class="l">Needs attention</div></div>
       ${notBilled?`<div class="stat"><div class="n">${notBilled}</div><div class="l">Awaiting invoice</div></div>`:''}
       ${unpaid.length?`<div class="stat" style="outline:2px solid var(--danger)"><div class="n" style="color:var(--danger)">${unpaid.length}</div><div class="l">Payment due</div></div>`:''}
     </div>
