@@ -491,6 +491,7 @@
   <div class="toolbar">
     <button id="bt_snaps" class="primary" onclick="setBTab('snaps')">📸 DO Snaps</button>
     <button id="bt_stelco" class="ghost" onclick="setBTab('stelco')">⚡ STELCO</button>
+    <button id="bt_profit" class="ghost" style="display:none" onclick="setBTab('profit')">💰 Sea Profit</button>
     <span style="flex:1"></span>
     <button class="ghost" onclick="aiKeySetup()" title="Admin: paste the Anthropic API key that powers the AI document reader">🔑 AI</button>
     <button class="primary" id="b_snapBtn" onclick="bToggleCapture()" style="background:#FF4F00">📸 Snap DO photo</button>
@@ -563,6 +564,22 @@
         </table>
       </div>
       <div class="empty" id="b_st_empty" style="display:none"><div class="big">⚡</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No STELCO shipments yet</div></div>
+    </div>
+  </div>
+
+  <div id="b_pane_profit" style="display:none">
+    <div class="stats" id="b_pr_stats"></div>
+    <div class="tablewrap m-cards">
+      <div class="scroll">
+        <table style="min-width:900px">
+          <thead><tr>
+            <th>DATE</th><th>BL</th><th>📦 CONTAINERS</th><th>BILL NO</th>
+            <th class="num">BILLED (MVR)</th><th class="num">EEMAN (MVR)</th><th class="num">PROFIT</th><th class="num">%</th>
+          </tr></thead>
+          <tbody id="b_pr_tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="b_pr_empty" style="display:none"><div class="big">💰</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No billed sea shipments yet</div><div style="color:var(--muted);font-size:13px;margin-top:4px">Profit appears here after a sea shipment is billed (🧾) and EEMAN's charge is typed (💸).</div></div>
     </div>
   </div>
 </section>
@@ -4275,17 +4292,23 @@ function dpMatch(dp){
 let bTab='snaps';
 function openDoQueue(){setBTab('snaps');switchView('billing');}
 function setBTab(t){
+  if(t==='profit'&&!isAdmin())t='stelco';   // profit is the owner's view only
   bTab=t;
   document.getElementById('bt_snaps').className=t==='snaps'?'primary':'ghost';
   document.getElementById('bt_stelco').className=t==='stelco'?'primary':'ghost';
+  document.getElementById('bt_profit').className=t==='profit'?'primary':'ghost';
   document.getElementById('b_pane_snaps').style.display=t==='snaps'?'':'none';
   document.getElementById('b_pane_stelco').style.display=t==='stelco'?'':'none';
+  document.getElementById('b_pane_profit').style.display=t==='profit'?'':'none';
   document.getElementById('b_snapBtn').style.display=t==='snaps'?'':'none';
   renderDoQueue();
 }
 function renderDoQueue(){
   autoLinkSnaps(); // pick up snaps synced in from do.html and attach them to their shipments
   renderStelcoDesk();
+  const pb=document.getElementById('bt_profit');
+  if(pb)pb.style.display=isAdmin()?'':'none';
+  if(bTab==='profit')renderSeaProfit();
   const box=document.getElementById('dp_list');if(!box)return;
   const pend=dosnaps.filter(d=>d.status==='pending').length;
   const m=isoLocal(new Date()).slice(0,7);
@@ -5204,6 +5227,57 @@ function stelcoBill(entryId){
     invAddLine({name:'Storage Fee (Air)',qty:1,rate:Number(e.demur),tax:0});
     invCalc();
   }
+}
+/* ── SEA PROFIT (admin only) ─────────────────────────────────────────────────
+   What each sea shipment actually earned: STELCO invoice − EEMAN's charge. The invoice figure
+   prefers the REAL QuickBooks total (qbTotal, set on fetch/payment webhooks); else it is computed
+   from the lines as sent (qbLines); else estimated from the sizes × the sea template (marked ≈). */
+function seaInvTotal(e){
+  if(e.qbTotal!=null)return {amt:Number(e.qbTotal),est:false};
+  if(e.qbLines&&e.qbLines.length){
+    let t=0;e.qbLines.forEach(l=>{const a=(Number(l.qty)||0)*(Number(l.rate)||0);t+=a*(Number(l.tax)?1.08:1);});
+    if(t)return {amt:invMoney(t),est:false};
+  }
+  const sizes=contSizeCounts(e);
+  if(sizes&&e.billNo){
+    let t=0;
+    expectedLines(e).forEach(l=>{const a=(Number(l.qty)||0)*(Number(l.rate)||0);t+=a*(Number(l.tax)?1.08:1);});
+    if(t)return {amt:invMoney(t),est:true};
+  }
+  return null;
+}
+function renderSeaProfit(){
+  const tb=document.getElementById('b_pr_tbody');if(!tb)return;
+  const rows=stelcoRows().filter(e=>e.type==='MP'&&(e.billNo||(e.outCost&&e.outCost.amt!=null)))
+    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  document.getElementById('b_pr_empty').style.display=rows.length?'none':'block';
+  const mo=isoLocal(new Date()).slice(0,7);
+  let tBill=0,tCost=0,mBill=0,mCost=0,anyEst=false,costMissing=0;
+  tb.innerHTML=rows.map(e=>{
+    const inv=seaInvTotal(e);
+    const cost=(e.outCost&&e.outCost.amt!=null)?Number(e.outCost.amt):null;
+    if(inv){tBill+=inv.amt;if((e.date||'').startsWith(mo))mBill+=inv.amt;if(inv.est)anyEst=true;}
+    if(cost!=null){tCost+=cost;if((e.date||'').startsWith(mo))mCost+=cost;}
+    else if(e.billNo)costMissing++;
+    const profit=(inv&&cost!=null)?invMoney(inv.amt-cost):null;
+    const pct=(profit!=null&&inv.amt)?Math.round(profit/inv.amt*100):null;
+    return `<tr>
+      <td data-l="Date">${fmtDate(e.date)}</td>
+      <td data-l="BL">${esc(e.awbBl)||'—'}</td>
+      <td data-l="Containers">${esc(seaContLabel(e))||'—'}</td>
+      <td data-l="Bill No">${esc(e.billNo)||'<span style="color:#b45309">not billed</span>'}</td>
+      <td class="num" data-l="Billed">${inv?(inv.est?'≈ ':'')+fmtNum(inv.amt):'—'}</td>
+      <td class="num" data-l="EEMAN">${cost!=null?fmtNum(cost):`<span style="cursor:pointer;color:#dc2626;font-weight:700;border-bottom:1px dashed #dc2626" onclick="stOut('${e.id}')" title="Type EEMAN's charge from their bill">＋ missing</span>`}</td>
+      <td class="num" data-l="Profit">${profit!=null?`<span style="font-weight:800;color:${profit>=0?'#16a34a':'#dc2626'}">${profit>=0?'+':''}${fmtNum(profit)}</span>`:'—'}</td>
+      <td class="num" data-l="%">${pct!=null?pct+'%':'—'}</td>
+    </tr>`;}).join('');
+  const st=document.getElementById('b_pr_stats');
+  if(st)st.innerHTML=`
+    <div class="card c-info"><div class="n">${fmtNum(invMoney(mBill-mCost))}</div><div class="l">💰 Profit · ${new Date().toLocaleDateString('en-GB',{month:'short'})}</div></div>
+    <div class="card ${tBill-tCost>=0?'c-blue':'c-danger'}"><div class="n">${anyEst?'≈ ':''}${fmtNum(invMoney(tBill-tCost))}</div><div class="l">Profit · All Time</div></div>
+    <div class="card c-purple"><div class="n">${fmtNum(invMoney(tBill))}</div><div class="l">Billed to STELCO</div></div>
+    <div class="card c-warn"><div class="n">${fmtNum(invMoney(tCost))}</div><div class="l">Paid to EEMAN</div></div>
+    ${costMissing?`<div class="card c-danger"><div class="n">${costMissing}</div><div class="l">💸 EEMAN Bill Missing</div></div>`:''}`;
 }
 function renderStelcoDesk(){
   const tb=document.getElementById('b_st_tbody');if(!tb)return;
