@@ -59,10 +59,9 @@ table.ctn td{padding:5px 6px;border-bottom:1px solid #f1f5f9}
 .scroll{overflow-x:auto}
 .msg{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:26px 20px;text-align:center;color:var(--muted)}
 .note{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--brand);
-  border-radius:12px;padding:14px 16px;margin:0 0 16px}
-.note h2{font-size:14px;margin:0 0 3px;font-weight:800}
-.note p{margin:0 0 10px;font-size:12.5px;color:var(--muted)}
-.note textarea{width:100%;min-height:78px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;
+  border-radius:12px;padding:11px 13px;margin:0 0 14px}
+.note h2{font-size:13.5px;margin:0 0 8px;font-weight:800}
+.note textarea{width:100%;min-height:52px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;
   font:inherit;font-size:14px;background:transparent;color:var(--ink);resize:vertical;outline:none}
 .note textarea:focus{border-color:var(--brand)}
 .note .row{display:flex;gap:9px;align-items:center;margin-top:9px;flex-wrap:wrap}
@@ -247,13 +246,18 @@ function render(d){
         <div class="k" style="color:#b91c1c">Outstanding balance</div><b>${money(owed)}</b>
         <div style="font-size:12.5px;margin-top:2px">across ${unpaid.length} invoice${unpaid.length===1?'':'s'}</div></div>`:''}`;
   // Message box sits ABOVE the shipment list — at the bottom of a long list nobody ever found it
+  // Shipments are picked by R NUMBER — that is the reference the office works from every day.
+  // Anything still without one falls back to its AWB/BL so it can still be talked about.
   h+=`<div class="note">
       <h2>💬 Send us a message</h2>
-      <p>A question or instruction about a shipment? Write it here and our team will see it straight away.</p>
       <select id="m_ship"><option value="">General message — not about one shipment</option>${
-        ships.slice().sort(sortShips).map(s=>`<option value="${esc(s.awbBl||s.blNo||'')}">${esc((s.type==='MP'?'BL ':'AWB ')+(s.awbBl||s.blNo||'—'))}</option>`).join('')
+        ships.slice().sort(sortShips).map(s=>{
+          const r=String(s.rNo||'').trim();
+          const label=r?('R '+r):((s.type==='MP'?'BL ':'AWB ')+(s.awbBl||s.blNo||'—'));
+          return `<option value="${esc(label)}">${esc(label)}</option>`;
+        }).join('')
       }</select>
-      <div style="height:9px"></div>
+      <div style="height:8px"></div>
       <textarea id="m_text" maxlength="900" placeholder="Type your message…"></textarea>
       <div class="row"><button id="m_send" type="button">Send</button><span id="m_said"></span></div>
     </div>`;
