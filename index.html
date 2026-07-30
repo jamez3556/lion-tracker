@@ -2248,14 +2248,21 @@ const ZAPIER_UPDATE_URL='https://hooks.zapier.com/hooks/catch/15397558/44q4sdo/'
 const ZAPIER_FETCH_URL='https://hooks.zapier.com/hooks/catch/15397558/44l2h33/';
 // Payment received: records a customer payment against the invoice in QuickBooks (Receive Payment).
 const ZAPIER_PAYMENT_URL='https://hooks.zapier.com/hooks/catch/15397558/44lhph5/';
+// Create-invoice hook for shipments that HAVE documents attached: Create Invoice → Attach File(s) →
+// Send Invoice → write-back, so the file rides the customer's ONE email.
+// Shipments with no documents go to ZAPIER_HOOK_URL instead (same Zap minus the attach step). Two
+// hooks because a Zapier Filter halts the WHOLE Zap: a single Zap with "only continue if a file
+// exists" created the invoice and then never sent it or wrote the number back.
+const ZAPIER_HOOK_ATT_URL='https://hooks.zapier.com/hooks/catch/15397558/46bhexi/';
 // Low-level sender. `event` tags what happened so ONE Zap can catch both (filter/branch on it):
 //   'shipment_created' — a new Form Log entry (duty not yet known)
 //   'payment_saved'    — Payment tab saved, carrying the real duty/MACL/MPL/balance
-function zapierPost(payload){
-  if(!ZAPIER_HOOK_URL)return; // not configured yet — harmless no-op
+function zapierPost(payload,url){
+  const target=url||ZAPIER_HOOK_URL;
+  if(!target)return; // not configured yet — harmless no-op
   try{
     // No Content-Type header on purpose — avoids a CORS preflight; Zapier still parses the JSON body.
-    fetch(ZAPIER_HOOK_URL,{method:'POST',body:JSON.stringify(payload)})
+    fetch(target,{method:'POST',body:JSON.stringify(payload)})
       .catch(e=>console.warn('Zapier notify failed',e));
   }catch(e){console.warn('Zapier notify error',e);}
 }
@@ -3747,11 +3754,16 @@ function sendInvoice(){
   // Nothing is sent and the entry isn't flagged unless the user presses OK.
   const summary=invSummaryText(lines);
   const curr=custCurrency(lookupCustomer(e.cno));
+  // up to 4 supporting documents ride the invoice — listed in the review box below, and they decide
+  // which create-invoice Zap this goes to
+  const atts=(e.attachments||[]).slice(0,4);
   if(!confirm(
     'SEND THIS INVOICE TO QUICKBOOKS?\n\n'+
     (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
     'Invoice '+(bn||'(QuickBooks will assign the next number)')+'    '+(e.type==='MP'?'BL ':'AWB ')+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
     'Email to: '+(document.getElementById('inv_email').value.trim()||'jaamiz25@gmail.com (no customer email)')+'\n'+
+    (atts.length?('Attached: '+atts.map(a=>a.name).join(', ')+'   (goes out WITH the invoice email)\n')
+                :'Attached: nothing — 📎 on the row first if a document should go with it\n')+
     '------------------------------------------\n'+
     summary+'\n'+
     '------------------------------------------\n'+
@@ -3776,7 +3788,6 @@ function sendInvoice(){
   // "State Electric Company Limited") — the Zap's Find Customer is case-sensitive and creates a
   // DUPLICATE on mismatch. customer.qbName (Customers tab) wins when set.
   const custRec=lookupCustomer(e.cno);
-  const atts=(e.attachments||[]).slice(0,4);
   zapierPost({
     event:'invoice_ready',
     entryId:e.id,                                  // → Zapier writes the QuickBooks-assigned number back to this entry via Firestore
@@ -3795,7 +3806,9 @@ function sendInvoice(){
     subtotal:subtotal,gst:gst,total:total,
     advance:advance,balance:invMoney(total-advance),  // Zap records advance as a separate Receive-Payment
     no:e.no
-  });
+  // documents attached ⇒ the Zap that attaches them BEFORE emailing, so the customer gets ONE email
+  // with the file. None ⇒ the plain Zap. Never a filter in the middle: that halted the whole Zap.
+  },(atts.length&&ZAPIER_HOOK_ATT_URL)?ZAPIER_HOOK_ATT_URL:ZAPIER_HOOK_URL);
   e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());
   // remember what was sent, so reopening the builder shows the REAL invoice lines (not the default draft)
   e.qbLines=lines.map(l=>({item:l.item,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
