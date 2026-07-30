@@ -4593,6 +4593,23 @@ async function aiKey(){
   __aiKeyCache=k||'';
   return __aiKeyCache;
 }
+// How much to spend reading a document. Reading an AWB number off a photo does NOT need the most
+// expensive model: haiku costs $1/$5 per million tokens against opus's $5/$25 — about 5× cheaper per
+// document — and reads printed shipping paperwork perfectly well. 'off' skips the paid call entirely
+// and leaves the free tesseract/pdf.js OCR to do the job.
+const AI_MODES={
+  fast:{model:'claude-haiku-4-5',label:'Fast & cheap (recommended)'},
+  best:{model:'claude-opus-5',   label:'Best quality (about 5× the cost)'}
+};
+let __aiModeCache;
+async function aiMode(){
+  if(__aiModeCache!==undefined)return __aiModeCache;
+  let m='';
+  if(window.__aiKey&&window.__aiKey.mode){try{m=await window.__aiKey.mode();}catch(e){}}
+  if(!m)m=localStorage.getItem('lion_ai_mode')||'';
+  __aiModeCache=(m==='off'||m==='best')?m:'fast';    // default: the cheap model
+  return __aiModeCache;
+}
 async function aiKeySetup(){
   if(!isAdmin()){toast('AI reader setup is admin-only');return;}
   const cur=await aiKey();
@@ -4601,7 +4618,23 @@ async function aiKeySetup(){
   const key=k.trim();
   __aiKeyCache=key;
   try{localStorage.setItem('lion_ai_key',key);}catch(e){}
-  if(window.__aiKey){try{await window.__aiKey.set(key);toast(key?'🔑 AI reader key saved for the whole team':'AI reader key removed');}catch(e){toast('Saved on this device only — cloud save failed: '+(e.code||e.message));}}
+  if(window.__aiKey){try{await window.__aiKey.set(key);}catch(e){toast('Saved on this device only — cloud save failed: '+(e.code||e.message));}}
+  if(!key){toast('AI reader key removed — free OCR only');return;}
+  const now=await aiMode();
+  const pick=prompt('How should documents be read?\n\n'
+    +'  1 = Fast & cheap  — haiku, about 5× cheaper, fine for AWBs and bills  (recommended)\n'
+    +'  2 = Best quality  — opus, most accurate on messy photos, costs the most\n'
+    +'  3 = Off           — free OCR only, no charge, less accurate\n\n'
+    +'Currently: '+(now==='off'?'Off':now==='best'?'Best quality':'Fast & cheap'),
+    now==='off'?'3':now==='best'?'2':'1');
+  if(pick!==null){
+    const m=pick.trim()==='2'?'best':pick.trim()==='3'?'off':'fast';
+    __aiModeCache=m;
+    try{localStorage.setItem('lion_ai_mode',m);}catch(e){}
+    if(window.__aiKey&&window.__aiKey.setMode){try{await window.__aiKey.setMode(m);}catch(e){}}
+  }
+  const m=await aiMode();
+  toast('🔑 Key saved · reading = '+(m==='off'?'free OCR only':m==='best'?'best quality (opus)':'fast & cheap (haiku)'));
 }
 const AI_SCHEMA={type:'object',additionalProperties:false,
   required:['awb','hawb','consignee','kg','rNo','maclTotal','demurrageTotal'],
@@ -4619,6 +4652,9 @@ function b64Of(blob){return new Promise((res,rej)=>{const r=new FileReader();r.o
 async function aiExtract(file,status){
   const key=await aiKey();
   if(!key)return null;
+  const mode=await aiMode();
+  if(mode==='off')return null;                      // paid reading switched off — free OCR takes over
+  const model=(AI_MODES[mode]||AI_MODES.fast).model;
   status('🤖 AI reading the document…');
   const isPdf=bIsPdf(file);
   let mediaType,data;
@@ -4632,7 +4668,7 @@ async function aiExtract(file,status){
       headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01',
         'anthropic-dangerously-allow-browser':'true','anthropic-dangerous-direct-browser-access':'true'},
       body:JSON.stringify({
-        model:'claude-opus-5',max_tokens:3000,
+        model:model,max_tokens:3000,
         output_config:{format:{type:'json_schema',schema:AI_SCHEMA}},
         messages:[{role:'user',content:[
           {type:isPdf?'document':'image',source:{type:'base64',media_type:mediaType,data:data}},
@@ -6059,7 +6095,10 @@ async function startSync(){
     // AI document-reader key lives in Firestore settings/ai (team-shared, never in the public HTML)
     window.__aiKey={
       get:async()=>{const s=await fx.getDoc(fx.doc(db,'settings','ai'));return s.exists()?(s.data().key||''):'';},
-      set:async(k)=>{await fx.setDoc(fx.doc(db,'settings','ai'),{key:k||'',u:Date.now()});}
+      set:async(k)=>{await fx.setDoc(fx.doc(db,'settings','ai'),{key:k||'',u:Date.now()},{merge:true});},
+      // reading quality/cost: 'fast' (haiku, ~5× cheaper) | 'best' (opus) | 'off' (free OCR only)
+      mode:async()=>{const s=await fx.getDoc(fx.doc(db,'settings','ai'));return s.exists()?(s.data().mode||''):'';},
+      setMode:async(m)=>{await fx.setDoc(fx.doc(db,'settings','ai'),{mode:m||'fast',u:Date.now()},{merge:true});}
     };
     fx.onAuthStateChanged(auth,user=>{
       if(user){
