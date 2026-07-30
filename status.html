@@ -171,6 +171,7 @@ function shipCard(s){
   const ref=(sea?'BL ':'AWB ')+(s.awbBl||s.blNo||'—');
   const bs=billState(s);
   const cleared=isCleared(s);
+  const submitted=!!String(s.rNo||'').trim();      // customs declaration filed = it has an R number
   const noted=!!s.clearance;                       // booked for clearance = under control
   const left=s.lastDate?daysLeft(s.lastDate):null; // working days, Fridays excluded
   // RED means someone should act: a clearance date that hasn't happened yet, or a free period running
@@ -179,9 +180,12 @@ function shipCard(s){
   const lastRed=!cleared&&!noted&&left!==null&&left<=3;
   let out=`<div class="ship"><div class="ship-top">
       <div><div class="ref">${esc(ref)}</div>
-        <div class="meta">${sea?'Sea freight':'Air freight'} · logged ${fmt(s.date)}${s.rNo?' · Ref '+esc(s.rNo):''}</div></div>
+        <div class="meta">${sea?'Sea freight':'Air freight'} · logged ${fmt(s.date)}</div></div>
       <div class="pills">${pill(s.status)}${bs?`<span class="pill ${bs.k}">${esc(bs.t)}</span>`:''}</div>
     </div><div class="rows">`;
+  // The customs declaration is step one — until it carries an R number nothing else can happen,
+  // so the customer sees it first and in red while it's outstanding.
+  out+=field('Customs declaration',submitted?'R '+esc(s.rNo):'Not submitted',!submitted&&!cleared);
   if(s.pkgs!=='')out+=field('Packages',esc(s.pkgs));
   if(s.grsWt!=='')out+=field('Gross weight',esc(s.grsWt)+' kg');
   if(s.doDate)out+=field('Delivery order',fmt(s.doDate));
@@ -191,6 +195,7 @@ function shipCard(s){
   if(s.total!=null)out+=field('Invoice total',money(s.total));
   if(s.balance!=null&&Number(s.balance)>0)out+=field('Balance due',money(s.balance));
   out+='</div>';
+  if(!submitted&&!cleared)out+=`<div class="warnbox w-soon">Customs declaration not submitted yet — this is the first step, and the R number appears here once it is filed.</div>`;
   if(bs&&bs.k==='b-none')out+=`<div class="warnbox w-ok">Customs clearance complete — your invoice is being prepared.</div>`;
   if(bs&&bs.k==='b-due')out+=`<div class="warnbox w-late">Payment due: ${money(s.balance)} against invoice ${esc(s.billNo)}.</div>`;
   // free-period countdown — only while the cargo sits in port with no clearance booked
@@ -221,6 +226,7 @@ function render(d){
   // urgent = still not cleared, nothing booked, and the free period is nearly (or already) gone
   const due=ships.filter(s=>{if(!s.lastDate||s.clearance||isCleared(s))return false;
     const n=daysLeft(s.lastDate);return n!==null&&n<=3;}).length;
+  const noDec=ships.filter(s=>!String(s.rNo||'').trim()&&!isCleared(s)).length;
   const states=ships.map(billState);
   const notBilled=states.filter(b=>b&&b.k==='b-none').length;
   const unpaid=ships.filter((s,i)=>states[i]&&states[i].k==='b-due');
@@ -231,6 +237,7 @@ function render(d){
       <div class="stat"><div class="n">${ships.length}</div><div class="l">Shipments</div></div>
       <div class="stat"><div class="n">${active}</div><div class="l">Awaiting clearance</div></div>
       <div class="stat" style="${due?'outline:2px solid var(--danger)':''}"><div class="n" style="${due?'color:var(--danger)':''}">${due}</div><div class="l">Needs attention</div></div>
+      ${noDec?`<div class="stat"><div class="n">${noDec}</div><div class="l">Declaration pending</div></div>`:''}
       ${notBilled?`<div class="stat"><div class="n">${notBilled}</div><div class="l">Awaiting invoice</div></div>`:''}
       ${unpaid.length?`<div class="stat" style="outline:2px solid var(--danger)"><div class="n" style="color:var(--danger)">${unpaid.length}</div><div class="l">Payment due</div></div>`:''}
     </div>
