@@ -5908,6 +5908,9 @@ function syncMPContainers(){
   let nextNo=containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0);
   entries.forEach(r=>{
     if(r.type!=='MP'||linked.has(r.id))return;
+    // billing-only sea (STELCO desk) NEVER creates Container Status records — the desk is its whole
+    // world (user: "container status you have added stelco shipment. remove all that").
+    if(isBillOnly(r))return;
     const st=r.billNo?'Delivered':((r.status==='Cleared'||r.status==='Delivered')?'Cleared':'Pending DO');
     const done=st!=='Pending DO';
     containers.push({id:'ct_'+r.id,entryId:r.id,no:++nextNo, // deterministic id — every device creates the SAME doc (no cloud duplicates)
