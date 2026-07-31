@@ -874,8 +874,9 @@
       </div>
       <div class="field"><label>📎 DOCUMENTS (tax invoice / DO / receipts)</label><div id="e_docs"></div></div>
       <div class="field" id="e_contWrap" style="display:none">
-        <label>CONTAINER NUMBER(S) (MP shipment)</label><input id="e_containerNo" placeholder="e.g. TLLU5033169, SEKU5503423">
+        <label>CONTAINER NUMBER(S) (MP shipment)</label><input id="e_containerNo" placeholder="e.g. TLLU5033169, SEKU5503423" oninput="renderContSizes()">
         <div class="hint">More than one container? Separate with commas. Goes straight to Container Status — not shown in the Form Log table</div>
+        <div id="e_contSizes" style="margin-top:8px"></div>
       </div>
       <div class="actions">
         <button type="button" class="ghost" onclick="closeModal('overlay-entry')">Cancel</button>
@@ -1533,6 +1534,74 @@ function cycleEntryStatus(id){
 }
 function toggleContBox(){
   document.getElementById('e_contWrap').style.display=e_type.value==='MP'?'':'none';
+  if(e_type.value==='MP')renderContSizes();
+}
+/* Container SIZE, typed on the shipment itself.
+   Sizes used to live only on the Container Status record, so a shipment that never got one
+   (billing-only) or one already cleared and out of the way had no way to record 20'/40'/LCL — the
+   customer's status page then showed a blank SIZE for ever. These rows sit under the container
+   numbers in the form: one per number, filled from whatever is already known, and saved onto the
+   entry (e.contSizes). If a Container Status record does exist it is updated too — but never
+   created, because sea billing-only work deliberately has no container record. */
+const CONT_SIZES=["20'","40'","40' HC","LCL"];
+function contNumsFromForm(){
+  return (document.getElementById('e_containerNo').value||'')
+    .split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
+}
+// what we already know about this container number: the entry's own note first, then its record
+function knownSize(entryId,num){
+  const e=entries.find(x=>x.id===entryId);
+  const own=e&&e.contSizes&&e.contSizes[num];
+  if(own&&own.size)return own;
+  const c=containers.find(x=>x.entryId===entryId)||containers.find(x=>contNoList(x).includes(num));
+  const i=c?ctnInfo(c,num):null;
+  return (i&&i.size)?{size:i.size,cbm:i.cbm||''}:{size:'',cbm:''};
+}
+function renderContSizes(){
+  const box=document.getElementById('e_contSizes');if(!box)return;
+  const id=document.getElementById('e_id').value;
+  const nums=contNumsFromForm();
+  if(!nums.length){box.innerHTML='';return;}
+  box.innerHTML=nums.map((n,i)=>{
+    const k=knownSize(id,n);
+    return `<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+      <span style="font-weight:700;min-width:130px">${esc(n)}</span>
+      <select id="ecs_size_${i}" data-num="${esc(n)}" onchange="contSizeChanged(${i})" style="max-width:130px">
+        <option value="">Size…</option>
+        ${CONT_SIZES.map(s=>`<option${k.size===s?' selected':''}>${s}</option>`).join('')}
+      </select>
+      <input id="ecs_cbm_${i}" placeholder="CBM" value="${esc(k.cbm||'')}" inputmode="decimal"
+             style="max-width:90px;display:${k.size==='LCL'?'':'none'}">
+    </div>`;}).join('');
+}
+function contSizeChanged(i){
+  const sel=document.getElementById('ecs_size_'+i),cbm=document.getElementById('ecs_cbm_'+i);
+  if(sel&&cbm)cbm.style.display=sel.value==='LCL'?'':'none';
+}
+// read the rows back out; {} when nothing was chosen, so an untouched form stores nothing
+function collectContSizes(){
+  const out={};
+  contNumsFromForm().forEach((n,i)=>{
+    const sel=document.getElementById('ecs_size_'+i);if(!sel||!sel.value)return;
+    const cbm=document.getElementById('ecs_cbm_'+i);
+    out[n]={size:sel.value,cbm:(sel.value==='LCL'&&cbm)?(cbm.value||'').trim():''};
+  });
+  return out;
+}
+// mirror onto the Container Status record when there is one — updating only, never creating
+function pushSizesToContainer(e){
+  if(!e||!e.contSizes)return false;
+  const c=containers.find(x=>x.entryId===e.id);if(!c)return false;
+  let touched=false;
+  Object.keys(e.contSizes).forEach(num=>{
+    const s=e.contSizes[num];if(!s||!s.size)return;
+    c.portInfo=c.portInfo||{};
+    const p=c.portInfo[num]=c.portInfo[num]||{};
+    if(p.size!==s.size){p.size=s.size;touched=true;}
+    if(s.size==='LCL'&&s.cbm&&p.cbm!==s.cbm){p.cbm=s.cbm;touched=true;}
+  });
+  if(touched)c.u=Date.now();
+  return touched;
 }
 /* ---- staff codes (FILE column): each staff member logs forms under their own code ---- */
 function staffCodes(){
@@ -1679,12 +1748,15 @@ function saveEntry(e){
     pkgs:e_pkgs.value===''?null:Number(e_pkgs.value),awbBl:e_awbBl.value.trim(),
     time:e_time.value,status:e_status.value,
     containerNo:e_type.value==='MP'?e_containerNo.value.trim():''};
+  // sizes typed under the container numbers — kept on the shipment so they survive with no container record
+  if(e_type.value==='MP'){const cs=collectContSizes();if(Object.keys(cs).length)rec.contSizes=cs;}
   if(document.getElementById('e_billOnly').checked||isBillOnly(rec)){rec.billOnly=true;rec.no=null;rec.file='';} // billing-only: no serial, no FILE
   if(prevEntry&&prevEntry.mpRemark)rec.mpRemark=prevEntry.mpRemark; // MP-tab remark isn't on this form — keep it
   if(prevEntry&&prevEntry.qbInvoiced){rec.qbInvoiced=prevEntry.qbInvoiced;rec.qbInvoicedAt=prevEntry.qbInvoicedAt;} // QuickBooks "sent" flag isn't on this form — keep it
   // side-channel fields not on this form (documents, fetched QuickBooks invoice, payments received) — never lose them on an edit
   // qbInvoiced/qbInvoicedAt MUST survive an edit — losing them removes the "already sent to
   // QuickBooks" warning and the next press of 🧾 silently creates a DUPLICATE invoice.
+  if(prevEntry&&!rec.contSizes&&prevEntry.contSizes)rec.contSizes=prevEntry.contSizes; // sizes survive an edit that didn't touch them
   if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec','qbInvoiced','qbInvoicedAt','qbSentMs','seaCont','outCost','demur','supplier'].forEach(k=>{
     if(prevEntry[k]!==undefined)rec[k]=prevEntry[k];
   });
@@ -1762,6 +1834,8 @@ function saveEntry(e){
     syncContFromEntry(rec,prevEntry,linked);
     saveContainers();renderConts(); // persist containerNo/logNo edits even when no status transition happened
   }
+  // sizes chosen in the form also go onto an existing Container Status record (never creates one)
+  if(rec.contSizes&&pushSizesToContainer(rec)){saveContainers();renderConts();}
   buildEntryFilters();renderEntries();renderMP();updateCounts();closeModal('overlay-entry');
   // entry was created from a DO snap (dpNewEntry): attach the photos/weight/MACL and go straight to billing
   if(window.__dpAfterSave){
@@ -5966,11 +6040,20 @@ function portalShipment(e){
     o.lastDate=el.next||'';o.ctnsLeft=c.ctnsLeft==null?'':c.ctnsLeft;
     // per-container dates fall back to the record's summary — staff usually type discharge there
     // (that's also what drives the last-free-date), and a blank customer table looked "not working"
-    o.containers=contNoList(c).map(cn=>{const i=ctnInfo(c,cn);
-      return {no:cn,size:i.size||'',arrival:i.arrival||'',
+    o.containers=contNoList(c).map(cn=>{const i=ctnInfo(c,cn);const own=(e.contSizes||{})[cn]||{};
+      const size=i.size||own.size||'';
+      return {no:cn,size:size==='LCL'&&(i.cbm||own.cbm)?('LCL '+(i.cbm||own.cbm)+' CBM'):size,
+              arrival:i.arrival||'',
               discharge:i.discharge||c.discharge||'',
               out:i.out||(c.status==='Delivered'?c.clearance||'':''),
               clearance:i.clearance||c.clearance||''};});
+  }else if(e.contSizes||e.containerNo){
+    // no Container Status record (billing-only sea, or a shipment logged without one) — the customer
+    // still deserves to see what was shipped, so build the table from the shipment itself
+    o.containers=(e.containerNo||'').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean)
+      .map(cn=>{const own=(e.contSizes||{})[cn]||{};
+        return {no:cn,size:own.size==='LCL'&&own.cbm?('LCL '+own.cbm+' CBM'):(own.size||''),
+                arrival:'',discharge:'',out:'',clearance:''};});
   }
   return o;
 }
