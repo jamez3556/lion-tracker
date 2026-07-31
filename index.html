@@ -733,6 +733,23 @@
 </div>
 
 <!-- expenses: add expense -->
+<div class="overlay" id="overlay-xpday">
+  <div class="modal" style="max-width:440px">
+    <h2>⚡ Daily items</h2>
+    <form onsubmit="return xpDaySave(event)">
+      <div class="field"><label>DATE</label>
+        <input type="date" id="xpd_date" onchange="xpDayRows()"></div>
+      <div id="xpd_rows" style="margin:10px 0"></div>
+      <div class="hint">Untick anything that didn't come today, and change an amount if it was different.
+        Items already on the list for this date are shown but can't be added twice.</div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-xpday')">Cancel</button>
+        <button type="submit" class="primary">Add ticked</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="overlay" id="overlay-xpadd">
   <div class="modal" style="max-width:420px">
     <h2 id="xpa_title">＋ Add Expense</h2>
@@ -2889,6 +2906,8 @@ function renderXpExp(){
         ${items.map(i=>`<option value="${esc(i)}" ${i===xpState.item?'selected':''}>${esc(i)}</option>`).join('')}
       </select>
       <button class="primary" onclick="openXpAdd()">＋ Add Expense</button>
+      <button class="ghost" onclick="xpDayOpen()" title="The three that come in every day — tick and add them together">⚡ Daily items</button>
+      <button class="ghost" onclick="xpCorrected()" title="Re-send the last payment message after an amendment">🔁 Corrected message</button>
       <button class="ghost" onclick="xpCopyReport()">📋 Copy month report</button>
       <button class="ghost" onclick="xpExcel()">⬇ Excel</button>
       ${exps.some(e=>String(e.id).startsWith('vb-'))?'':'<button class="ghost" onclick="xpImportViber()">⤵ Import Viber list (27-07)</button>'}
@@ -2943,6 +2962,52 @@ function xpSelDay(d){
   const allIn=ids.every(id=>xpState.sel.includes(id));
   xpState.sel=allIn?xpState.sel.filter(id=>!ids.includes(id)):[...new Set([...xpState.sel,...ids])];
   renderExpenses();
+}
+/* The three that arrive every single day. Adding them one at a time — pick preset, type amount,
+   save, repeat — is where items get forgotten (a missed "Dhoni kappi" meant a second WhatsApp
+   message after the payment had already been sent). Tick what came today, correct any amount that
+   differs, add them in one go. */
+const XP_DAILY=['Dhoni mehi','Airport mehi','Dhoni kappi'];
+function xpDayOpen(){
+  if(!xpGuard())return;
+  const today=isoLocal(new Date());
+  document.getElementById('xpd_date').value=today;
+  xpDayRows();
+  showModal('overlay-xpday');
+}
+// redraw the rows for the chosen date: anything already on the list that day is ticked off and locked
+function xpDayRows(){
+  const date=document.getElementById('xpd_date').value||isoLocal(new Date());
+  document.getElementById('xpd_rows').innerHTML=XP_DAILY.map((label,i)=>{
+    const def=(XP_PRESETS.find(p=>p.label===label)||{}).amount||'';
+    const already=xpKind('exp').find(e=>e.date===date&&e.item.toLowerCase()===label.toLowerCase());
+    return `<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
+      <input type="checkbox" id="xpd_on_${i}" ${already?'disabled':'checked'} style="width:18px;height:18px">
+      <label for="xpd_on_${i}" style="flex:1;font-weight:700;margin:0">${esc(label)}</label>
+      <input id="xpd_amt_${i}" type="number" inputmode="numeric" value="${already?already.amount:def}"
+             ${already?'disabled':''} style="max-width:110px;text-align:right">
+      ${already?`<span style="color:#16a34a;font-size:11.5px;font-weight:700;min-width:96px">${already.paid?'already PAID':'already on list'}</span>`:'<span style="min-width:96px"></span>'}
+    </div>`;}).join('');
+}
+function xpDaySave(ev){
+  ev.preventDefault();
+  if(!xpGuard())return false;
+  const date=document.getElementById('xpd_date').value;
+  if(!date)return false;
+  const added=[];
+  XP_DAILY.forEach((label,i)=>{
+    const on=document.getElementById('xpd_on_'+i);
+    if(!on||on.disabled||!on.checked)return;
+    const amount=parseInt(document.getElementById('xpd_amt_'+i).value,10);
+    if(!amount||amount<=0)return;
+    expensesData.push({id:uid(),kind:'exp',date,item:label,amount,paid:false,paidAt:null});
+    added.push(label+' '+amount);
+  });
+  if(!added.length){toast('Nothing ticked');return false;}
+  saveExpensesData();closeModal('overlay-xpday');
+  renderExpenses();updateCounts();
+  toast('Added '+added.length+' item'+(added.length>1?'s':'')+' — '+added.join(', '));
+  return false;
 }
 function openXpAdd(){
   if(!xpGuard())return;
@@ -3011,24 +3076,61 @@ function saveXpAdd(ev){
   toast('Added '+item+' · '+rf(amount));
   return false;
 }
-function xpReceipt(items){
+/* Payment runs.
+
+   The message sent to the group is generated, never hand-typed — but until now it was a snapshot of
+   whatever was ticked at that moment. When an amount turned out to be wrong, or an item had been
+   missed, the only way out was to edit the WhatsApp message by hand (and the header total then
+   disagreed with the list) or to send a second, confusing one.
+
+   So every payment now carries a reference — P-1, P-2 … — stamped on its items. Adding a missed
+   item to that same run, or correcting an amount afterwards, produces ONE corrected message that
+   openly replaces the earlier one, with the true list and the true total. Nothing is ever retyped. */
+function xpNextRun(){return xpKind('exp').reduce((m,e)=>Math.max(m,Number(e.runNo)||0),0)+1;}
+function xpRunItems(no){return xpKind('exp').filter(e=>Number(e.runNo)===Number(no));}
+function xpLastRun(){return xpKind('exp').reduce((m,e)=>Math.max(m,Number(e.runNo)||0),0);}
+function xpReceipt(items,runNo,corrected){
   const total=items.reduce((s,e)=>s+e.amount,0);
   const lines=[...items].sort((a,b)=>a.date<b.date?-1:1).map(e=>`${xpD(e.date)} ${e.item} ${e.amount}`);
-  return `✅ PAID ${rf(total)} on ${xpD(isoLocal(new Date()))}\n\n`+lines.join('\n')+`\n\nTotal: ${rf(total)}\nLion Logistics`;
+  const head=corrected
+    ? `🔁 CORRECTED — this replaces my earlier message (Ref P-${runNo})\n\n✅ PAID ${rf(total)} on ${xpD(isoLocal(new Date()))}`
+    : `✅ PAID ${rf(total)} on ${xpD(isoLocal(new Date()))}`;
+  return head+`\n\n`+lines.join('\n')+`\n\nTotal: ${rf(total)}\nRef P-${runNo}\nLion Logistics`;
+}
+function xpShowReceipt(runNo,corrected){
+  document.getElementById('xpr_text').value=xpReceipt(xpRunItems(runNo),runNo,corrected);
+  document.getElementById('xpr_slipBtn').style.display='none';
+  showModal('overlay-xprec');
 }
 function xpMarkPaid(){
   if(!xpGuard())return;
   const items=xpKind('exp').filter(e=>xpState.sel.includes(e.id)&&!e.paid);
   if(!items.length)return;
   const total=items.reduce((s,e)=>s+e.amount,0);
-  if(!confirm(`Mark ${items.length} item(s) — ${rf(total)} — as PAID?`))return;
+  if(!confirm(`Mark ${items.length} item(s) — ${rf(total)} — as PAID?\n\n`
+    +[...items].sort((a,b)=>a.date<b.date?-1:1).map(e=>`${xpD(e.date)}  ${e.item}  ${e.amount}`).join('\n')))return;
+  // something already paid today? offer to join it, so a forgotten item becomes ONE corrected message
+  const today=isoLocal(new Date());
+  const last=xpLastRun();
+  const joinable=last&&xpRunItems(last).some(e=>(e.paidAt||'').slice(0,10)===today);
+  let runNo=xpNextRun(),corrected=false;
+  if(joinable&&confirm(`You already paid something today — Ref P-${last}.\n\n`
+    +`OK  = add these to P-${last} and give you ONE corrected message replacing the one you sent.\n`
+    +`Cancel = a separate new payment with its own message.`)){runNo=last;corrected=true;}
   const now=new Date().toISOString();
-  items.forEach(e=>{e.paid=true;e.paidAt=now;});
+  items.forEach(e=>{e.paid=true;e.paidAt=now;e.runNo=runNo;});
   xpState.sel=[];
   saveExpensesData();renderExpenses();updateCounts();
-  document.getElementById('xpr_text').value=xpReceipt(items);
-  document.getElementById('xpr_slipBtn').style.display='none';
-  showModal('overlay-xprec');
+  xpShowReceipt(runNo,corrected);
+}
+// after amending anything that was already paid — wrong amount, item removed, item added
+function xpCorrected(){
+  if(!xpGuard())return;
+  const last=xpLastRun();
+  if(!last){toast('No payment has been made from the app yet — nothing to correct');return;}
+  const items=xpRunItems(last);
+  if(!items.length){toast('Ref P-'+last+' has no items left');return;}
+  xpShowReceipt(last,true);
 }
 function xpUnpay(id){
   if(!xpGuard())return;
