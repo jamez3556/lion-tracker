@@ -6952,11 +6952,24 @@ async function startSync(){
       setMode:async(m)=>{await fx.setDoc(fx.doc(db,'settings','ai'),{mode:m||'fast',u:Date.now()},{merge:true});}
     };
     /* QuickBooks balances, written nightly by lion-qb-sync (Vercel + the QuickBooks API — no Zapier
-       tasks). settings/qbbal holds every invoice STILL OWING; anything missing from it that was
-       invoiced before the sync ran has been paid. One tiny document, one read when it changes. */
+       tasks). Every invoice STILL OWING is listed; anything missing from it that was invoiced
+       before the sync ran has been paid.
+       Firestore caps how much one document may hold, and a few thousand open invoices is past that
+       cap — so settings/qbbal is only the summary (how many parts, when it ran) and the invoices
+       themselves live in settings/qbbal_0, _1, _2 … Read once a night, when the summary changes. */
     try{
-      fx.onSnapshot(fx.doc(db,'settings','qbbal'),s=>{
-        window.__qbbal=s.exists()?s.data():null;
+      fx.onSnapshot(fx.doc(db,'settings','qbbal'),async s=>{
+        const meta=s.exists()?s.data():null;
+        if(!meta||!meta.updated){window.__qbbal=null;}
+        else if(meta.inv){window.__qbbal=meta;}                      // older single-document shape
+        else{
+          const inv={};
+          const parts=await Promise.all(
+            Array.from({length:Number(meta.chunks)||0},(_,i)=>
+              fx.getDoc(fx.doc(db,'settings','qbbal_'+i)).catch(()=>null)));
+          parts.forEach(p=>{if(p&&p.exists())Object.assign(inv,p.data().inv||{});});
+          window.__qbbal={inv,updated:meta.updated,count:meta.count};
+        }
         try{renderCusts();renderPayments();if(bTab==='air')renderAirProfit();}catch(e){}
       },e=>console.warn('QuickBooks balances unavailable',(e&&e.code)||e));
     }catch(e){}
