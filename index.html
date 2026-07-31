@@ -3086,9 +3086,27 @@ function saveXpAdd(ev){
    So every payment now carries a reference — P-1, P-2 … — stamped on its items. Adding a missed
    item to that same run, or correcting an amount afterwards, produces ONE corrected message that
    openly replaces the earlier one, with the true list and the true total. Nothing is ever retyped. */
+/* A run is A DAY'S PAYMENT — not a button press. Grouping by button press was wrong twice over:
+   un-paying an item left it tagged to the run so it stayed in the message, and anything paid
+   before this existed carried no tag and vanished from it. Deriving the group from the day the
+   money went out is self-correcting: whatever is paid on that day is in, the moment it stops
+   being paid it is out, and older records are picked up without needing a migration. */
+const xpPayDay=e=>e.paidAt?isoLocal(new Date(e.paidAt)):'';   // paidAt is UTC — read it back as local
 function xpNextRun(){return xpKind('exp').reduce((m,e)=>Math.max(m,Number(e.runNo)||0),0)+1;}
-function xpRunItems(no){return xpKind('exp').filter(e=>Number(e.runNo)===Number(no));}
-function xpLastRun(){return xpKind('exp').reduce((m,e)=>Math.max(m,Number(e.runNo)||0),0);}
+function xpRunItems(day){return xpKind('exp').filter(e=>e.paid&&xpPayDay(e)===day);}
+// the reference for a day, stamped onto its items so it never changes once shown
+function xpRunNoFor(day){
+  const items=xpRunItems(day);
+  if(!items.length)return 0;
+  const no=items.reduce((m,e)=>Math.max(m,Number(e.runNo)||0),0)||xpNextRun();
+  items.forEach(e=>{if(Number(e.runNo)!==no)e.runNo=no;});
+  return no;
+}
+// the most recent day money actually went out
+function xpLastPayDay(){
+  return xpKind('exp').filter(e=>e.paid&&e.paidAt)
+    .map(xpPayDay).sort().pop()||'';
+}
 function xpReceipt(items,runNo,corrected){
   const total=items.reduce((s,e)=>s+e.amount,0);
   const lines=[...items].sort((a,b)=>a.date<b.date?-1:1).map(e=>`${xpD(e.date)} ${e.item} ${e.amount}`);
@@ -3097,8 +3115,10 @@ function xpReceipt(items,runNo,corrected){
     : `✅ PAID ${rf(total)} on ${xpD(isoLocal(new Date()))}`;
   return head+`\n\n`+lines.join('\n')+`\n\nTotal: ${rf(total)}\nRef P-${runNo}\nLion Logistics`;
 }
-function xpShowReceipt(runNo,corrected){
-  document.getElementById('xpr_text').value=xpReceipt(xpRunItems(runNo),runNo,corrected);
+function xpShowReceipt(day,corrected){
+  const no=xpRunNoFor(day);
+  saveExpensesData();                                  // the reference was just stamped on the items
+  document.getElementById('xpr_text').value=xpReceipt(xpRunItems(day),no,corrected);
   document.getElementById('xpr_slipBtn').style.display='none';
   showModal('overlay-xprec');
 }
@@ -3109,37 +3129,33 @@ function xpMarkPaid(){
   const total=items.reduce((s,e)=>s+e.amount,0);
   if(!confirm(`Mark ${items.length} item(s) — ${rf(total)} — as PAID?\n\n`
     +[...items].sort((a,b)=>a.date<b.date?-1:1).map(e=>`${xpD(e.date)}  ${e.item}  ${e.amount}`).join('\n')))return;
-  /* One payment a day. So anything paid later the same day JOINS that day's run automatically —
-     no question asked — and the message always shows the day's real total, never a small second
-     figure that makes the group think two payments were made. */
+  /* One payment a day. Anything paid later the same day joins that day automatically — no question
+     asked — so the message always carries the day's real total, never a small second figure that
+     makes the group think two separate payments were made. */
   const today=isoLocal(new Date());
-  // paidAt is a UTC timestamp — read it back as a LOCAL day, or between midnight and 5am Malé
-  // time it reports yesterday and a second payment would wrongly start its own run
-  const todays=xpKind('exp').filter(e=>e.runNo&&e.paidAt&&isoLocal(new Date(e.paidAt))===today)
-    .reduce((m,e)=>Math.max(m,Number(e.runNo)||0),0);
-  const runNo=todays||xpNextRun();
-  const corrected=!!todays;
+  const alreadyToday=xpRunItems(today).length;          // paid earlier today ⇒ this is a correction
   const now=new Date().toISOString();
-  items.forEach(e=>{e.paid=true;e.paidAt=now;e.runNo=runNo;});
+  items.forEach(e=>{e.paid=true;e.paidAt=now;});
   xpState.sel=[];
   saveExpensesData();renderExpenses();updateCounts();
-  xpShowReceipt(runNo,corrected);
+  xpShowReceipt(today,alreadyToday>0);
 }
 // after amending anything that was already paid — wrong amount, item removed, item added
 function xpCorrected(){
   if(!xpGuard())return;
-  const last=xpLastRun();
-  if(!last){toast('No payment has been made from the app yet — nothing to correct');return;}
-  const items=xpRunItems(last);
-  if(!items.length){toast('Ref P-'+last+' has no items left');return;}
-  xpShowReceipt(last,true);
+  const day=xpLastPayDay();
+  if(!day){toast('Nothing has been paid yet — no message to correct');return;}
+  xpShowReceipt(day,true);
 }
 function xpUnpay(id){
   if(!xpGuard())return;
   const e=xpKind('exp').find(x=>x.id===id);if(!e)return;
   if(!confirm(`Un-pay "${e.item}" ${xpD(e.date)} (${rf(e.amount)})?`))return;
-  e.paid=false;e.paidAt=null;
+  const wasDay=xpPayDay(e);
+  e.paid=false;e.paidAt=null;delete e.runNo;   // out of that day's payment, so out of its message
   saveExpensesData();renderExpenses();updateCounts();
+  if(wasDay&&xpRunItems(wasDay).length)
+    toast('Removed from the '+xpD(wasDay)+' payment — press 🔁 Corrected message to re-send it');
 }
 function xpDel(id){
   if(!xpGuard())return;
