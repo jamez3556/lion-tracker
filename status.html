@@ -90,7 +90,9 @@ a{color:var(--brand)}
 </head>
 <body>
 <header><div class="hwrap" id="hdr" title="Tap to refresh">
-  <div class="logo"><img src="logo.png" alt="LION Logistics"></div>
+  <!-- absolute path on purpose: this same page is also served from /s/<token>, one level deeper,
+       where a relative "logo.png" would 404 and show a broken image to the customer -->
+  <div class="logo"><img src="/lion-tracker/logo.png" alt="LION Logistics"></div>
   <div><h1>LI<span>O</span>N LOGISTICS</h1>
     <div class="sub" id="hdr_sub">Shipment &amp; customs clearance status</div></div>
 </div></header>
