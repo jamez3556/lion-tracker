@@ -3109,14 +3109,16 @@ function xpMarkPaid(){
   const total=items.reduce((s,e)=>s+e.amount,0);
   if(!confirm(`Mark ${items.length} item(s) — ${rf(total)} — as PAID?\n\n`
     +[...items].sort((a,b)=>a.date<b.date?-1:1).map(e=>`${xpD(e.date)}  ${e.item}  ${e.amount}`).join('\n')))return;
-  // something already paid today? offer to join it, so a forgotten item becomes ONE corrected message
+  /* One payment a day. So anything paid later the same day JOINS that day's run automatically —
+     no question asked — and the message always shows the day's real total, never a small second
+     figure that makes the group think two payments were made. */
   const today=isoLocal(new Date());
-  const last=xpLastRun();
-  const joinable=last&&xpRunItems(last).some(e=>(e.paidAt||'').slice(0,10)===today);
-  let runNo=xpNextRun(),corrected=false;
-  if(joinable&&confirm(`You already paid something today — Ref P-${last}.\n\n`
-    +`OK  = add these to P-${last} and give you ONE corrected message replacing the one you sent.\n`
-    +`Cancel = a separate new payment with its own message.`)){runNo=last;corrected=true;}
+  // paidAt is a UTC timestamp — read it back as a LOCAL day, or between midnight and 5am Malé
+  // time it reports yesterday and a second payment would wrongly start its own run
+  const todays=xpKind('exp').filter(e=>e.runNo&&e.paidAt&&isoLocal(new Date(e.paidAt))===today)
+    .reduce((m,e)=>Math.max(m,Number(e.runNo)||0),0);
+  const runNo=todays||xpNextRun();
+  const corrected=!!todays;
   const now=new Date().toISOString();
   items.forEach(e=>{e.paid=true;e.paidAt=now;e.runNo=runNo;});
   xpState.sel=[];
