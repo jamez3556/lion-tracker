@@ -5653,9 +5653,13 @@ function portalShipment(e){
     const el=effLast(c);
     o.blNo=c.blNo||'';o.doDate=c.doDate||'';o.clearance=c.clearance||'';
     o.lastDate=el.next||'';o.ctnsLeft=c.ctnsLeft==null?'':c.ctnsLeft;
+    // per-container dates fall back to the record's summary — staff usually type discharge there
+    // (that's also what drives the last-free-date), and a blank customer table looked "not working"
     o.containers=contNoList(c).map(cn=>{const i=ctnInfo(c,cn);
-      return {no:cn,size:i.size||'',arrival:i.arrival||'',discharge:i.discharge||'',
-              out:i.out||'',clearance:i.clearance||''};});
+      return {no:cn,size:i.size||'',arrival:i.arrival||'',
+              discharge:i.discharge||c.discharge||'',
+              out:i.out||(c.status==='Delivered'?c.clearance||'':''),
+              clearance:i.clearance||c.clearance||''};});
   }
   return o;
 }
@@ -6668,6 +6672,9 @@ async function startSync(){
         showSection('cloud-account');closeModal('overlay-cloud');
         revealApp();
         startSync().catch(e=>{chip('☁ Sync error');toast('Cloud sync error: '+e.message);});
+        // refresh shared customer status pages once per sign-in — a payload-shape fix (or an edit
+        // made while this device was closed) otherwise waits for the next save to reach customers
+        setTimeout(()=>{try{typeof syncPortals==='function'&&syncPortals();}catch(e){}},12000);
       }else{
         window.__userEmail='';
         chip('☁ Sign in','#d97706');showSection('cloud-login');
