@@ -5705,11 +5705,15 @@ async function msgDelete(id){
    What leaves the office: nothing but that customer's own shipment facts — no staff codes, no rates,
    no duty/MACL/MPL costs, no other customer, no credentials. Built here and written to the 'portal'
    collection; status.html reads one doc by its key without signing in. */
-const PORTAL_BASE='https://jamez3556.github.io/lion-tracker/status.html';
+/* Customer links are typed on phones and pasted into WhatsApp, so they're kept short: the page is
+   served from /s/ as well as the original /status.html (both live — links already with customers
+   must never break), and new keys are 12 characters instead of 24. 12 base-36 characters is about
+   4.7 × 10^18 combinations and every guess costs a Firestore read, so guessing one is not a thing. */
+const PORTAL_BASE='https://jamez3556.github.io/lion-tracker/s/';
 const PORTAL_MAX=80;               // most recent shipments per customer — keeps the doc small
 function portalToken(){
   const a=new Uint8Array(16);(crypto.getRandomValues?crypto:window.msCrypto).getRandomValues(a);
-  return Array.from(a).map(b=>b.toString(36)).join('').slice(0,24);
+  return Array.from(a).map(b=>b.toString(36)).join('').slice(0,12);
 }
 // One shipment as the customer should see it. Container detail comes from the linked Container Status
 // record, using effLast() so a hand-set LAST DATE is what they're told too.
