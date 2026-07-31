@@ -515,6 +515,7 @@
     <button id="bt_snaps" class="primary" onclick="setBTab('snaps')">📸 DO Snaps</button>
     <button id="bt_stelco" class="ghost" onclick="setBTab('stelco')">⚡ STELCO</button>
     <button id="bt_profit" class="ghost" style="display:none" onclick="setBTab('profit')">💰 Sea Profit</button>
+    <button id="bt_air" class="ghost" style="display:none" onclick="setBTab('air')">✈ Air Profit</button>
     <span style="flex:1"></span>
     <button class="ghost" onclick="aiKeySetup()" title="Admin: paste the Anthropic API key that powers the AI document reader">🔑 AI</button>
     <button class="primary" id="b_snapBtn" onclick="bToggleCapture()" style="background:#FF4F00">📸 Snap DO photo</button>
@@ -601,6 +602,27 @@
     </div>
   </div>
 
+  <div id="b_pane_air" style="display:none">
+    <div class="stats" id="b_ap_stats"></div>
+    <div class="toolbar" style="gap:8px;flex-wrap:wrap">
+      <input id="b_ap_search" placeholder="🔍 Search customer, AWB, invoice…" style="flex:1;min-width:220px" oninput="renderAirProfit()">
+      <select id="b_ap_month" onchange="renderAirProfit()"></select>
+    </div>
+    <div class="tablewrap m-cards">
+      <div class="scroll">
+        <table style="min-width:940px">
+          <thead><tr>
+            <th>DATE</th><th>CUSTOMER</th><th>AWB</th><th>BILL NO</th>
+            <th class="num">INVOICE</th><th class="num" title="MACL / duty / demurrage billed at cost — not income">PASS-THROUGH</th>
+            <th class="num" title="Our own charges, before GST — this is what LION actually earns">OUR EARNING</th><th class="num">%</th>
+          </tr></thead>
+          <tbody id="b_ap_tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="b_ap_empty" style="display:none"><div class="big">✈</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No billed air shipments in this period</div></div>
+    </div>
+  </div>
+
   <div id="b_pane_profit" style="display:none">
     <div class="stats" id="b_pr_stats"></div>
     <div class="toolbar" style="gap:8px;flex-wrap:wrap">
@@ -647,6 +669,7 @@
           <th data-k="contact">CONTACT <span class="arrow">▲▼</span></th>
           <th class="nosort">CLR/KG</th>
           <th class="nosort">JOBS IN LOG</th>
+          <th class="num nosort" id="u_th_out" style="display:none" title="Invoiced and not yet paid — click a figure to see the invoices and record a payment">💰 OUTSTANDING</th>
           <th class="nosort actcol"></th>
         </tr></thead>
         <tbody id="u_tbody"></tbody>
@@ -984,6 +1007,16 @@
       <button type="button" class="ghost" id="inv_updateBtn" onclick="updateInvoice()" title="Correct THIS invoice in QuickBooks (same number) — use after a mistake, only if unpaid">✏️ Update Invoice</button>
       <button type="button" class="ghost" id="inv_resendBtn" onclick="resendInvoice()" title="Email the existing invoice again — does NOT create a new one">📧 Resend Email</button>
       <button type="button" class="primary" onclick="sendInvoice()">Send to QuickBooks →</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay-dues">
+  <div class="modal" style="max-width:620px">
+    <h2 id="dues_title">💰 Outstanding</h2>
+    <div style="padding:16px 18px">
+      <div id="dues_body"></div>
+      <div class="actions"><button type="button" class="ghost" onclick="closeModal('overlay-dues')">Close</button></div>
     </div>
   </div>
 </div>
@@ -4480,23 +4513,29 @@ function dpMatch(dp){
 let bTab='snaps';
 function openDoQueue(){setBTab('snaps');switchView('billing');}
 function setBTab(t){
-  if(t==='profit'&&!isAdmin())t='stelco';   // profit is the owner's view only
+  if((t==='profit'||t==='air')&&!isAdmin())t='stelco';   // profit views are the owner's only
   bTab=t;
   document.getElementById('bt_snaps').className=t==='snaps'?'primary':'ghost';
   document.getElementById('bt_stelco').className=t==='stelco'?'primary':'ghost';
   document.getElementById('bt_profit').className=t==='profit'?'primary':'ghost';
+  document.getElementById('bt_air').className=t==='air'?'primary':'ghost';
   document.getElementById('b_pane_snaps').style.display=t==='snaps'?'':'none';
   document.getElementById('b_pane_stelco').style.display=t==='stelco'?'':'none';
   document.getElementById('b_pane_profit').style.display=t==='profit'?'':'none';
+  document.getElementById('b_pane_air').style.display=t==='air'?'':'none';
   document.getElementById('b_snapBtn').style.display=t==='snaps'?'':'none';
   renderDoQueue();
+  if(t==='air')renderAirProfit();
 }
 function renderDoQueue(){
   autoLinkSnaps(); // pick up snaps synced in from do.html and attach them to their shipments
   renderStelcoDesk();
   const pb=document.getElementById('bt_profit');
   if(pb)pb.style.display=isAdmin()?'':'none';
+  const ab=document.getElementById('bt_air');
+  if(ab)ab.style.display=isAdmin()?'':'none';
   if(bTab==='profit')renderSeaProfit();
+  if(bTab==='air')renderAirProfit();
   const box=document.getElementById('dp_list');if(!box)return;
   const pend=dosnaps.filter(d=>d.status==='pending').length;
   const m=isoLocal(new Date()).slice(0,7);
@@ -5424,6 +5463,41 @@ function stelcoBill(entryId){
    What each sea shipment actually earned: STELCO invoice − EEMAN's charge. The invoice figure
    prefers the REAL QuickBooks total (qbTotal, set on fetch/payment webhooks); else it is computed
    from the lines as sent (qbLines); else estimated from the sizes × the sea template (marked ≈). */
+/* ── MONEY HELPERS (no Zapier tasks — everything below is computed from what the app already knows) ──
+   Fetching a balance from QuickBooks costs Zapier tasks, so the app never polls. It uses the best
+   source it already has, and marks a figure as an estimate (≈) when it isn't straight from
+   QuickBooks. Pressing ⬇ Check on a shipment still upgrades that one to the exact figure. */
+function invTotalOf(e){
+  if(e.qbTotal!=null)return {amt:Number(e.qbTotal),est:false};
+  const sum=lines=>{let t=0;lines.forEach(l=>{const a=(Number(l.qty)||0)*(Number(l.rate)||0);t+=a*(Number(l.tax)?1.08:1);});return invMoney(t);};
+  if(e.qbLines&&e.qbLines.length){const t=sum(e.qbLines);if(t)return {amt:t,est:false};}
+  if((e.billNo||'').trim()){const t=sum(expectedLines(e));if(t)return {amt:t,est:true};}
+  return null;
+}
+// Everything received against this shipment: the advance typed in the Payment tab plus every
+// payment recorded through 💰 Payment Received.
+function entryPaid(e){
+  const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
+  const adv=(pay&&pay.advance)?Number(pay.advance):0;
+  return invMoney(adv+(e.qbPayRec||[]).reduce((s,p)=>s+(Number(p.amt)||0),0));
+}
+// Still owed on an invoiced shipment. QuickBooks' own balance wins when we have it.
+function entryDue(e){
+  if(!(e.billNo||'').trim())return null;           // not invoiced ⇒ nothing is owed yet
+  if(e.qbBalance!=null)return {due:invMoney(Number(e.qbBalance)),est:false};
+  const t=invTotalOf(e);if(!t)return null;
+  return {due:invMoney(t.amt-entryPaid(e)),est:true};
+}
+function custOutstanding(cno){
+  const key=String(cno||'').toUpperCase();
+  let due=0,est=false,n=0,oldest='';
+  entries.filter(e=>(e.cno||'').toUpperCase()===key&&(e.billNo||'').trim()).forEach(e=>{
+    const d=entryDue(e);if(!d||d.due<=0.5)return;   // ignore rounding dust
+    due+=d.due;n++;if(d.est)est=true;
+    if(!oldest||String(e.date||'')<oldest)oldest=e.date||'';
+  });
+  return {due:invMoney(due),n,est,oldest};
+}
 function seaInvTotal(e){
   if(e.qbTotal!=null)return {amt:Number(e.qbTotal),est:false};
   if(e.qbLines&&e.qbLines.length){
@@ -5501,6 +5575,75 @@ function renderSeaProfit(){
 // different work: air = KG/MACL/demurrage from DO snaps; sea = containers/EEMAN cost/margin.
 let stMode=localStorage.getItem('lion_st_mode')||'AIR';
 function stSetMode(m){stMode=m;try{localStorage.setItem('lion_st_mode',m);}catch(e){}renderStelcoDesk();}
+/* ── AIR PROFIT (admin only) ─────────────────────────────────────────────────
+   Air has no outsourcer, so "profit per job" means something different from sea: it is what LION
+   actually earns, which is the SERVICE lines only. Our invoices already separate this perfectly —
+   our own charges carry 8% GST, while MACL / duty / demurrage are billed at cost with no GST. So:
+     OUR EARNING = sum of the taxable lines (excluding the GST itself, which belongs to MIRA)
+     PASS-THROUGH = the non-taxable lines, money that goes straight back out again.
+   Nothing new has to be typed for this to work; overheads (salary, van, fuel) are a monthly figure
+   from the Expenses tab, subtracted at the bottom rather than guessed per job. */
+function svcSplit(e){
+  const src=(e.qbLines&&e.qbLines.length)?e.qbLines
+    :((e.billNo||'').trim()?expectedLines(e).map(l=>({item:l.name,qty:l.qty,rate:l.rate,tax:l.tax})):null);
+  if(!src)return null;
+  let svc=0,pass=0;
+  src.forEach(l=>{const a=invMoney((Number(l.qty)||0)*(Number(l.rate)||0));
+    if(Number(l.tax))svc+=a;else pass+=a;});
+  return {svc:invMoney(svc),pass:invMoney(pass),est:!(e.qbLines&&e.qbLines.length)};
+}
+function buildAirMonths(){
+  const sel=document.getElementById('b_ap_month');if(!sel)return;
+  const cur=sel.value;
+  const ms=[...new Set(entries.filter(e=>e.type!=='MP'&&(e.billNo||'').trim()&&e.date).map(e=>e.date.slice(0,7)))].sort().reverse();
+  sel.innerHTML='<option value="">All months</option>'+ms.map(m=>{
+    const d=new Date(m+'-01T00:00:00');
+    return `<option value="${m}">${d.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</option>`;}).join('');
+  sel.value=ms.includes(cur)||cur===''?cur:(ms[0]||'');
+}
+function renderAirProfit(){
+  const tb=document.getElementById('b_ap_tbody');if(!tb)return;
+  buildAirMonths();
+  const q=((document.getElementById('b_ap_search')||{}).value||'').trim().toLowerCase();
+  const mo=((document.getElementById('b_ap_month')||{}).value||'');
+  const all=entries.filter(e=>e.type!=='MP'&&(e.billNo||'').trim());
+  const rows=all.filter(e=>{
+    if(mo&&(e.date||'').slice(0,7)!==mo)return false;
+    if(q&&![e.customer,e.cno,e.awbBl,e.billNo,e.rNo].join(' ').toLowerCase().includes(q))return false;
+    return true;
+  }).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  let tSvc=0,tPass=0,tInv=0,anyEst=false;
+  document.getElementById('b_ap_empty').style.display=rows.length?'none':'block';
+  tb.innerHTML=rows.slice(0,200).map(e=>{
+    const s=svcSplit(e), inv=invTotalOf(e);
+    if(s){tSvc+=s.svc;tPass+=s.pass;if(s.est)anyEst=true;}
+    if(inv)tInv+=inv.amt;
+    const pct=(s&&inv&&inv.amt)?Math.round(s.svc/inv.amt*100):null;
+    return `<tr>
+      <td data-l="Date">${fmtDate(e.date)}</td>
+      <td data-l="Customer" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.customer)}">${esc(e.customer)||'—'}</td>
+      <td data-l="AWB">${esc(e.awbBl)||'—'}</td>
+      <td data-l="Bill No">${esc(e.billNo)}</td>
+      <td class="num" data-l="Invoice">${inv?(inv.est?'≈ ':'')+fmtNum(inv.amt):'—'}</td>
+      <td class="num" data-l="Pass-through" style="color:var(--muted)">${s?fmtNum(s.pass):'—'}</td>
+      <td class="num" data-l="Our earning">${s?`<span style="font-weight:800;color:#16a34a">${s.est?'≈ ':''}${fmtNum(s.svc)}</span>`:'—'}</td>
+      <td class="num" data-l="%">${pct!=null?pct+'%':'—'}</td>
+    </tr>`;}).join('');
+  // overheads for the SAME period, from the Expenses tab (paid expenses + salary paid)
+  const inPeriod=d=>!mo||String(d||'').slice(0,7)===mo;
+  // salary payments carry paidAt (an ISO timestamp), expenses carry date — accept either
+  const oh=expensesData.filter(r=>r.kind==='exp'&&inPeriod(r.date)).reduce((s,r)=>s+(Number(r.amount)||0),0)
+          +salaryData.filter(r=>r.kind==='salpay'&&inPeriod(r.date||r.paidAt)).reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const net=invMoney(tSvc-oh);
+  const label=mo?new Date(mo+'-01T00:00:00').toLocaleDateString('en-GB',{month:'short',year:'numeric'}):'All time';
+  const st=document.getElementById('b_ap_stats');
+  if(st)st.innerHTML=`
+    <div class="card c-blue"><div class="n">${anyEst?'≈ ':''}${fmtNum(invMoney(tSvc))}</div><div class="l">✈ Our Earning · ${label}</div></div>
+    <div class="card c-info"><div class="n">${fmtNum(invMoney(tInv))}</div><div class="l">Invoiced (incl. pass-through)</div></div>
+    <div class="card c-purple"><div class="n">${fmtNum(invMoney(tPass))}</div><div class="l">Paid out for customers</div></div>
+    <div class="card c-warn"><div class="n">${fmtNum(invMoney(oh))}</div><div class="l">Overheads (expenses + salary)</div></div>
+    <div class="card ${net>=0?'c-ok':'c-danger'}"><div class="n">${net>=0?'':'−'}${fmtNum(Math.abs(net))}</div><div class="l">${net>=0?'Left after overheads':'Short of overheads'}</div></div>`;
+}
 function renderStelcoDesk(){
   const tb=document.getElementById('b_st_tbody');if(!tb)return;
   const every=stelcoRows();
@@ -5617,10 +5760,15 @@ function jobCount(cno){
 }
 function renderCusts(){
   for(const k in jobCountCache)delete jobCountCache[k];
+  const thOut=document.getElementById('u_th_out');if(thOut)thOut.style.display=isAdmin()?'':'none';
+  // total owed to us right now — the owner's number, so admin only
+  let owedTotal=0,owedCust=0,owedEst=false;
+  if(isAdmin())customers.forEach(c=>{const o=custOutstanding(c.cno);if(o.due>0){owedTotal+=o.due;owedCust++;if(o.est)owedEst=true;}});
   document.getElementById('u_stats').innerHTML=`
     <div class="card c-blue"><div class="n">${customers.length.toLocaleString()}</div><div class="l">Customers</div></div>
     <div class="card c-purple"><div class="n">${customers.filter(c=>c.cno.toUpperCase().startsWith('C')).length.toLocaleString()}</div><div class="l">C Numbers</div></div>
-    <div class="card c-info"><div class="n">${customers.filter(c=>/^A\d/i.test(c.cno)).length.toLocaleString()}</div><div class="l">ID Numbers (A…)</div></div>`;
+    <div class="card c-info"><div class="n">${customers.filter(c=>/^A\d/i.test(c.cno)).length.toLocaleString()}</div><div class="l">ID Numbers (A…)</div></div>
+    ${isAdmin()&&owedTotal>0?`<div class="card c-danger"><div class="n">${owedEst?'≈ ':''}${fmtNum(invMoney(owedTotal))}</div><div class="l">💰 Outstanding · ${owedCust} customer${owedCust>1?'s':''}</div></div>`:''}`;
   const rows=filteredCusts();
   const slice=rows.slice((uState.page-1)*PAGE_SIZE,uState.page*PAGE_SIZE);
   document.getElementById('u_empty').style.display=rows.length===0?'block':'none';
@@ -5632,6 +5780,11 @@ function renderCusts(){
       <td data-l="Contact">${r.contact?esc(r.contact)+`<button class="copybtn" onclick="copyCustContact('${r.id}')" title="Copy">📋</button>`:'<span class="d-none">—</span>'}${r.wa?' <span title="WhatsApp updates ON" style="color:#25D366;font-weight:800;font-size:10.5px;border:1px solid #25D366;border-radius:999px;padding:0 6px">WA</span>':''}</td>
       <td data-l="Clr/kg">${(r.apRates&&r.apRates['Clearance KG']!=null)?fmtNum(r.apRates['Clearance KG']):'<span class="d-none">—</span>'}</td>
       <td data-l="Jobs">${jc?`<span class="daysbadge d-ok">${jc} job${jc>1?'s':''}</span>`:'<span class="d-none">—</span>'}</td>
+      ${isAdmin()?(()=>{const o=custOutstanding(r.cno);
+        return `<td class="num" data-l="Outstanding">${o.due>0
+          ?`<span style="cursor:pointer;font-weight:800;color:#dc2626;border-bottom:1px dashed #dc2626"
+              onclick="openCustDues('${r.id}')" title="${o.n} unpaid invoice${o.n>1?'s':''}${o.oldest?', oldest '+fmtDate(o.oldest):''} — click to see them and record a payment">${o.est?'≈ ':''}${fmtNum(o.due)}</span>`
+          :'<span class="d-none">—</span>'}</td>`;})():''}
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="openAttachCust('${r.id}')" title="Customer documents (ID, licences, forms…) — shared with the Logins tab">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
         ${isAdmin()?`<button class="iconbtn" style="${r.portalKey?'color:#15803d;font-weight:700':''}" onclick="portalShare('${r.id}')" title="${r.portalKey?'Status link is live — click to copy it again':'Give this customer a private link to track their own shipments'}">🔗</button>`:''}
@@ -5640,6 +5793,50 @@ function renderCusts(){
       </div></td></tr>`;
   }).join('');
   pagerHTML(document.getElementById('u_pager'),uState,rows.length,'custs');
+}
+/* What this customer still owes, invoice by invoice, with 💰 Receive on each. Reading this costs
+   nothing; only recording an actual payment talks to QuickBooks (one Zapier task), and ⬇ exact
+   refreshes a single balance (two) when a figure needs to be certain. */
+function openCustDues(custId){
+  if(!isAdmin()){toast('Admin only');return;}
+  const c=customers.find(x=>x.id===custId);if(!c)return;
+  window.__dueCust=custId;
+  renderCustDues();showModal('overlay-dues');
+}
+function renderCustDues(){
+  const c=customers.find(x=>x.id===window.__dueCust);if(!c)return;
+  const key=(c.cno||'').toUpperCase();
+  const rows=entries.filter(e=>(e.cno||'').toUpperCase()===key&&(e.billNo||'').trim())
+    .map(e=>({e,d:entryDue(e)})).filter(x=>x.d&&x.d.due>0.5)
+    .sort((a,b)=>String(a.e.date||'').localeCompare(String(b.e.date||'')));   // oldest first — chase those
+  const tot=rows.reduce((s,x)=>s+x.d.due,0);
+  const anyEst=rows.some(x=>x.d.est);
+  document.getElementById('dues_title').textContent='💰 Outstanding — '+(c.name||c.cno);
+  document.getElementById('dues_body').innerHTML=rows.length?
+    `<div style="font-weight:800;font-size:18px;margin-bottom:10px">${anyEst?'≈ ':''}MVR ${fmtNum(invMoney(tot))}
+      <span style="font-weight:600;font-size:12.5px;color:var(--muted)">· ${rows.length} invoice${rows.length>1?'s':''}</span></div>`
+    +rows.map(({e,d})=>{
+      const age=Math.max(0,Math.round((Date.now()-new Date((e.date||isoLocal(new Date()))+'T00:00:00').getTime())/86400000));
+      const col=age>60?'#dc2626':age>30?'#b45309':'#0369a1';
+      return `<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:9px;padding:8px 11px;margin-bottom:6px;flex-wrap:wrap">
+        <div style="flex:1;min-width:150px">
+          <b>${esc(e.billNo)}</b> <span style="color:var(--muted);font-size:12px">· ${esc(e.awbBl)||'—'}</span>
+          <div style="font-size:11.5px;color:${col};font-weight:700">${fmtDate(e.date)} · ${age} day${age===1?'':'s'} old</div>
+        </div>
+        <div style="font-weight:800;white-space:nowrap">${d.est?'≈ ':''}${fmtNum(d.due)}</div>
+        <button class="iconbtn" style="background:#FF4F00;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="closeModal('overlay-dues');openPayRec('${e.id}')" title="Record the payment received">💰 Receive</button>
+        <button class="iconbtn" onclick="fetchOneBalance('${e.id}')" title="Ask QuickBooks for this invoice's exact balance (2 Zapier tasks)">⬇</button>
+      </div>`;}).join('')
+    +(anyEst?`<div style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5">≈ means the app worked this out from the invoice and the payments recorded here — no Zapier tasks spent. Press ⬇ on a line to get QuickBooks' exact balance.</div>`:'')
+    :'<div style="color:#16a34a;font-weight:700">Nothing outstanding — every invoice is paid.</div>';
+}
+// one-invoice refresh; the fetch Zap writes the balance back through the qbinv collection
+function fetchOneBalance(id){
+  const e=entries.find(x=>x.id===id);if(!e||!(e.billNo||'').trim())return;
+  if(!ZAPIER_FETCH_URL){toast('Fetch webhook not set up');return;}
+  try{fetch(ZAPIER_FETCH_URL,{method:'POST',body:JSON.stringify({event:'invoice_fetch',entryId:e.id,billNo:e.billNo.trim()})}).catch(()=>{});}catch(err){}
+  toast('⬇ Asked QuickBooks for '+e.billNo+' — the exact balance lands in a few seconds');
+  setTimeout(()=>{try{renderCustDues();renderCusts();}catch(err){}},15000);
 }
 // documents picked while ADDING a customer wait here and upload right after Save creates the record
 let custPendingFiles=[];
