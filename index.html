@@ -1051,7 +1051,7 @@
       <input type="hidden" id="pr_entryId">
       <div class="actions">
         <button type="button" class="ghost" onclick="closeModal('overlay-payrec')">Cancel</button>
-        <button type="submit" class="primary">Record in QuickBooks →</button>
+        <button type="submit" class="primary" id="pr_submit">Record in QuickBooks →</button>
       </div>
     </form>
   </div>
@@ -4404,7 +4404,13 @@ function openPayRec(entryId){
     (prev?`<div style="color:#0369a1;margin-top:4px">Already recorded: ${esc(prev)}</div>`:'');
   showModal('overlay-payrec');
 }
-window.sendPaymentReceived=function(ev){
+/* Record a payment DIRECTLY in QuickBooks through lion-qb-sync — no Zapier, no per-task charge.
+   The old webhook was fire-and-forget: it reported success whether or not QuickBooks accepted it.
+   This waits for the real answer and shows the invoice's remaining balance, so an amount that
+   overpays, an invoice that is already settled, or a typo'd number is refused instead of silently
+   going wrong inside the accounts. */
+const QB_API='https://lion-qb-sync.vercel.app/api';
+window.sendPaymentReceived=async function(ev){
   ev.preventDefault();
   if(!isAdmin()){toast('Recording payments is admin-only');return false;}
   const e=entries.find(x=>x.id===document.getElementById('pr_entryId').value);if(!e)return false;
@@ -4412,21 +4418,33 @@ window.sendPaymentReceived=function(ev){
   const date=document.getElementById('pr_date').value;
   const method=document.getElementById('pr_method').value;
   if(amt<=0){toast('Enter the amount received');return false;}
-  if(!ZAPIER_PAYMENT_URL){toast('Not set up yet — the payment webhook URL is missing');return false;}
+  if(!(e.billNo||'').trim()){toast('This shipment has no invoice number yet');return false;}
   if(!confirm('RECORD PAYMENT in QuickBooks?\n\nInvoice '+e.billNo+' — '+(e.customer||'')+'\nAmount: MVR '+invFmt(amt)+'\nMethod: '+method+'  Date: '+fmtDate(date)+
     '\n\nThis writes into the accounts. A mistaken payment must be deleted inside QuickBooks.'))return false;
+  const btn=document.getElementById('pr_submit');if(btn){btn.disabled=true;btn.textContent='Recording…';}
   try{
-    fetch(ZAPIER_PAYMENT_URL,{method:'POST',body:JSON.stringify({
-      event:'payment_received',entryId:e.id,billNo:e.billNo.trim(),
-      amount:amt,date:date,method:method,
-      customerName:e.customer||'',cNumber:e.cno||''
-    })}).catch(err=>console.warn('PayRec failed',err));
-  }catch(err){console.warn('PayRec error',err);}
-  (e.qbPayRec=e.qbPayRec||[]).push({amt:amt,date:date,method:method});
-  if(e.qbBalance!=null)e.qbBalance=Math.max(0,invMoney(Number(e.qbBalance)-amt)); // optimistic; next fetch confirms from QuickBooks
-  saveEntries();renderPayments();
-  closeModal('overlay-payrec');
-  toast('💰 Payment MVR '+invFmt(amt)+' sent to QuickBooks against invoice '+e.billNo);
+    const tok=await (window.__idToken?window.__idToken():'');
+    if(!tok)throw new Error('You are signed out — reload and sign in again');
+    const r=await fetch(QB_API+'/payment',{method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
+      body:JSON.stringify({invoiceNo:e.billNo.trim(),amount:amt,date:date,
+        note:method+' · '+(e.cno||'')+' · '+(e.awbBl||''),
+        // same shipment + amount + day twice = the same payment, not two: the service returns the first
+        key:'pay_'+e.id+'_'+date+'_'+amt})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
+    (e.qbPayRec=e.qbPayRec||[]).push({amt:amt,date:date,method:method,qbId:j.paymentId||''});
+    e.qbBalance=j.balanceAfter;                    // the REAL balance QuickBooks now holds
+    saveEntries();renderPayments();renderCusts();
+    closeModal('overlay-payrec');
+    toast(j.duplicate
+      ?('Already recorded — invoice '+e.billNo+' balance MVR '+invFmt(j.balanceAfter))
+      :('💰 Recorded in QuickBooks — invoice '+e.billNo+' now owes MVR '+invFmt(j.balanceAfter)));
+  }catch(err){
+    console.warn('PayRec failed',err);
+    alert('Payment NOT recorded.\n\n'+(err.message||err)+'\n\nNothing was written to QuickBooks.');
+  }
+  if(btn){btn.disabled=false;btn.textContent='Record Payment';}
   return false;
 };
 // Audit: ask the fetch Zap for this invoice's REAL lines from QuickBooks (Find Invoice by number
@@ -6943,6 +6961,10 @@ async function startSync(){
         try{renderEntries();renderMsgs();}catch(e){}
       },e=>console.warn('customer messages unavailable (rule missing?)',(e&&e.code)||e));
     }catch(e){console.warn('customer messages listener failed',e);}
+    /* Proof of who is asking, for the writes that go straight to QuickBooks (lion-qb-sync).
+       The service verifies this token against this same Firebase project and only lets the admin
+       address through — so nothing secret has to live in this file, which is public on Pages. */
+    window.__idToken=async()=>{try{return auth.currentUser?await auth.currentUser.getIdToken():'';}catch(e){return '';}};
     // AI document-reader key lives in Firestore settings/ai (team-shared, never in the public HTML)
     window.__aiKey={
       get:async()=>{const s=await fx.getDoc(fx.doc(db,'settings','ai'));return s.exists()?(s.data().key||''):'';},
