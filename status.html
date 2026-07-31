@@ -170,9 +170,23 @@ function sortShips(a,b){
   }
   return String(b.date||'').localeCompare(String(a.date||''));   // newest first
 }
+/* Customers recognise a shipment by WHO SENT IT long before they recognise the BL number, so the
+   supplier rides next to the reference: "BL ULGSMLE26FC-121 / Eldon". Keep it to one or two words —
+   the legal tail ("PVT LTD", "CO., LTD", "SRL", "GMBH"…) is noise on a status card. */
+function shortSupplier(name){
+  let n=String(name||'').replace(/[.,]/g,' ').replace(/\s+/g,' ').trim();
+  if(!n)return '';
+  const TAIL=/^(pvt|private|ltd|limited|llc|inc|co|corp|company|plc|srl|sr|sa|gmbh|bv|nv|ag|as|oy|ab|sdn|bhd|pte|pty|jsc|llp|lp|group|trading|international|intl|est|fze|fzc|fzco|dmcc|wll)$/i;
+  const words=n.split(' ').filter(w=>w&&!TAIL.test(w));
+  if(!words.length)return n.split(' ')[0]||'';
+  const keep=words.slice(0,2).join(' ');
+  // TitleCase unless it's an acronym (ACL, MSA) — shouty ALL CAPS reads badly on the card
+  return keep.split(' ').map(w=>w.length<=3&&w===w.toUpperCase()?w:w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join(' ');
+}
 function shipCard(s){
   const sea=s.type==='MP';
-  const ref=(sea?'BL ':'AWB ')+(s.awbBl||s.blNo||'—');
+  const sup=shortSupplier(s.supplier);
+  const ref=(sea?'BL ':'AWB ')+(s.awbBl||s.blNo||'—')+(sup?' / '+sup:'');
   const bs=billState(s);
   const cleared=isCleared(s);
   const submitted=!!String(s.rNo||'').trim();      // customs declaration filed = it has an R number
