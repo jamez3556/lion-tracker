@@ -994,6 +994,7 @@
     <div style="padding:16px 18px">
       <div id="att_info" style="margin-bottom:10px;font-size:13.5px"></div>
       <div id="att_list"></div>
+      <div id="att_sharehint" style="margin-top:8px;font-size:11.5px;color:var(--muted);line-height:1.5"></div>
       <div style="margin-top:12px">
         <input type="file" id="att_file" multiple style="display:none" onchange="attUpload(this.files)">
         <button type="button" class="primary" onclick="document.getElementById('att_file').click()">＋ Add file</button>
@@ -4270,13 +4271,21 @@ function renderAttach(){
     :attRef.list==='creds'?`<b>${esc(e.name)||'—'}</b> — this login has no C number; add it to share documents with the Customers tab`
     :`<b>${esc(e.customer)||'—'}</b> — R ${esc(e.rNo)||'—'} &nbsp;·&nbsp; AWB/BL ${esc(e.awbBl)||'—'}`;
   const list=e.attachments||[];
+  const shareable=attRef.list==='entries';   // only shipment documents can go on a customer's page
   document.getElementById('att_list').innerHTML=list.length?list.map((a,i)=>
-    `<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:6px">
+    `<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;margin-bottom:6px${a.share?';background:#f0fdf4;border-color:#16a34a':''}">
       <a href="${esc(a.url)}" target="_blank" rel="noopener" style="flex:1;font-weight:600;word-break:break-all">${esc(a.name)}</a>
       <span style="color:#94a3b8;font-size:11.5px;white-space:nowrap">${fmtDate(a.ts)}${a.size?' · '+Math.max(1,Math.round(a.size/1024))+' KB':''}</span>
+      ${shareable?`<button class="iconbtn" onclick="attShare(${i})" style="${a.share?'color:#16a34a':'color:#94a3b8'};font-size:15px"
+        title="${a.share?'The customer CAN open this from their status page — click to make it private again'
+                       :'Private to the team. Click to let this customer open it from their status page.'}">${a.share?'👁':'🔒'}</button>`:''}
       <button class="iconbtn del" onclick="attDelete(${i})" title="Delete for the whole team">🗑️</button>
     </div>`).join('')
     :'<div style="color:#94a3b8">No documents yet — add the AWB, duty receipt, photos…</div>';
+  const hint=document.getElementById('att_sharehint');
+  if(hint)hint.innerHTML=shareable
+    ?'🔒 = team only (default) · 👁 = the customer can open it from their status link. A shared link works for anyone who has it, so only share what the customer should hold.'
+    :'';
 }
 window.attUpload=async function(files){
   const e=attRec();if(!e||!files||!files.length)return;
@@ -4310,6 +4319,25 @@ window.attUpload=async function(files){
   st.textContent='';
   document.getElementById('att_file').value='';
   attSave();renderAttach();
+};
+/* Sharing a document with the customer. Documents are PRIVATE by default and only become visible on
+   the customer's status page when someone deliberately turns on 👁 — because a Storage link works for
+   anyone who holds it, signed in or not, and a link that has been out cannot be recalled. */
+window.attShare=function(i){
+  const e=attRec();if(!e||attRef.list!=='entries')return;
+  const a=(e.attachments||[])[i];if(!a)return;
+  if(!a.share){
+    const cust=lookupCustomer(e.cno);
+    const shared=cust&&cust.portalKey;
+    if(!confirm('Let the customer open “'+a.name+'” from their status page?\n\n'
+      +(shared?'':'(This customer has no status link yet — it will be visible as soon as one is shared.)\n')
+      +'\nAnyone holding that link can open the document, and a link cannot be recalled once sent.'))return;
+    a.share=true;
+  }else{
+    delete a.share;   // back to team-only; it disappears from the customer page on the next refresh
+  }
+  attSave();renderAttach();
+  toast(a.share?'👁 Shared — the customer can open it':'🔒 Private again — removed from the customer page');
 };
 window.attDelete=async function(i){
   const e=attRec();if(!e||!(e.attachments&&e.attachments[i]))return;
@@ -5694,6 +5722,10 @@ function portalShipment(e){
   // invoice money, only when QuickBooks has actually told us — never guess a customer's paid status
   if(e.qbBalance!=null)o.balance=Number(e.qbBalance);
   if(e.qbTotal!=null)o.total=Number(e.qbTotal);
+  // documents: ONLY the ones deliberately marked 👁 share. Never send a path or anything else about
+  // the private ones — the payload is a public document, so what isn't sent can't leak.
+  const shared=(e.attachments||[]).filter(a=>a.share&&a.url);
+  if(shared.length)o.docs=shared.map(a=>({name:a.name||'Document',url:a.url}));
   if(c){
     const el=effLast(c);
     o.blNo=c.blNo||'';o.doDate=c.doDate||'';o.clearance=c.clearance||'';
