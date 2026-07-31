@@ -5481,9 +5481,24 @@ function entryPaid(e){
   const adv=(pay&&pay.advance)?Number(pay.advance):0;
   return invMoney(adv+(e.qbPayRec||[]).reduce((s,p)=>s+(Number(p.amt)||0),0));
 }
-// Still owed on an invoiced shipment. QuickBooks' own balance wins when we have it.
+/* Still owed on an invoiced shipment, best source first:
+   1. the nightly QuickBooks sync — covers invoices STAFF typed straight into QuickBooks and payments
+      they took there, which the app could never see before;
+   2. a balance pulled with ⬇ Check on that one invoice;
+   3. the app's own arithmetic (marked ≈).
+   An invoice missing from the sync has been PAID — but only trust that if the invoice is older than
+   the sync itself, otherwise a brand-new invoice would look paid just because the sync ran first. */
+function qbSync(){const q=window.__qbbal;return (q&&q.inv&&q.updated)?q:null;}
 function entryDue(e){
-  if(!(e.billNo||'').trim())return null;           // not invoiced ⇒ nothing is owed yet
+  const bn=(e.billNo||'').trim();
+  if(!bn)return null;                              // not invoiced ⇒ nothing is owed yet
+  const q=qbSync();
+  if(q){
+    const hit=q.inv[bn]||q.inv[bn.replace(/\s+/g,'')];
+    if(hit)return {due:invMoney(Number(hit.b)||0),est:false,src:'qb'};
+    const syncedThrough=String(q.updated||'').slice(0,10);
+    if(e.date&&e.date<syncedThrough)return {due:0,est:false,src:'qb'};   // not owing ⇒ settled
+  }
   if(e.qbBalance!=null)return {due:invMoney(Number(e.qbBalance)),est:false};
   const t=invTotalOf(e);if(!t)return null;
   return {due:invMoney(t.amt-entryPaid(e)),est:true};
@@ -5768,7 +5783,7 @@ function renderCusts(){
     <div class="card c-blue"><div class="n">${customers.length.toLocaleString()}</div><div class="l">Customers</div></div>
     <div class="card c-purple"><div class="n">${customers.filter(c=>c.cno.toUpperCase().startsWith('C')).length.toLocaleString()}</div><div class="l">C Numbers</div></div>
     <div class="card c-info"><div class="n">${customers.filter(c=>/^A\d/i.test(c.cno)).length.toLocaleString()}</div><div class="l">ID Numbers (A…)</div></div>
-    ${isAdmin()&&owedTotal>0?`<div class="card c-danger"><div class="n">${owedEst?'≈ ':''}${fmtNum(invMoney(owedTotal))}</div><div class="l">💰 Outstanding · ${owedCust} customer${owedCust>1?'s':''}</div></div>`:''}`;
+    ${isAdmin()&&owedTotal>0?`<div class="card c-danger" title="${(()=>{const q=qbSync();return q?'From QuickBooks, refreshed '+fmtDate(String(q.updated).slice(0,10)):'Worked out in the app — connect QuickBooks for exact figures';})()}"><div class="n">${owedEst?'≈ ':''}${fmtNum(invMoney(owedTotal))}</div><div class="l">💰 Outstanding · ${owedCust} customer${owedCust>1?'s':''}${qbSync()?' · ✓ QuickBooks':''}</div></div>`:''}`;
   const rows=filteredCusts();
   const slice=rows.slice((uState.page-1)*PAGE_SIZE,uState.page*PAGE_SIZE);
   document.getElementById('u_empty').style.display=rows.length===0?'block':'none';
@@ -6936,6 +6951,15 @@ async function startSync(){
       mode:async()=>{const s=await fx.getDoc(fx.doc(db,'settings','ai'));return s.exists()?(s.data().mode||''):'';},
       setMode:async(m)=>{await fx.setDoc(fx.doc(db,'settings','ai'),{mode:m||'fast',u:Date.now()},{merge:true});}
     };
+    /* QuickBooks balances, written nightly by lion-qb-sync (Vercel + the QuickBooks API — no Zapier
+       tasks). settings/qbbal holds every invoice STILL OWING; anything missing from it that was
+       invoiced before the sync ran has been paid. One tiny document, one read when it changes. */
+    try{
+      fx.onSnapshot(fx.doc(db,'settings','qbbal'),s=>{
+        window.__qbbal=s.exists()?s.data():null;
+        try{renderCusts();renderPayments();if(bTab==='air')renderAirProfit();}catch(e){}
+      },e=>console.warn('QuickBooks balances unavailable',(e&&e.code)||e));
+    }catch(e){}
     // EEMAN payment ledger (admin's 💸 EEMAN Account inside MP Shipments) — same settings collection
     window.__eeman={
       get:async()=>{const s=await fx.getDoc(fx.doc(db,'settings','eeman'));return s.exists()?s.data():{pays:[]};},
