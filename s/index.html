@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Shipment Status — LION Logistics</title>
+<style>
+:root{
+  --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --bg:#f1f5f9; --card:#fff;
+  --brand:#FF4F00; --ok:#15803d; --warn:#b45309; --danger:#dc2626; --info:#1d4ed8;
+}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  background:var(--bg);color:var(--ink);-webkit-text-size-adjust:100%}
+header{background:#0f172a;color:#fff;padding:18px;border-bottom:5px solid var(--brand)}
+.hwrap{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}
+.hwrap:active{opacity:.7}
+.logo{width:76px;height:76px;border-radius:12px;background:#fff;display:grid;place-items:center;
+  flex:0 0 auto;padding:7px}
+.logo img{width:100%;height:100%;object-fit:contain;display:block}
+h1{font-size:22px;margin:0;font-weight:800;letter-spacing:.02em}
+h1 span{color:var(--brand)}
+.sub{font-size:12px;color:#94a3b8;margin-top:1px}
+main{max-width:900px;margin:0 auto;padding:16px 14px 60px}
+.who{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+.who b{font-size:16px}
+.who .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:9px 14px;flex:1 1 auto;min-width:104px}
+.stat .n{font-size:21px;font-weight:800;line-height:1.1}
+.stat .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.ship{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-bottom:10px}
+.ship-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.ref{font-weight:800;font-size:15px;word-break:break-all}
+.meta{font-size:12.5px;color:var(--muted);margin-top:2px}
+.pill{font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px;white-space:nowrap;text-transform:uppercase;letter-spacing:.03em}
+.p-pending{background:#fef3c7;color:#92400e}
+.p-cleared{background:#dcfce7;color:#15803d}
+.p-delivered{background:#e0e7ff;color:#3730a3}
+.b-paid{background:#dcfce7;color:#15803d}
+.b-due{background:#fee2e2;color:#b91c1c}
+.b-inv{background:#dbeafe;color:#1d4ed8}
+.b-none{background:#f1f5f9;color:#475569;border:1px dashed #cbd5e1}
+.pills{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media (prefers-color-scheme:dark){
+  .b-none{background:#1a222c;color:#94a3b8;border-color:#334155}
+}
+.rows{margin-top:11px;display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:9px}
+.f{background:#f8fafc;border:1px solid var(--line);border-radius:9px;padding:7px 10px}
+.f .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.f .v{font-weight:700;font-size:13.5px;margin-top:1px}
+.warnbox{margin-top:10px;padding:8px 11px;border-radius:9px;font-size:13px;font-weight:700}
+.w-soon{background:#fef3c7;color:#92400e}
+.w-late{background:#fee2e2;color:#b91c1c}
+.w-ok{background:#dcfce7;color:#166534}
+table.ctn{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px}
+table.ctn th{text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:4px 6px;border-bottom:1px solid var(--line)}
+table.ctn td{padding:5px 6px;border-bottom:1px solid #f1f5f9}
+.scroll{overflow-x:auto}
+.docs{margin-top:10px}
+.docs-t{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.doc{display:inline-flex;align-items:center;gap:6px;margin:0 6px 6px 0;padding:6px 11px;border:1px solid var(--line);
+  border-radius:999px;font-size:12.5px;font-weight:600;text-decoration:none;color:var(--brand);background:var(--card)}
+.doc:before{content:'📄'}
+.doc:hover{border-color:var(--brand)}
+.msg{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:26px 20px;text-align:center;color:var(--muted)}
+.note{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--brand);
+  border-radius:12px;padding:11px 13px;margin:0 0 14px}
+.note h2{font-size:13.5px;margin:0 0 8px;font-weight:800}
+.note textarea{width:100%;min-height:52px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;
+  font:inherit;font-size:14px;background:transparent;color:var(--ink);resize:vertical;outline:none}
+.note textarea:focus{border-color:var(--brand)}
+.note .row{display:flex;gap:9px;align-items:center;margin-top:9px;flex-wrap:wrap}
+.note select{padding:9px 11px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;
+  background:transparent;color:var(--ink);outline:none;flex:1 1 180px}
+.note button{background:var(--brand);color:#fff;border:0;border-radius:9px;padding:10px 20px;
+  font:inherit;font-weight:800;font-size:14px;cursor:pointer}
+.note button:disabled{opacity:.55;cursor:default}
+.note .said{color:var(--ok);font-weight:700;font-size:13.5px}
+footer{max-width:900px;margin:0 auto;padding:0 14px 30px;font-size:12px;color:var(--muted);text-align:center}
+a{color:var(--brand)}
+@media (prefers-color-scheme:dark){
+  :root{--ink:#e6edf6;--muted:#94a3b8;--line:#26303d;--bg:#0b1118;--card:#141b24}
+  .f{background:#0f1720}
+  table.ctn td{border-bottom-color:#1c242f}
+}
+</style>
+</head>
+<body>
+<header><div class="hwrap" id="hdr" title="Tap to refresh">
+  <div class="logo"><img src="logo.png" alt="LION Logistics"></div>
+  <div><h1>LI<span>O</span>N LOGISTICS</h1>
+    <div class="sub" id="hdr_sub">Shipment &amp; customs clearance status</div></div>
+</div></header>
+<main id="main"><div class="msg">Loading your shipments…</div></main>
+<footer id="foot"></footer>
+
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
+import {getFirestore,doc,getDoc,collection,addDoc} from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
+
+// Same public web config the tracker uses. It grants nothing on its own: this page can only read
+// portal/<key> because the security rule allows a get there and denies listing.
+const app=initializeApp({
+  apiKey:'AIzaSyAkNK-8qXg6kHTqrpof90BwIM81vh5ER4o',
+  authDomain:'lion-tracker-47830.firebaseapp.com',
+  projectId:'lion-tracker-47830',
+  storageBucket:'lion-tracker-47830.firebasestorage.app',
+  messagingSenderId:'1076678882929',
+  appId:'1:1076678882929:web:bf0a470ec4b5e639b20dd0'
+});
+const db=getFirestore(app);
+
+const main=document.getElementById('main');
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmt(d){
+  if(!d)return '—';
+  const p=String(d).split('-');
+  if(p.length!==3)return esc(d);
+  return Number(p[2])+' '+MON[Number(p[1])-1]+" '"+p[0].slice(2);
+}
+// Working days to a date, Fridays excluded — the same rule the office uses for the free period.
+function daysLeft(d){
+  if(!d)return null;
+  const t=new Date();t.setHours(0,0,0,0);
+  const target=new Date(d+'T00:00:00');
+  const cal=Math.round((target-t)/86400000);
+  if(cal===0)return 0;
+  if(Math.abs(cal)>3660)return cal;
+  const step=cal>0?1:-1;let n=0;const cur=new Date(t);
+  for(let i=0;i<Math.abs(cal);i++){cur.setDate(cur.getDate()+step);if(cur.getDay()!==5)n+=step;}
+  return n;
+}
+function pill(s){
+  const k=s==='Delivered'?'p-delivered':(s==='Cleared'?'p-cleared':'p-pending');
+  const label=s==='Delivered'?'Completed':s;
+  return `<span class="pill ${k}">${esc(label)}</span>`;
+}
+function field(k,v,red){return `<div class="f"><div class="k">${esc(k)}</div><div class="v"${red?' style="color:var(--danger)"':''}>${v}</div></div>`;}
+function money(n){return Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+// CLEARED means the shipment's own status says so. The container's "clearance" field is the date the
+// cargo is BOOKED to be cleared (noted) — a shipment can have one and still be sitting in port, so it
+// must never be read as proof the job is finished.
+function isCleared(s){return s.status==='Cleared'||s.status==='Delivered';}
+// Billing state, said plainly and never guessed. "Paid"/"Payment due" only appear when QuickBooks has
+// actually reported the balance; with an invoice but no balance figure we just say "Invoiced".
+function billState(s){
+  if(!s.billNo)return isCleared(s)?{k:'b-none',t:'Not billed yet'}:null;
+  if(s.balance==null)return {k:'b-inv',t:'Invoiced'};
+  return Number(s.balance)<=0?{k:'b-paid',t:'Paid'}:{k:'b-due',t:'Payment due'};
+}
+
+// Page order — what needs watching is at the top, finished business at the bottom:
+//   1. booked for clearance      → earliest clearance date first
+//   2. still in port, not booked → least time left first (overdue at the very top of the group)
+//   3. cleared, invoice to come
+//   4. invoiced                  → newest first, at the bottom
+function shipRank(s){
+  if(s.billNo)return 3;
+  if(isCleared(s))return 2;
+  return s.clearance?0:1;
+}
+function sortShips(a,b){
+  const ra=shipRank(a),rb=shipRank(b);
+  if(ra!==rb)return ra-rb;
+  if(ra===0)return String(a.clearance||'9999-99-99').localeCompare(String(b.clearance||'9999-99-99'));
+  if(ra===1){
+    const na=a.lastDate?daysLeft(a.lastDate):null, nb=b.lastDate?daysLeft(b.lastDate):null;
+    if(na===null&&nb===null)return String(b.date||'').localeCompare(String(a.date||''));
+    if(na===null)return 1;      // no free-date information — after the ones we can measure
+    if(nb===null)return -1;
+    return na-nb;
+  }
+  return String(b.date||'').localeCompare(String(a.date||''));   // newest first
+}
+/* Customers recognise a shipment by WHO SENT IT long before they recognise the BL number, so the
+   supplier rides next to the reference: "BL ULGSMLE26FC-121 / Eldon". Keep it to one or two words —
+   the legal tail ("PVT LTD", "CO., LTD", "SRL", "GMBH"…) is noise on a status card. */
+function shortSupplier(name){
+  // keep letters/digits, & and - ; everything else (dots, commas, brackets) is just noise
+  let n=String(name||'').replace(/[^\w&\-\s]/g,' ').replace(/\s+/g,' ').trim();
+  if(!n)return '';
+  // "L & S" is ONE name, not two words plus a stray & — join initial-ampersand groups first
+  for(let i=0;i<2;i++)n=n.replace(/\b([A-Za-z])\s*&\s*([A-Za-z])\b/g,'$1&$2');
+  const TAIL=/^(pvt|private|ltd|limited|llc|inc|co|corp|company|plc|srl|sr|sa|gmbh|bv|nv|ag|as|oy|ab|sdn|bhd|pte|pty|jsc|llp|lp|group|trading|international|intl|est|fze|fzc|fzco|dmcc|wll)$/i;
+  const words=n.split(' ').filter(w=>/[a-z0-9]/i.test(w)&&!TAIL.test(w));
+  if(!words.length)return n.split(' ')[0]||'';
+  const keep=words.slice(0,2).join(' ');
+  // TitleCase unless it's an acronym (ACL, MSA) — shouty ALL CAPS reads badly on the card
+  return keep.split(' ').map(w=>w.length<=3&&w===w.toUpperCase()?w:w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join(' ');
+}
+function shipCard(s){
+  const sea=s.type==='MP';
+  const sup=shortSupplier(s.supplier);
+  const ref=(sea?'BL ':'AWB ')+(s.awbBl||s.blNo||'—')+(sup?' / '+sup:'');
+  const bs=billState(s);
+  const cleared=isCleared(s);
+  const submitted=!!String(s.rNo||'').trim();      // customs declaration filed = it has an R number
+  const noted=!!s.clearance;                       // booked for clearance = under control
+  const left=s.lastDate?daysLeft(s.lastDate):null; // working days, Fridays excluded
+  // RED means someone should act: a clearance date that hasn't happened yet, or a free period running
+  // out on cargo nobody has booked in. Once the shipment is cleared, both go back to normal.
+  const clearRed=!cleared;
+  const lastRed=!cleared&&!noted&&left!==null&&left<=3;
+  let out=`<div class="ship"><div class="ship-top">
+      <div><div class="ref">${esc(ref)}</div>
+        <div class="meta">${sea?'Sea freight':'Air freight'} · logged ${fmt(s.date)}</div></div>
+      <div class="pills">${pill(s.status)}${bs?`<span class="pill ${bs.k}">${esc(bs.t)}</span>`:''}</div>
+    </div><div class="rows">`;
+  // The customs declaration is step one — until it carries an R number nothing else can happen,
+  // so the customer sees it first and in red while it's outstanding.
+  out+=field('Customs declaration',submitted?'R '+esc(s.rNo):'Not submitted',!submitted&&!cleared);
+  if(s.pkgs!=='')out+=field('Packages',esc(s.pkgs));
+  if(s.grsWt!=='')out+=field('Gross weight',esc(s.grsWt)+' kg');
+  if(s.doDate)out+=field('Delivery order',fmt(s.doDate));
+  if(s.lastDate)out+=field('Last free date',fmt(s.lastDate),lastRed);
+  if(s.clearance)out+=field(cleared?'Cleared on':'Clearance booked',fmt(s.clearance),clearRed);
+  if(s.billNo)out+=field('Invoice',esc(s.billNo));
+  if(s.total!=null)out+=field('Invoice total',money(s.total));
+  if(s.balance!=null&&Number(s.balance)>0)out+=field('Balance due',money(s.balance));
+  out+='</div>';
+  if(!submitted&&!cleared)out+=`<div class="warnbox w-soon">Customs declaration not submitted yet — this is the first step, and the R number appears here once it is filed.</div>`;
+  if(bs&&bs.k==='b-none')out+=`<div class="warnbox w-ok">Customs clearance complete — your invoice is being prepared.</div>`;
+  if(bs&&bs.k==='b-due')out+=`<div class="warnbox w-late">Payment due: ${money(s.balance)} against invoice ${esc(s.billNo)}.</div>`;
+  // free-period countdown — only while the cargo sits in port with no clearance booked
+  if(s.lastDate&&!noted&&!cleared){
+    const n=left;
+    if(n!==null){
+      if(n<0)out+=`<div class="warnbox w-late">⚠ Free period ended ${Math.abs(n)} working day${Math.abs(n)===1?'':'s'} ago — storage charges may apply.</div>`;
+      else if(n===0)out+=`<div class="warnbox w-late">⚠ Last free day is today.</div>`;
+      else if(n<=3)out+=`<div class="warnbox w-soon">${n} working day${n===1?'':'s'} left before storage charges start.</div>`;
+      else out+=`<div class="warnbox w-ok">${n} working days left in the free period.</div>`;
+    }
+  }else if(noted&&!cleared){
+    out+=`<div class="warnbox w-soon">Booked for clearance on ${fmt(s.clearance)} — not completed yet.</div>`;
+  }
+  // documents LION chose to share on this shipment
+  if(s.docs&&s.docs.length){
+    out+='<div class="docs"><div class="docs-t">📎 Documents</div>'
+      +s.docs.map(d=>`<a class="doc" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.name||'Document')}</a>`).join('')
+      +'</div>';
+  }
+  if(s.containers&&s.containers.length){
+    out+='<div class="scroll"><table class="ctn"><thead><tr><th>Container</th><th>Size</th><th>Arrived</th><th>Discharged</th><th>Out of port</th></tr></thead><tbody>';
+    s.containers.forEach(c=>{
+      out+=`<tr><td><b>${esc(c.no)}</b></td><td>${esc(c.size||'—')}</td><td>${fmt(c.arrival)}</td><td>${fmt(c.discharge)}</td><td>${c.out?fmt(c.out):'—'}</td></tr>`;
+    });
+    out+='</tbody></table></div>';
+  }
+  return out+'</div>';
+}
+
+function render(d){
+  const ships=d.shipments||[];
+  const active=ships.filter(s=>!isCleared(s)).length;
+  // urgent = still not cleared, nothing booked, and the free period is nearly (or already) gone
+  const due=ships.filter(s=>{if(!s.lastDate||s.clearance||isCleared(s))return false;
+    const n=daysLeft(s.lastDate);return n!==null&&n<=3;}).length;
+  const noDec=ships.filter(s=>!String(s.rNo||'').trim()&&!isCleared(s)).length;
+  const states=ships.map(billState);
+  const notBilled=states.filter(b=>b&&b.k==='b-none').length;
+  const unpaid=ships.filter((s,i)=>states[i]&&states[i].k==='b-due');
+  const owed=unpaid.reduce((t,s)=>t+Number(s.balance||0),0);
+  let h=`<div class="who"><div class="k">Account</div><b>${esc(d.name||'—')}</b>
+      <div class="meta" style="font-size:12.5px;color:var(--muted)">Customer number ${esc(d.cno||'—')}</div></div>
+    <div class="stats">
+      <div class="stat"><div class="n">${ships.length}</div><div class="l">Shipments</div></div>
+      <div class="stat"><div class="n">${active}</div><div class="l">Awaiting clearance</div></div>
+      <div class="stat" style="${due?'outline:2px solid var(--danger)':''}"><div class="n" style="${due?'color:var(--danger)':''}">${due}</div><div class="l">Needs attention</div></div>
+      ${noDec?`<div class="stat"><div class="n">${noDec}</div><div class="l">Declaration pending</div></div>`:''}
+      ${notBilled?`<div class="stat"><div class="n">${notBilled}</div><div class="l">Awaiting invoice</div></div>`:''}
+      ${unpaid.length?`<div class="stat" style="outline:2px solid var(--danger)"><div class="n" style="color:var(--danger)">${unpaid.length}</div><div class="l">Payment due</div></div>`:''}
+    </div>
+    ${owed>0?`<div class="who" style="border-color:#fecaca;background:#fef2f2;color:#b91c1c">
+        <div class="k" style="color:#b91c1c">Outstanding balance</div><b>${money(owed)}</b>
+        <div style="font-size:12.5px;margin-top:2px">across ${unpaid.length} invoice${unpaid.length===1?'':'s'}</div></div>`:''}`;
+  // Message box sits ABOVE the shipment list — at the bottom of a long list nobody ever found it
+  // Shipments are picked by R NUMBER — that is the reference the office works from every day.
+  // Anything still without one falls back to its AWB/BL so it can still be talked about.
+  h+=`<div class="note">
+      <h2>💬 Send us a message</h2>
+      <select id="m_ship"><option value="">General message — not about one shipment</option>${
+        ships.slice().sort(sortShips).map(s=>{
+          const r=String(s.rNo||'').trim();
+          const label=r?('R '+r):((s.type==='MP'?'BL ':'AWB ')+(s.awbBl||s.blNo||'—'));
+          return `<option value="${esc(label)}">${esc(label)}</option>`;
+        }).join('')
+      }</select>
+      <div style="height:8px"></div>
+      <textarea id="m_text" maxlength="900" placeholder="Type your message…"></textarea>
+      <div class="row"><button id="m_send" type="button">Send</button><span id="m_said"></span></div>
+    </div>`;
+  h+=ships.length?ships.slice().sort(sortShips).map(shipCard).join(''):'<div class="msg">No shipments on this account yet.</div>';
+  main.innerHTML=h;
+  wireMessage(d);
+  document.getElementById('foot').innerHTML=
+    `Updated ${fmt(d.updated)}${d.updatedTime?' at '+esc(d.updatedTime):''} · LION Logistics Pvt Ltd, Malé, Maldives<br>
+     Questions about a shipment? Reply to your usual contact at LION Logistics.`;
+}
+
+// The message is written straight into Firestore ('portalmsg'). The security rule only accepts it if
+// the sender's link key really exists, so a stranger can't post — and it costs nothing to run.
+let PORTAL_KEY='';
+function wireMessage(d){
+  const btn=document.getElementById('m_send'), box=document.getElementById('m_text'), said=document.getElementById('m_said');
+  btn.addEventListener('click',async()=>{
+    const text=box.value.trim();
+    if(!text){box.focus();return;}
+    btn.disabled=true;said.textContent='Sending…';said.className='';
+    try{
+      await addDoc(collection(db,'portalmsg'),{
+        key:PORTAL_KEY, text:text,
+        about:document.getElementById('m_ship').value||'',
+        cno:d.cno||'', name:d.name||'',
+        at:new Date().toISOString(), read:false
+      });
+      box.value='';said.textContent='✓ Sent — we will get back to you.';said.className='said';
+      setTimeout(()=>{said.textContent='';btn.disabled=false;},6000);
+    }catch(err){
+      console.error(err);
+      said.textContent='Could not send just now — please try again.';btn.disabled=false;
+    }
+  });
+}
+
+// Tapping the logo or the company name re-reads the shipments — the natural thing to do on a phone
+// when you want to know whether anything has moved.
+const sub=document.getElementById('hdr_sub');
+const SUBTITLE='Shipment &amp; customs clearance status';
+let loading=false;
+async function load(){
+  const key=PORTAL_KEY;
+  if(!key){main.innerHTML='<div class="msg">This link is incomplete. Please use the full link sent to you by LION Logistics.</div>';return;}
+  if(loading)return;
+  loading=true;sub.textContent='Updating…';
+  try{
+    const snap=await getDoc(doc(db,'portal',key));
+    if(!snap.exists()){
+      main.innerHTML='<div class="msg">This tracking link is no longer active.<br>Please contact LION Logistics for a new one.</div>';
+    }else{
+      render(snap.data());
+      window.scrollTo({top:0,behavior:'smooth'});
+    }
+    sub.innerHTML=SUBTITLE;
+  }catch(err){
+    console.error(err);
+    main.innerHTML='<div class="msg">Could not load your shipments right now. Please try again shortly.</div>';
+    sub.innerHTML=SUBTITLE;
+  }
+  loading=false;
+}
+document.getElementById('hdr').addEventListener('click',load);
+PORTAL_KEY=(location.hash||'').replace(/^#/,'').trim();
+load();
+</script>
+</body>
+</html>
