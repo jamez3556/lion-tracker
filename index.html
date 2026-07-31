@@ -398,6 +398,7 @@
           <th data-k="grsWt" class="num">GRS WT <span class="arrow">▲▼</span></th>
           <th data-k="pkgs" class="num">PKGS <span class="arrow">▲▼</span></th>
           <th data-k="awbBl">AWB / BL NO <span class="arrow">▲▼</span></th>
+          <th data-k="supplier" title="Shipper / exporter from the BL — shown beside the BL on the customer's status page">SUPPLIER <span class="arrow">▲▼</span></th>
           <th data-k="status">STATUS <span class="arrow">▲▼</span></th>
           <th class="num nosort mp-admin" id="mp_th_eeman" style="display:none" title="EEMAN's clearance charge to LION (internal — admin only)">💸 EEMAN</th>
           <th data-k="mpRemark">REMARK <span class="arrow">▲▼</span></th>
@@ -1650,7 +1651,7 @@ function saveEntry(e){
   // side-channel fields not on this form (documents, fetched QuickBooks invoice, payments received) — never lose them on an edit
   // qbInvoiced/qbInvoicedAt MUST survive an edit — losing them removes the "already sent to
   // QuickBooks" warning and the next press of 🧾 silently creates a DUPLICATE invoice.
-  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec','qbInvoiced','qbInvoicedAt','qbSentMs','seaCont','outCost','demur'].forEach(k=>{
+  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec','qbInvoiced','qbInvoicedAt','qbSentMs','seaCont','outCost','demur','supplier'].forEach(k=>{
     if(prevEntry[k]!==undefined)rec[k]=prevEntry[k];
   });
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
@@ -2285,7 +2286,7 @@ function filteredMP(){
     if(r.type!=='MP')return false;
     if(isBillOnly(r))return false;            // STELCO-desk sea (billing-only) lives on its own desk, never here
     if(r.billNo)return false;                 // billed → leaves the MP list (invoice entered in Form Log)
-    if(q&&![r.cno,r.customer,r.awbBl,r.rNo,r.file,r.mpRemark].join(' ').toLowerCase().includes(q))return false;
+    if(q&&![r.cno,r.customer,r.awbBl,r.rNo,r.file,r.mpRemark,r.supplier].join(' ').toLowerCase().includes(q))return false;
     if(sf&&r.status!==sf)return false;
     if(mf&&(r.date||'').slice(0,7)!==mf)return false;
     return true;
@@ -2324,6 +2325,7 @@ function renderMP(){
     <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
     <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
     <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
+    <td data-l="Supplier"><input class="mpremark" style="min-width:120px" value="${esc(r.supplier)}" placeholder="Shipper on the BL…" onchange="setSupplier('${jatt(r.id)}',this.value)"></td>
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
     ${isAdmin()?`<td class="num" data-l="💸 EEMAN">${(r.outCost&&r.outCost.amt!=null)
       ?`<span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stOut('${jatt(r.id)}')" title="EEMAN's charge${r.outCost.inv?' · his inv '+esc(r.outCost.inv):''} — click to change">${fmtNum(r.outCost.amt)}</span>`
@@ -2407,6 +2409,16 @@ async function eemanPayDel(i){
   if(!confirm('Delete the payment of '+fmtNum(p.amt)+' on '+fmtDate(p.d)+'?'))return;
   eemanPays.splice(eemanPays.indexOf(p),1);
   await eemanSave();renderEemanAcct();
+}
+// Supplier = the shipper/exporter printed on the BL. Lives only on the MP tab (sea work never
+// touches the Form Log) and rides to the customer's status page beside the BL number.
+function setSupplier(id,val){
+  const r=entries.find(x=>x.id===id);if(!r)return;
+  const v=val.trim();
+  if((r.supplier||'')===v)return;
+  if(v)r.supplier=v;else delete r.supplier;
+  saveEntries();                       // saveEntries refreshes any shared status pages
+  toast(v?'Supplier saved — customers see it beside the BL':'Supplier cleared');
 }
 function setMpRemark(id,val){
   const r=entries.find(x=>x.id===id);if(!r)return;
@@ -5676,6 +5688,7 @@ function portalToken(){
 function portalShipment(e){
   const c=containers.find(x=>x.entryId===e.id);
   const o={date:e.date||'',type:e.type||'',rNo:e.rNo||'',awbBl:e.awbBl||'',
+    supplier:e.supplier||'',                       // shown next to the BL on the customer's card
     pkgs:e.pkgs==null?'':e.pkgs,grsWt:e.grsWt==null?'':e.grsWt,
     status:e.status||'Pending',billNo:e.billNo||''};
   // invoice money, only when QuickBooks has actually told us — never guess a customer's paid status
