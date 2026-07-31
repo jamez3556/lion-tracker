@@ -174,10 +174,13 @@ function sortShips(a,b){
    supplier rides next to the reference: "BL ULGSMLE26FC-121 / Eldon". Keep it to one or two words —
    the legal tail ("PVT LTD", "CO., LTD", "SRL", "GMBH"…) is noise on a status card. */
 function shortSupplier(name){
-  let n=String(name||'').replace(/[.,]/g,' ').replace(/\s+/g,' ').trim();
+  // keep letters/digits, & and - ; everything else (dots, commas, brackets) is just noise
+  let n=String(name||'').replace(/[^\w&\-\s]/g,' ').replace(/\s+/g,' ').trim();
   if(!n)return '';
+  // "L & S" is ONE name, not two words plus a stray & — join initial-ampersand groups first
+  for(let i=0;i<2;i++)n=n.replace(/\b([A-Za-z])\s*&\s*([A-Za-z])\b/g,'$1&$2');
   const TAIL=/^(pvt|private|ltd|limited|llc|inc|co|corp|company|plc|srl|sr|sa|gmbh|bv|nv|ag|as|oy|ab|sdn|bhd|pte|pty|jsc|llp|lp|group|trading|international|intl|est|fze|fzc|fzco|dmcc|wll)$/i;
-  const words=n.split(' ').filter(w=>w&&!TAIL.test(w));
+  const words=n.split(' ').filter(w=>/[a-z0-9]/i.test(w)&&!TAIL.test(w));
   if(!words.length)return n.split(' ')[0]||'';
   const keep=words.slice(0,2).join(' ');
   // TitleCase unless it's an acronym (ACL, MSA) — shouty ALL CAPS reads badly on the card
