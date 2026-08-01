@@ -1623,8 +1623,11 @@ function billSet(id,val){
   }
   const before={...e};
   e.billNo=bn;
-  if(bn)e.status='Delivered';                       // invoice exists ⇒ Delivered, same as the form
-  else if(e.status==='Delivered')e.status='Cleared'; // invoice removed ⇒ back a step, never Pending
+  /* Invoice exists ⇒ Delivered. Invoice removed ⇒ back to Pending — NOT Cleared. Cleared is a
+     state a person chooses by hand; the app must never award it, or a shipment nobody has cleared
+     sits there looking cleared. */
+  if(bn)e.status='Delivered';
+  else if(e.status==='Delivered')e.status='Pending';
   if(syncPaymentFromEntry(e))savePayments();
   syncContFromEntry(e,before,null);
   saveEntries();
