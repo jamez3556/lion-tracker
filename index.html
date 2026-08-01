@@ -4371,17 +4371,29 @@ async function qbInvoice(preview){
         +'\n\nIf that matches what you expect, press "Create in QuickBooks".');
       return;
     }
-    // it exists now — record the number and let the invoice rule do the rest
-    const before={...e};
-    if(j.invoiceNo){e.billNo=j.invoiceNo;e.status='Delivered';
-      if(syncPaymentFromEntry(e))savePayments();syncContFromEntry(e,before,null);}
-    e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());delete e.qbSentMs;
-    e.qbLines=inv.lines.map(l=>({item:l.item,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
-    e.qbTotal=j.total;e.qbBalance=j.balance;
-    saveEntries();renderEntries();renderMP();renderPayments();renderCusts();updateCounts();
+    /* The invoice EXISTS from here on. Everything below is our own bookkeeping, so it runs in its
+       own try — a failure updating the container or the payment record must never be reported as
+       "invoice not created", which would send you back to create a second one. */
+    try{
+      const before={...e};
+      if(j.invoiceNo){e.billNo=j.invoiceNo;e.status='Delivered';
+        if(syncPaymentFromEntry(e))savePayments();syncContFromEntry(e,before,null);}
+      e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());delete e.qbSentMs;
+      e.qbLines=inv.lines.map(l=>({item:l.item,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
+      e.qbTotal=j.total;e.qbBalance=j.balance;
+      saveEntries();renderEntries();renderMP();renderPayments();renderCusts();updateCounts();
+    }catch(err2){
+      console.warn('invoice created, but updating the shipment failed',err2);
+      alert('The invoice WAS created in QuickBooks'+(j.invoiceNo?' as '+j.invoiceNo:'')
+        +', but the app could not update the shipment.\n\n'+(err2.message||err2)
+        +'\n\nType the number into BILL NO by hand. Do NOT create it again.');
+    }
     closeModal('overlay-invoice');
-    toast(j.duplicate?('Already created — invoice '+j.invoiceNo)
-      :('🧾 Invoice '+j.invoiceNo+' created in QuickBooks — MVR '+fmtNum(j.total)));
+    // an alert, not a toast: this is the number that has to reach the Form Log, and a toast fades
+    alert((j.duplicate?'Already created earlier.':'🧾 Invoice created in QuickBooks.')
+      +'\n\nNumber: '+(j.invoiceNo||'(QuickBooks did not return one — find it in QuickBooks and type it into BILL NO)')
+      +'\nCustomer: '+j.customer
+      +'\nTotal: MVR '+fmtNum(j.total));
   }catch(err){
     console.warn('QuickBooks invoice failed',err);
     alert((preview?'Preview failed.\n\n':'Invoice NOT created.\n\n')+(err.message||err));
