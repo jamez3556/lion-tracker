@@ -5151,6 +5151,8 @@ function renderDoQueue(){
     const linked=dp.entryId?entries.find(x=>x.id===dp.entryId):null;
     const m=linked||dpMatch(dp);
     const billed=dp.status==='billed';
+    // R number: the one read off the DO photo, else the one typed into its linked Form Log entry
+    const dpR=String(dp.rNo||'').trim()||(linked&&String(linked.rNo||'').trim())||'';
     const extras=(dp.extras||[]).map(x=>esc(x.item)+' Rf '+Number(x.amount).toLocaleString()).join(' · ');
     const matchTxt=m
       ?`<span style="color:${m.billNo?'#16a34a':'#0369a1'}">${linked?'📋 Linked':'≈ Matches'} NO ${m.no??'—'} — ${esc(m.customer)||'—'} (${esc(m.cno)||'—'})${m.billNo?' · '+esc(m.billNo):''}</span>`
@@ -5165,7 +5167,7 @@ function renderDoQueue(){
         ?`<a href="${esc(ph.url)}" target="_blank" rel="noopener" title="Open the DO document" style="width:64px;height:64px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;font-size:26px;text-decoration:none">📄</a>`
         :`<a href="${esc(ph.url)}" target="_blank" rel="noopener" title="Open the DO photo"><img src="${esc(ph.url)}" alt="DO" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"></a>`):''}
       <div style="flex:1;min-width:0;font-size:13px">
-        <div style="font-weight:800;font-size:14px">${esc(dp.awb)} · ${Number(dp.kg)||'—'} kg${dp.rNo?' · R '+esc(dp.rNo):''}
+        <div style="font-weight:800;font-size:14px">${esc(dp.awb)} · ${Number(dp.kg)||'—'} kg${dpR?' · R '+esc(dpR):''}
           ${billed?`<span style="color:#16a34a;font-size:11.5px;font-weight:800;margin-left:6px">✅ BILLED${dp.billNo?' · '+esc(dp.billNo):''}</span>`:''}
           ${dosnaps.filter(o=>awbDigits(o.awb)===awbDigits(dp.awb)).length>1?`<span style="color:#dc2626;font-size:11.5px;font-weight:800;margin-left:6px" title="Another DO snap has this same AWB — check whether one should be deleted">⚠ SAME AWB TWICE</span>`:''}</div>
         <div style="color:var(--muted);margin:2px 0">${esc(dp.customer||'')}${dp.customer?' · ':''}${fmtDate(dp.date)} ${esc(dp.time||'')} · by ${esc(dp.by||'—')}${dp.macl?' · MACL <b>'+Number(dp.macl).toLocaleString()+'</b>':''}${dp.demur?' · Demurrage <b>'+Number(dp.demur).toLocaleString()+'</b>':''}${(dp.photos||[]).length>1?' · 📎 '+dp.photos.length+' photos':''}</div>
