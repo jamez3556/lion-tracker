@@ -5701,6 +5701,33 @@ function entryPaid(e){
    An invoice missing from the sync has been PAID — but only trust that if the invoice is older than
    the sync itself, otherwise a brand-new invoice would look paid just because the sync ran first. */
 function qbSync(){const q=window.__qbbal;return (q&&q.inv&&q.updated)?q:null;}
+/* Pull from QuickBooks on demand, instead of waiting for the midnight job.
+   Costs nothing per press — it is our own service, not Zapier. The figures on screen update on
+   their own the moment the service finishes writing: the app is already listening for that. */
+function qbLastSyncLabel(){
+  const q=qbSync();
+  if(!q)return 'Pull the latest invoice balances from QuickBooks';
+  const d=new Date(q.updated);
+  return 'Last read from QuickBooks '+fmtDate(isoLocal(d))+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')
+    +' · '+(q.count||0).toLocaleString()+' unpaid invoices';
+}
+async function qbRefresh(btn){
+  if(!isAdmin()){toast('QuickBooks is admin-only');return;}
+  const old=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='Reading…';}
+  try{
+    const tok=await (window.__idToken?window.__idToken():'');
+    if(!tok)throw new Error('You are signed out — reload and sign in again');
+    const r=await fetch(QB_API+'/sync',{headers:{Authorization:'Bearer '+tok}});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
+    toast('✓ QuickBooks read — '+(j.invoices||0).toLocaleString()+' unpaid invoices');
+  }catch(err){
+    console.warn('QuickBooks refresh failed',err);
+    toast('⚠ Could not read QuickBooks — '+(err.message||err));
+  }
+  if(btn){btn.disabled=false;btn.textContent=old||'🔄 Refresh';}
+}
 function entryDue(e){
   const bn=(e.billNo||'').trim();
   if(!bn)return null;                              // not invoiced ⇒ nothing is owed yet
@@ -5995,7 +6022,7 @@ function renderCusts(){
     <div class="card c-blue"><div class="n">${customers.length.toLocaleString()}</div><div class="l">Customers</div></div>
     <div class="card c-purple"><div class="n">${customers.filter(c=>c.cno.toUpperCase().startsWith('C')).length.toLocaleString()}</div><div class="l">C Numbers</div></div>
     <div class="card c-info"><div class="n">${customers.filter(c=>/^A\d/i.test(c.cno)).length.toLocaleString()}</div><div class="l">ID Numbers (A…)</div></div>
-    ${isAdmin()&&owedTotal>0?`<div class="card c-danger" title="${(()=>{const q=qbSync();return q?'From QuickBooks, refreshed '+fmtDate(String(q.updated).slice(0,10)):'Worked out in the app — connect QuickBooks for exact figures';})()}"><div class="n">${owedEst?'≈ ':''}${fmtNum(invMoney(owedTotal))}</div><div class="l">💰 Outstanding · ${owedCust} customer${owedCust>1?'s':''}${qbSync()?' · ✓ QuickBooks':''}</div></div>`:''}`;
+    ${isAdmin()&&owedTotal>0?`<div class="card c-danger" title="${(()=>{const q=qbSync();return q?'From QuickBooks, refreshed '+fmtDate(String(q.updated).slice(0,10)):'Worked out in the app — connect QuickBooks for exact figures';})()}"><div class="n">${owedEst?'≈ ':''}${fmtNum(invMoney(owedTotal))}</div><div class="l">💰 Outstanding · ${owedCust} customer${owedCust>1?'s':''}${qbSync()?' · ✓ QuickBooks':''}</div>${isAdmin()?`<button class="ghost" style="margin-top:6px;padding:2px 9px;font-size:11px" onclick="qbRefresh(this)" title="${qbLastSyncLabel()}">🔄 Refresh</button>`:''}</div>`:''}`;
   const rows=filteredCusts();
   const slice=rows.slice((uState.page-1)*PAGE_SIZE,uState.page*PAGE_SIZE);
   document.getElementById('u_empty').style.display=rows.length===0?'block':'none';
