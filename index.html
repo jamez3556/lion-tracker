@@ -171,7 +171,12 @@
   .overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:flex-start;
     justify-content:center;padding:40px 16px;z-index:50;overflow:auto}
   .overlay.show{display:flex}
-  .modal{background:#fff;border-radius:16px;width:100%;max-width:560px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal{background:#fff;border-radius:16px;width:100%;max-width:560px;box-shadow:0 20px 60px rgba(0,0,0,.3);position:relative}
+  /* every modal gets a ✕ (injected at boot) — a deliberate way out, so accidental outside-clicks
+     don't have to be the only way to close */
+  .modalx{position:absolute;top:10px;right:12px;width:32px;height:32px;border:none;background:none;
+    border-radius:8px;font-size:17px;font-weight:700;color:#94a3b8;cursor:pointer;line-height:1;z-index:5}
+  .modalx:hover{background:#fee2e2;color:#dc2626}
   .modal h2{margin:0;padding:20px 24px;font-size:17px;border-bottom:1px solid var(--line)}
   .modal form{padding:20px 24px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -1007,6 +1012,10 @@
       <button type="button" class="ghost" onclick="invAddLine({name:'',tax:8})">＋ Custom (GST)</button>
       <button type="button" class="ghost" onclick="invAddLine({name:'',tax:0})">＋ Custom (non-tax)</button>
       <button type="button" class="ghost" id="inv_tmplBtn" onclick="saveInvTemplate()" title="Remember these lines as this customer's own invoice format — every future shipment starts from them">📋 Save as this customer's format</button>
+      <input type="file" id="inv_file" multiple style="display:none" onchange="invAttach(this.files)">
+      <button type="button" class="ghost" id="inv_attBtn" onclick="document.getElementById('inv_file').click()"
+        title="Attach the DO / MACL bill / receipts right here — the builder stays open and your lines are kept">📎 Documents</button>
+      <span id="inv_attStatus" style="font-size:12px;color:var(--muted)"></span>
     </div>
     <div class="grid3">
       <div class="field"><label id="inv_lbl_sub">SUBTOTAL</label><input id="inv_subtotal" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:600"></div>
@@ -1321,7 +1330,22 @@ function toast(msg){
 }
 function closeModal(id){document.getElementById(id).classList.remove('show')}
 function showModal(id){document.getElementById(id).classList.add('show')}
-document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('show')}));
+/* Outside-click closes a modal — but only when the PRESS started outside too. A click event fires
+   on the overlay whenever the mouse is released over it, so selecting text in a form and letting go
+   past the edge used to throw the whole half-filled invoice away. Track where the press began.
+   And every modal gets a ✕, so there is always a deliberate way out. */
+let __pressTarget=null;
+document.addEventListener('mousedown',e=>{__pressTarget=e.target;},true);
+document.querySelectorAll('.overlay').forEach(o=>{
+  o.addEventListener('click',e=>{if(e.target===o&&__pressTarget===o)o.classList.remove('show')});
+  const m=o.querySelector('.modal');
+  if(m&&!m.querySelector('.modalx')){
+    const x=document.createElement('button');
+    x.type='button';x.className='modalx';x.textContent='✕';x.title='Close';
+    x.onclick=()=>o.classList.remove('show');
+    m.prepend(x);
+  }
+});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.show').forEach(o=>o.classList.remove('show'))});
 function store(key,seed){
   let v=null;try{v=JSON.parse(localStorage.getItem(key))}catch(e){}
@@ -4275,6 +4299,28 @@ function invAuditHTML(e){
     ?`<div style="color:#dc2626;font-weight:700;margin-top:4px">${src} — ⚠ differs from the customer's standard charges:<br>&nbsp;• ${probs.map(esc).join('<br>&nbsp;• ')}</div>`
     :`<div style="color:#16a34a;font-weight:700;margin-top:4px">${src} — ✔ matches the customer's standard charges.</div>`;
 }
+/* Attach documents WITHOUT leaving the invoice builder. Forgetting the DO used to mean closing
+   this modal — and losing every typed line — to reach the Documents window. This uploads to the
+   same shipment through the same attUpload path (including the several-files-into-one-PDF merge),
+   while the builder and everything typed in it stay exactly as they are. */
+async function invAttach(files){
+  const id=document.getElementById('inv_entryId').value;
+  if(!entries.find(x=>x.id===id)||!files||!files.length)return;
+  attRef={list:'entries',id:id};                      // point the shared uploader at this shipment
+  const st=document.getElementById('inv_attStatus');
+  st.textContent='Uploading…';
+  try{await window.attUpload(files);}finally{st.textContent='';}
+  document.getElementById('inv_file').value='';
+  invAttCount();
+  const e=entries.find(x=>x.id===id);
+  toast('📎 '+((e&&e.attachments)||[]).length+' document(s) on this shipment — they will ride with the invoice');
+}
+function invAttCount(){
+  const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);
+  const n=((e&&e.attachments)||[]).length;
+  const b=document.getElementById('inv_attBtn');
+  if(b)b.textContent='📎 Documents'+(n?' ('+n+')':'');
+}
 function openInvoiceForm(entryId){
   if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===entryId);if(!e)return;
@@ -4345,6 +4391,7 @@ function openInvoiceForm(entryId){
     `<div><span class="k">Customer</span><b>${esc(e.customer)||'—'}</b> <span style="color:#94a3b8">(${esc(e.cno)||'—'})</span></div>
      <div><span class="k">R No</span><b>${esc(e.rNo)||'—'}</b> &nbsp; <span class="k">${sea?'BL':'AWB'}</span><b>${esc(e.awbBl)||'—'}</b> &nbsp; ${sea?`<span class="k">Container</span><b>${esc(cont)||'—'}</b>`:`<span class="k">Grs Wt</span><b>${fmtNum(e.grsWt)}</b>`}</div>
      <div><span class="k">Date</span>${fmtDate(e.date)} &nbsp; <span class="k">Bill No</span><b>${esc(e.billNo)||'—'}</b></div>${noRates}${warn}${loading}${invPaidHTML(e)}${invAuditHTML(e)}`;
+  invAttCount();
   invCalc();
   showModal('overlay-invoice');
 }
