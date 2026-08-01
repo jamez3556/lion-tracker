@@ -4346,9 +4346,16 @@ async function qbInvoice(preview){
   const bn=document.getElementById('inv_billNo').value.trim();
   if(!preview&&e.qbInvoiced&&!confirm('⚠ This shipment was already sent to QuickBooks'
     +(e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):'')+'.\n\nCreating again makes a SECOND invoice. Continue?'))return;
+  // documents ride with the invoice; the email goes to the customer (or to you if none is typed)
+  const atts=invoiceAttachments(e);
+  const mail=qbEmails(document.getElementById('inv_email').value.trim()
+    ||(cust&&cust.billEmail)||'jaamiz25@gmail.com');
+  const to=mail.emails||'jaamiz25@gmail.com';
   if(!preview&&!confirm('CREATE INVOICE in QuickBooks?\n\n'+name+'\n'
     +invSummaryText(inv.lines)+'\n\nGST 8%: '+fmtNum(inv.gst)+'\nTOTAL: '+fmtNum(inv.total)
-    +(bn?'\nInvoice No: '+bn:'\nNumber: assigned by QuickBooks')))return;
+    +(bn?'\nInvoice No: '+bn:'\nNumber: assigned by QuickBooks')
+    +'\n\nDocuments attached: '+(atts.length?atts.map(a=>a.name||'document').join(', '):'none')
+    +'\nEmail to: '+to))return;
   toast(preview?'Checking with QuickBooks…':'Creating the invoice…');
   try{
     const tok=await (window.__idToken?window.__idToken():'');
@@ -4358,7 +4365,9 @@ async function qbInvoice(preview){
       body:JSON.stringify({
         preview:!!preview,customer:name,docNumber:bn,date:e.date||isoLocal(new Date()),
         memo:document.getElementById('inv_memo').value.trim(),
-        email:(cust&&cust.billEmail)||'',
+        email:to,
+        send:!preview,                                    // preview never emails anyone
+        attachments:atts.map(a=>({url:a.url,name:a.name||'document',type:a.type||''})),
         // itemId is what QuickBooks matches on — the builder's short name ("Form Filling") is two
         // different QuickBooks items depending on air or sea, and only this map knows which
         lines:inv.lines.map(l=>({item:l.item,itemId:l.itemId,desc:l.description,qty:l.qty,rate:l.rate,taxable:!!l.taxable})),
@@ -4399,7 +4408,11 @@ async function qbInvoice(preview){
     alert((j.duplicate?'Already created earlier.':'🧾 Invoice created in QuickBooks.')
       +'\n\nNumber: '+(j.invoiceNo||'(QuickBooks did not return one — find it in QuickBooks and type it into BILL NO)')
       +'\nCustomer: '+j.customer
-      +'\nTotal: MVR '+fmtNum(j.total));
+      +'\nTotal: MVR '+fmtNum(j.total)
+      +'\nDocuments attached: '+((j.attached&&j.attached.length)?j.attached.join(', '):'none')
+      +(j.attachErrors&&j.attachErrors.length?'\n⚠ Not attached: '+j.attachErrors.join(' · '):'')
+      +'\nEmailed to: '+(j.emailed||'not sent')
+      +(j.emailError?'\n⚠ Email failed: '+j.emailError:''));
   }catch(err){
     console.warn('QuickBooks invoice failed',err);
     alert((preview?'Preview failed.\n\n':'Invoice NOT created.\n\n')+(err.message||err));
