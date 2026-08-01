@@ -5742,6 +5742,35 @@ function entryDue(e){
   const t=invTotalOf(e);if(!t)return null;
   return {due:invMoney(t.amt-entryPaid(e)),est:true};
 }
+/* What a customer owes, from QuickBooks' own books.
+
+   The app used to add up only the invoices attached to shipments in its Form Log — about 1,200
+   jobs. QuickBooks counts every invoice that customer has ever left unpaid, 9,500 of them going
+   back to 2017, so for anyone who traded with us before this app existed the two could never agree.
+   The synced list already carries each invoice's customer name, so the true balance is worked out
+   here, and the app-only figure is kept alongside it for the tooltip. */
+let __qbCustMap=null,__qbCustAt='';
+function qbCustMap(){
+  const q=qbSync();if(!q)return null;
+  if(__qbCustMap&&__qbCustAt===q.updated)return __qbCustMap;   // rebuilt only when a sync lands
+  const m={};
+  Object.keys(q.inv).forEach(no=>{
+    const r=q.inv[no]||{},k=String(r.c||'').trim().toLowerCase();if(!k)return;
+    const b=Number(r.b)||0;if(b<=0)return;      // settled between syncs — not a debt, not a count
+    const e=m[k]=m[k]||{b:0,n:0,o:''};
+    e.b+=b;e.n++;
+    if(r.d&&(!e.o||r.d<e.o))e.o=r.d;
+  });
+  __qbCustMap=m;__qbCustAt=q.updated;return m;
+}
+// QuickBooks' display name can differ from ours — customer.qbName (Customers tab) is the bridge
+function qbCustDue(cno){
+  const m=qbCustMap();if(!m)return null;
+  const c=lookupCustomer(cno);if(!c)return null;
+  const names=[c.qbName,c.name].filter(Boolean).map(s=>String(s).trim().toLowerCase());
+  for(const k of names){const hit=m[k];if(hit)return {due:invMoney(hit.b),n:hit.n,est:false,oldest:hit.o||'',src:'qb'};}
+  return null;
+}
 function custOutstanding(cno){
   const key=String(cno||'').toUpperCase();
   let due=0,est=false,n=0,oldest='';
@@ -5750,7 +5779,9 @@ function custOutstanding(cno){
     due+=d.due;n++;if(d.est)est=true;
     if(!oldest||String(e.date||'')<oldest)oldest=e.date||'';
   });
-  return {due:invMoney(due),n,est,oldest};
+  const app={due:invMoney(due),n,est,oldest};
+  const qb=qbCustDue(cno);
+  return qb?Object.assign({},qb,{app}):app;   // QuickBooks wins; the app's own figure rides along
 }
 function seaInvTotal(e){
   if(e.qbTotal!=null)return {amt:Number(e.qbTotal),est:false};
@@ -6037,7 +6068,7 @@ function renderCusts(){
       ${isAdmin()?(()=>{const o=custOutstanding(r.cno);
         return `<td class="num" data-l="Outstanding">${o.due>0
           ?`<span style="cursor:pointer;font-weight:800;color:#dc2626;border-bottom:1px dashed #dc2626"
-              onclick="openCustDues('${r.id}')" title="${o.n} unpaid invoice${o.n>1?'s':''}${o.oldest?', oldest '+fmtDate(o.oldest):''} — click to see them and record a payment">${o.est?'≈ ':''}${fmtNum(o.due)}</span>`
+              onclick="openCustDues('${r.id}')" title="${o.src==='qb'?'QuickBooks balance — ':''}${o.n} unpaid invoice${o.n>1?'s':''}${o.oldest?', oldest '+fmtDate(o.oldest):''}${o.app?'. On shipments in this app: '+fmtNum(o.app.due)+(o.app.n?' ('+o.app.n+')':''):''} — click to see them and record a payment">${o.est?'≈ ':''}${fmtNum(o.due)}</span>`
           :'<span class="d-none">—</span>'}</td>`;})():''}
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="openAttachCust('${r.id}')" title="Customer documents (ID, licences, forms…) — shared with the Logins tab">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
