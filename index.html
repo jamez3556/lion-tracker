@@ -2752,17 +2752,43 @@ function renderPayments(){
       <td class="name" data-l="Customer" title="${esc(r.name)}">${esc(r.name)||'—'}</td>
       <td data-l="R No">${esc(r.rNo)||'—'}</td>
       <td data-l="AWB / BL">${esc(r.blNo)||'—'}</td>
-      <td class="num" data-l="Duty">${fmtNum(r.duty)}</td>
-      <td class="num" data-l="MACL">${fmtNum(r.macl)}</td>
-      <td class="num" data-l="MPL">${fmtNum(r.mpl)}</td>
+      <td class="num" data-l="Duty">${payCell(r,'duty')}</td>
+      <td class="num" data-l="MACL">${payCell(r,'macl')}</td>
+      <td class="num" data-l="MPL">${payCell(r,'mpl')}</td>
       <td class="num" data-l="Total">${has?fmtNum(payTotal(r)):'—'}</td>
-      <td class="num" data-l="Advance">${fmtNum(r.advance)}</td>
+      <td class="num" data-l="Advance">${payCell(r,'advance')}</td>
       <td class="num" data-l="Balance">${balCell}</td>
       <td data-l="Remarks">${esc(r.remark)||'—'}</td>
       <td data-l="Bill">${bill}</td>
       <td class="actcol" data-l="Invoice">${inv}</td></tr>`;
   }).join('');
   pagerHTML(document.getElementById('pay_pager'),payState,rows.length,'payments');
+}
+/* Money straight into the table.
+
+   Entering duty, MACL, MPL or an advance used to mean opening the row's form for one number.
+   These cells take the figure where you are looking: an empty one shows a ＋, click it, type,
+   Enter or Tab to save. Escape puts it back. Nothing else about the payment record is touched, so
+   the mirrored identity fields (customer, R No, invoice) stay exactly as the Form Log set them. */
+function payCell(r,field){
+  const v=r[field];
+  const shown=(v===''||v==null)?'':String(v);
+  return `<input value="${esc(shown)}" data-pid="${jatt(r.id)}" data-f="${field}"
+    placeholder="＋" inputmode="decimal" onfocus="this.select()"
+    onchange="payCellSet('${jatt(r.id)}','${field}',this.value)"
+    onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value='${esc(shown)}';this.blur();}"
+    style="width:92px;text-align:right;padding:2px 6px;border:1px solid transparent;border-radius:6px;
+           background:transparent;font:inherit;color:inherit"
+    onmouseover="this.style.borderColor='var(--line)'" onmouseout="if(document.activeElement!==this)this.style.borderColor='transparent'">`;
+}
+function payCellSet(id,field,val){
+  const p=payments.find(x=>x.id===id);if(!p)return;
+  const raw=String(val).replace(/,/g,'').trim();          // "2,556.04" is not a number to JS
+  const n=raw===''?null:Number(raw);
+  if(raw!==''&&(!isFinite(n)||n<0)){toast('Enter a number');renderPayments();return;}
+  if((p[field]??null)===n)return;                          // nothing changed — don't touch the record
+  p[field]=n;p.u=Date.now();
+  savePayments();renderPayments();renderCusts();
 }
 function updatePayCalc(){
   const t=(Number(pay_duty.value)||0)+(Number(pay_macl.value)||0)+(Number(pay_mpl.value)||0);
