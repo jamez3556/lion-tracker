@@ -1530,11 +1530,11 @@ function renderEntries(){
     <td class="name" data-l="Customer" title="${esc(r.customer)}">${esc(r.customer)}</td>
     <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
     <td data-l="File">${r.file?esc(r.file)+(r.fileNo?' - '+r.fileNo:''):'—'}</td>
-    <td data-l="R No">${esc(r.rNo)||'—'}</td>
+    <td data-l="R No">${entryCell(r,'rNo')}</td>
     <td data-l="Bill No">${billCell(r)}</td>
-    <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
-    <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
-    <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
+    <td class="num" data-l="Grs Wt">${entryCell(r,'grsWt',true)}</td>
+    <td class="num" data-l="Pkgs">${entryCell(r,'pkgs',true)}</td>
+    <td data-l="AWB / BL">${entryCell(r,'awbBl')}</td>
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
     <td class="actcol"><div class="rowact">
       ${((r.type==='AP'||r.type==='MP')&&isAdmin())?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
@@ -1562,6 +1562,43 @@ function cycleEntryStatus(id){
    The invoice rule still applies exactly as it does in the form: a number entered marks the
    shipment Delivered and mirrors onto its payment record and container; clearing it demotes the
    shipment again. Nothing else on the record is touched. */
+/* The same inline treatment for the other columns staff fill in after the fact: R NO, GRS WT,
+   PKGS and the AWB/BL. Empty reads "—  ＋" like every other blank; typing saves on Enter or Tab.
+   Only the one field is written — nothing else on the shipment is touched. */
+function entryCell(r,field,num){
+  const v=(r[field]==null||r[field]==='')?'':String(r[field]);
+  return `<input value="${esc(v)}" placeholder="—  ＋" spellcheck="false"${num?' inputmode="decimal"':''}
+    onchange="entrySet('${jatt(r.id)}','${field}',this.value)"
+    onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value='${esc(v)}';this.blur();}"
+    onfocus="this.select();this.style.borderColor='var(--line)'"
+    style="width:${num?'80px':'110px'};${num?'text-align:right;':''}padding:2px 6px;border:1px solid transparent;border-radius:6px;background:transparent;font:inherit;color:inherit"
+    onmouseover="this.style.borderColor='var(--line)'" onmouseout="if(document.activeElement!==this)this.style.borderColor='transparent'">`;
+}
+function entrySet(id,field,val){
+  const e=entries.find(x=>x.id===id);if(!e)return;
+  const raw=String(val==null?'':val).trim();
+  let v;
+  if(field==='grsWt'||field==='pkgs'){
+    const n=raw===''?null:Number(raw.replace(/,/g,''));   // "1,650" is not a number to JS
+    if(raw!==''&&(!isFinite(n)||n<0)){toast('Enter a number');renderEntries();renderMP();return;}
+    v=n;
+  }else v=raw;
+  if((e[field]??'')===(v??''))return;                     // nothing changed
+  /* The AWB/BL is the shipment's identity — two entries sharing one is how a job gets cleared
+     twice. Same rule as the form: a hard stop for documented work, a warning for billing-only. */
+  if(field==='awbBl'&&v){
+    const key=v.replace(/\s+/g,'').toUpperCase();
+    const dup=entries.find(x=>x.id!==id&&(x.awbBl||'').replace(/\s+/g,'').toUpperCase()===key);
+    if(dup){
+      const msg='⚠ AWB / BL "'+v+'" is already on NO '+(dup.no??'—')+' ('+(dup.customer||'—')+', '+fmtDate(dup.date)+')';
+      if(isBillOnly(e)){ if(!confirm(msg+'\n\nUse it here as well?')){renderEntries();renderMP();return;} }
+      else { toast(msg);renderEntries();renderMP();return; }
+    }
+  }
+  e[field]=v;e.u=Date.now();
+  if(syncPaymentFromEntry(e))savePayments();              // R No and AWB are mirrored onto the payment
+  saveEntries();buildEntryFilters();renderEntries();renderMP();renderPayments();updateCounts();
+}
 function billCell(r){
   const v=(r.billNo||'');
   // empty reads "— ＋": the dash matches every other empty cell in the table, the ＋ says you can
@@ -2490,11 +2527,11 @@ function renderMP(){
     <td class="name" data-l="Customer" title="${esc(r.customer)}">${esc(r.customer)}</td>
     <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
     <td data-l="File">${r.file?esc(r.file)+(r.fileNo?' - '+r.fileNo:''):'—'}</td>
-    <td data-l="R No">${esc(r.rNo)||'—'}</td>
+    <td data-l="R No">${entryCell(r,'rNo')}</td>
     <td data-l="Bill No">${billCell(r)}</td>
-    <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
-    <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
-    <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
+    <td class="num" data-l="Grs Wt">${entryCell(r,'grsWt',true)}</td>
+    <td class="num" data-l="Pkgs">${entryCell(r,'pkgs',true)}</td>
+    <td data-l="AWB / BL">${entryCell(r,'awbBl')}</td>
     <td data-l="Supplier"><input class="mpremark" style="min-width:120px" value="${esc(r.supplier)}" placeholder="Shipper on the BL…" onchange="setSupplier('${jatt(r.id)}',this.value)"></td>
     <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
     ${isAdmin()?`<td class="num" data-l="💸 EEMAN">${(r.outCost&&r.outCost.amt!=null)
