@@ -2582,8 +2582,11 @@ function saveCont(e){
   }else if(rec.status==='Cleared'){
     rec._manual=true;delete rec._billCleared; // hand-picked Cleared (no invoice) — stays cleared, never auto-reopened
   }
-  if(c_id.value){containers[containers.findIndex(x=>x.id===c_id.value)]=rec;toast('Container updated');}
-  else{containers.push(rec);toast('Container added');}
+  // R NO / C NO / customer / BL / container NO typed here go back onto the Form Log entry (may revert
+  // a field on rec, so it runs before the record is stored)
+  const backNote=pushContIdentityToEntry(rec);
+  if(c_id.value){containers[containers.findIndex(x=>x.id===c_id.value)]=rec;toast('Container updated'+backNote);}
+  else{containers.push(rec);toast('Container added'+backNote);}
   saveContainers();ensureCustomer(rec.cno,rec.name);
   applyContToEntry(rec); // keep the Form Log entry's status in sync with this container
   renderConts();updateCounts();closeModal('overlay-cont');
@@ -7130,6 +7133,37 @@ function mirrorContFromEntry(e,cont){
   put('containerNo',(e.containerNo||'').trim());
   if(c.logNo!==e.no){c.logNo=e.no;changed=true;}
   return changed;
+}
+// The other direction: identity fields typed into the Container Status form go back onto the Form Log
+// entry, so the Form Log stays the one place everything else reads from (Payment row, invoice, customer
+// status page). A field the Form Log has blank fills silently; one that already holds a DIFFERENT value
+// is only replaced with a confirmation — cancelling keeps the Form Log's value on both records, since
+// the boot/merge sweep would otherwise quietly undo what was just typed here.
+const CONT_TO_ENTRY=[['rNo','rNo','R NO'],['cno','cno','C NO'],['name','customer','CUSTOMER'],
+                     ['blNo','awbBl','AWB / BL'],['containerNo','containerNo','CONTAINER NO']];
+function pushContIdentityToEntry(c){
+  const e=c&&c.entryId?entries.find(x=>x.id===c.entryId):null;
+  if(!e)return ''; // stand-alone container row (no Form Log entry) — nothing to write back
+  const fill=[],clash=[];
+  CONT_TO_ENTRY.forEach(([ck,ek,label])=>{
+    if(ck==='containerNo'&&e.type!=='MP')return; // container numbers only live on sea entries
+    const v=String(c[ck]||'').trim(),cur=String(e[ek]||'').trim();
+    if(!v||v===cur)return;
+    (cur?clash:fill).push({ek,ck,v,cur,label});
+  });
+  let take=fill;
+  if(clash.length){
+    const lines=clash.map(f=>`  ${f.label}:  Form Log "${f.cur}"  →  "${f.v}"`).join('\n');
+    if(confirm(`The Form Log entry (NO ${e.no??'—'}) has different details:\n\n${lines}\n\nReplace them with what you typed here?\n\nCancel keeps the Form Log's values.`))
+      take=fill.concat(clash);
+    else clash.forEach(f=>{c[f.ck]=f.cur;}); // container falls back in line with the Form Log
+  }
+  if(!take.length)return '';
+  take.forEach(f=>{e[f.ek]=f.v;});
+  saveEntries();
+  if(syncPaymentFromEntry(e)){savePayments();renderPayments();}
+  buildEntryFilters();renderEntries();renderMP();
+  return ' — '+take.map(f=>f.label).join(' · ')+' updated in the Form Log too';
 }
 // Sweep every linked container against its entry. Runs at boot and after a cloud merge, so an R number
 // typed on one device shows up in Container Status on all of them.
