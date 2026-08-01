@@ -1525,7 +1525,7 @@ function renderEntries(){
     <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
     <td data-l="File">${r.file?esc(r.file)+(r.fileNo?' - '+r.fileNo:''):'—'}</td>
     <td data-l="R No">${esc(r.rNo)||'—'}</td>
-    <td data-l="Bill No">${esc(r.billNo)||'—'}</td>
+    <td data-l="Bill No">${billCell(r)}</td>
     <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
     <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
     <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
@@ -1548,6 +1548,43 @@ function cycleEntryStatus(id){
   // no invoice → toggle between Pending and Cleared only (Delivered needs an invoice)
   r.status=r.status==='Cleared'?'Pending':'Cleared';saveEntries();renderEntries();renderMP();
   if(linked)syncContFromEntry(r,before,linked); // propagate the status change to the container
+}
+/* BILL NO typed straight into the table, on the Form Log and the MP tab.
+
+   158 shipments were waiting for an invoice number, and each one meant opening the form to type a
+   single field. An empty cell shows ＋; type the number, Enter or Tab saves, Escape reverts.
+   The invoice rule still applies exactly as it does in the form: a number entered marks the
+   shipment Delivered and mirrors onto its payment record and container; clearing it demotes the
+   shipment again. Nothing else on the record is touched. */
+function billCell(r){
+  const v=(r.billNo||'');
+  return `<input value="${esc(v)}" placeholder="＋" spellcheck="false"
+    onchange="billSet('${jatt(r.id)}',this.value)"
+    onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value='${esc(v)}';this.blur();}"
+    onfocus="this.select();this.style.borderColor='var(--line)'"
+    style="width:104px;padding:2px 6px;border:1px solid transparent;border-radius:6px;background:transparent;font:inherit;color:inherit"
+    onmouseover="this.style.borderColor='var(--line)'" onmouseout="if(document.activeElement!==this)this.style.borderColor='transparent'">`;
+}
+function billSet(id,val){
+  const e=entries.find(x=>x.id===id);if(!e)return;
+  const bn=String(val||'').trim();
+  if(bn===(e.billNo||''))return;
+  // a number already used elsewhere is nearly always a typo — two shipments can't share one invoice
+  if(bn){
+    const dup=entries.find(x=>x.id!==id&&(x.billNo||'').trim()===bn);
+    if(dup&&!confirm('Invoice '+bn+' is already on NO '+(dup.no??'—')+' ('+(dup.customer||'—')+').\n\nUse it here as well?')){
+      renderEntries();renderMP();return;
+    }
+  }
+  const before={...e};
+  e.billNo=bn;
+  if(bn)e.status='Delivered';                       // invoice exists ⇒ Delivered, same as the form
+  else if(e.status==='Delivered')e.status='Cleared'; // invoice removed ⇒ back a step, never Pending
+  if(syncPaymentFromEntry(e))savePayments();
+  syncContFromEntry(e,before,null);
+  saveEntries();
+  buildEntryFilters();renderEntries();renderMP();renderPayments();renderCusts();updateCounts();
+  toast(bn?('Invoice '+bn+' saved — marked Delivered'):'Invoice number cleared');
 }
 function toggleContBox(){
   document.getElementById('e_contWrap').style.display=e_type.value==='MP'?'':'none';
@@ -2446,7 +2483,7 @@ function renderMP(){
     <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
     <td data-l="File">${r.file?esc(r.file)+(r.fileNo?' - '+r.fileNo:''):'—'}</td>
     <td data-l="R No">${esc(r.rNo)||'—'}</td>
-    <td data-l="Bill No">${esc(r.billNo)||'—'}</td>
+    <td data-l="Bill No">${billCell(r)}</td>
     <td class="num" data-l="Grs Wt">${fmtNum(r.grsWt)}</td>
     <td class="num" data-l="Pkgs">${fmtNum(r.pkgs)}</td>
     <td data-l="AWB / BL">${esc(r.awbBl)||'—'}</td>
