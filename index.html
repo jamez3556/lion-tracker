@@ -1024,7 +1024,9 @@
       <button type="button" class="ghost" id="inv_fetchBtn" onclick="fetchInvoice()" title="Refresh from QuickBooks: the invoice's real lines + paid balance (uses 2 Zapier tasks)">⬇ Check in QuickBooks</button>
       <button type="button" class="ghost" id="inv_updateBtn" onclick="updateInvoice()" title="Correct THIS invoice in QuickBooks (same number) — use after a mistake, only if unpaid">✏️ Update Invoice</button>
       <button type="button" class="ghost" id="inv_resendBtn" onclick="resendInvoice()" title="Email the existing invoice again — does NOT create a new one">📧 Resend Email</button>
-      <button type="button" class="primary" onclick="sendInvoice()">Send to QuickBooks →</button>
+      <button type="button" class="ghost" onclick="qbInvoice(true)" title="See exactly what would be created in QuickBooks — writes nothing">🔍 Preview</button>
+      <button type="button" class="primary" onclick="qbInvoice(false)" title="Create this invoice in QuickBooks directly — no Zapier task">🧾 Create in QuickBooks</button>
+      <button type="button" class="ghost" onclick="sendInvoice()" title="The old route: Zapier creates it, attaches documents and emails the customer">Send via Zapier →</button>
     </div>
   </div>
 </div>
@@ -4324,6 +4326,64 @@ function collectInvoiceLines(e){
 }
 function invSummaryText(lines){
   return lines.map(l=>'  • '+l.item+'   '+l.qty+' x '+l.rate+' = '+fmtNum(l.amount)+(l.taxable?'':'   (no GST)')).join('\n');
+}
+/* Create the invoice in QuickBooks DIRECTLY — no Zapier, no per-task charge.
+   preview=true writes nothing: it comes back with the customer, the tax codes and the totals
+   QuickBooks would use, so the first one can be checked before it exists. */
+async function qbInvoice(preview){
+  if(!isAdmin()){toast('Billing is admin-only');return;}
+  const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
+  const inv=collectInvoiceLines(e);
+  if(!inv.lines.length){toast('No lines to invoice');return;}
+  const cust=lookupCustomer(e.cno);
+  const name=(cust&&cust.qbName)||e.customer||'';
+  const bn=document.getElementById('inv_billNo').value.trim();
+  if(!preview&&e.qbInvoiced&&!confirm('⚠ This shipment was already sent to QuickBooks'
+    +(e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):'')+'.\n\nCreating again makes a SECOND invoice. Continue?'))return;
+  if(!preview&&!confirm('CREATE INVOICE in QuickBooks?\n\n'+name+'\n'
+    +invSummaryText(inv.lines)+'\n\nGST 8%: '+fmtNum(inv.gst)+'\nTOTAL: '+fmtNum(inv.total)
+    +(bn?'\nInvoice No: '+bn:'\nNumber: assigned by QuickBooks')))return;
+  toast(preview?'Checking with QuickBooks…':'Creating the invoice…');
+  try{
+    const tok=await (window.__idToken?window.__idToken():'');
+    if(!tok)throw new Error('You are signed out — reload and sign in again');
+    const r=await fetch(QB_API+'/invoice',{method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
+      body:JSON.stringify({
+        preview:!!preview,customer:name,docNumber:bn,date:e.date||isoLocal(new Date()),
+        memo:document.getElementById('inv_memo').value.trim(),
+        email:(cust&&cust.billEmail)||'',
+        lines:inv.lines.map(l=>({item:l.item,desc:l.description,qty:l.qty,rate:l.rate,taxable:!!l.taxable})),
+        key:'inv_'+e.id})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
+    if(preview){
+      alert('PREVIEW — nothing was created.\n\nCustomer matched: '+j.customer
+        +'\nTax code for our charges: '+((j.taxCodes.taxable||{}).name||j.taxCodes.taxable.value)
+        +'\nTax code for pass-throughs: '+((j.taxCodes.passThrough||{}).name||j.taxCodes.passThrough.value)
+        +'\nCopied from invoice: '+j.taxCodes.copiedFrom
+        +'\n\nOur charges: '+fmtNum(j.totals.taxable)
+        +'\nPass-throughs: '+fmtNum(j.totals.nonTax)
+        +'\nGST 8%: '+fmtNum(j.totals.gst)
+        +'\nTOTAL: '+fmtNum(j.totals.total)
+        +'\n\nIf that matches what you expect, press "Create in QuickBooks".');
+      return;
+    }
+    // it exists now — record the number and let the invoice rule do the rest
+    const before={...e};
+    if(j.invoiceNo){e.billNo=j.invoiceNo;e.status='Delivered';
+      if(syncPaymentFromEntry(e))savePayments();syncContFromEntry(e,before,null);}
+    e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());delete e.qbSentMs;
+    e.qbLines=inv.lines.map(l=>({item:l.item,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
+    e.qbTotal=j.total;e.qbBalance=j.balance;
+    saveEntries();renderEntries();renderMP();renderPayments();renderCusts();updateCounts();
+    closeModal('overlay-invoice');
+    toast(j.duplicate?('Already created — invoice '+j.invoiceNo)
+      :('🧾 Invoice '+j.invoiceNo+' created in QuickBooks — MVR '+fmtNum(j.total)));
+  }catch(err){
+    console.warn('QuickBooks invoice failed',err);
+    alert((preview?'Preview failed.\n\n':'Invoice NOT created.\n\n')+(err.message||err));
+  }
 }
 async function sendInvoice(){
   if(!isAdmin()){toast('Billing is admin-only');return;}
