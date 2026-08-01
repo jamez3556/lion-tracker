@@ -4412,6 +4412,7 @@ async function qbInvoice(preview){
       headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
       body:JSON.stringify({
         preview:!!preview,customer:name,docNumber:bn,date:e.date||isoLocal(new Date()),
+        awbBl:e.awbBl||'',rNo:e.rNo||'',        // the invoice's own AWB / BL NO and Custom R Number fields
         memo:document.getElementById('inv_memo').value.trim(),
         email:to,
         send:!preview,                                    // preview never emails anyone
