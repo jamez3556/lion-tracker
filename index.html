@@ -6092,32 +6092,128 @@ function openCustDues(custId){
   window.__dueCust=custId;
   renderCustDues();showModal('overlay-dues');
 }
+/* Every unpaid invoice QuickBooks holds for this customer — not just the ones attached to a
+   shipment in the Form Log. A customer who traded with us before this app existed has invoices the
+   Form Log has never heard of, and they are just as owed. */
+function custQbInvoices(c){
+  const q=qbSync();if(!q||!q.inv)return null;
+  const names=[c.qbName,c.name].filter(Boolean).map(s=>String(s).trim().toLowerCase());
+  const out=[];
+  Object.keys(q.inv).forEach(no=>{
+    const r=q.inv[no]||{};
+    if(!names.includes(String(r.c||'').trim().toLowerCase()))return;
+    const b=Number(r.b)||0;if(b<=0.5)return;
+    const e=entries.find(x=>(x.billNo||'').trim()===no);      // may or may not be one of our shipments
+    out.push({no,b,d:r.d||'',awb:e?(e.awbBl||''):'',entryId:e?e.id:''});
+  });
+  return out.sort((a,b)=>String(a.d).localeCompare(String(b.d)));   // oldest first — chase those
+}
+const dueSel=new Set();
+function dueToggle(no){dueSel.has(no)?dueSel.delete(no):dueSel.add(no);renderCustDues();}
+function dueAll(on){
+  const c=customers.find(x=>x.id===window.__dueCust);if(!c)return;
+  dueSel.clear();
+  if(on)(custQbInvoices(c)||[]).forEach(r=>dueSel.add(r.no));
+  renderCustDues();
+}
 function renderCustDues(){
   const c=customers.find(x=>x.id===window.__dueCust);if(!c)return;
+  document.getElementById('dues_title').textContent='💰 Outstanding — '+(c.name||c.cno);
+  const qb=custQbInvoices(c);
+  if(qb){
+    const tot=qb.reduce((s,r)=>s+r.b,0);
+    const picked=qb.filter(r=>dueSel.has(r.no));
+    const pickedTot=picked.reduce((s,r)=>s+r.b,0);
+    document.getElementById('dues_body').innerHTML=qb.length?
+      `<div style="font-weight:800;font-size:18px;margin-bottom:4px">MVR ${fmtNum(invMoney(tot))}
+        <span style="font-weight:600;font-size:12.5px;color:var(--muted)">· ${qb.length} invoice${qb.length>1?'s':''} · from QuickBooks</span></div>
+       <div style="margin-bottom:10px"><label style="font-size:12.5px;font-weight:700;cursor:pointer">
+         <input type="checkbox" ${picked.length===qb.length?'checked':''} onchange="dueAll(this.checked)"> Select all</label></div>`
+      +qb.map(r=>{
+        const age=Math.max(0,Math.round((Date.now()-new Date((r.d||isoLocal(new Date()))+'T00:00:00').getTime())/86400000));
+        const col=age>60?'#dc2626':age>30?'#b45309':'#0369a1';
+        return `<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:9px;padding:8px 11px;margin-bottom:6px;flex-wrap:wrap;${dueSel.has(r.no)?'background:#fff7ed;border-color:#FF4F00':''}">
+          <input type="checkbox" ${dueSel.has(r.no)?'checked':''} onchange="dueToggle('${jatt(r.no)}')" style="width:17px;height:17px">
+          <div style="flex:1;min-width:150px">
+            <b>${esc(r.no)}</b> <span style="color:var(--muted);font-size:12px">· ${esc(r.awb)||'—'}</span>
+            <div style="font-size:11.5px;color:${col};font-weight:700">${fmtDate(r.d)} · ${age} day${age===1?'':'s'} old</div>
+          </div>
+          <div style="font-weight:800;white-space:nowrap">${fmtNum(r.b)}</div>
+        </div>`;}).join('')
+      +`<div style="position:sticky;bottom:0;background:var(--card,#fff);border-top:1px solid var(--line);padding:10px 0 2px;margin-top:8px">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <label style="margin:0;font-size:12px;font-weight:700">PAID ON</label>
+            <input type="date" id="dues_date" value="${isoLocal(new Date())}" style="max-width:170px">
+            <button class="primary" ${picked.length?'':'disabled'} onclick="dueReceive(this)"
+              style="flex:1;min-width:230px">💰 Receive ${picked.length||''} ${picked.length===1?'invoice':'invoices'} — MVR ${fmtNum(invMoney(pickedTot))}</button>
+          </div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.5">
+            Each ticked invoice is settled in full, in QuickBooks, dated as above. For a part payment
+            use the 💰 button on the shipment in the Payment tab instead.</div>
+        </div>`
+      :'<div style="color:#16a34a;font-weight:700">Nothing outstanding — every invoice is paid.</div>';
+    return;
+  }
+  // QuickBooks not synced yet — fall back to what the app can work out from its own shipments
   const key=(c.cno||'').toUpperCase();
   const rows=entries.filter(e=>(e.cno||'').toUpperCase()===key&&(e.billNo||'').trim())
     .map(e=>({e,d:entryDue(e)})).filter(x=>x.d&&x.d.due>0.5)
-    .sort((a,b)=>String(a.e.date||'').localeCompare(String(b.e.date||'')));   // oldest first — chase those
+    .sort((a,b)=>String(a.e.date||'').localeCompare(String(b.e.date||'')));
   const tot=rows.reduce((s,x)=>s+x.d.due,0);
-  const anyEst=rows.some(x=>x.d.est);
-  document.getElementById('dues_title').textContent='💰 Outstanding — '+(c.name||c.cno);
   document.getElementById('dues_body').innerHTML=rows.length?
-    `<div style="font-weight:800;font-size:18px;margin-bottom:10px">${anyEst?'≈ ':''}MVR ${fmtNum(invMoney(tot))}
-      <span style="font-weight:600;font-size:12.5px;color:var(--muted)">· ${rows.length} invoice${rows.length>1?'s':''}</span></div>`
-    +rows.map(({e,d})=>{
-      const age=Math.max(0,Math.round((Date.now()-new Date((e.date||isoLocal(new Date()))+'T00:00:00').getTime())/86400000));
-      const col=age>60?'#dc2626':age>30?'#b45309':'#0369a1';
-      return `<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:9px;padding:8px 11px;margin-bottom:6px;flex-wrap:wrap">
-        <div style="flex:1;min-width:150px">
-          <b>${esc(e.billNo)}</b> <span style="color:var(--muted);font-size:12px">· ${esc(e.awbBl)||'—'}</span>
-          <div style="font-size:11.5px;color:${col};font-weight:700">${fmtDate(e.date)} · ${age} day${age===1?'':'s'} old</div>
-        </div>
-        <div style="font-weight:800;white-space:nowrap">${d.est?'≈ ':''}${fmtNum(d.due)}</div>
-        <button class="iconbtn" style="background:#FF4F00;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="closeModal('overlay-dues');openPayRec('${e.id}')" title="Record the payment received">💰 Receive</button>
-        <button class="iconbtn" onclick="fetchOneBalance('${e.id}')" title="Ask QuickBooks for this invoice's exact balance (2 Zapier tasks)">⬇</button>
-      </div>`;}).join('')
-    +(anyEst?`<div style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5">≈ means the app worked this out from the invoice and the payments recorded here — no Zapier tasks spent. Press ⬇ on a line to get QuickBooks' exact balance.</div>`:'')
+    `<div style="font-weight:800;font-size:18px;margin-bottom:10px">≈ MVR ${fmtNum(invMoney(tot))}
+      <span style="font-weight:600;font-size:12.5px;color:var(--muted)">· ${rows.length} invoice${rows.length>1?'s':''} · press 🔄 Refresh for QuickBooks' figures</span></div>`
+    +rows.map(({e,d})=>`<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:9px;padding:8px 11px;margin-bottom:6px;flex-wrap:wrap">
+        <div style="flex:1;min-width:150px"><b>${esc(e.billNo)}</b>
+          <span style="color:var(--muted);font-size:12px">· ${esc(e.awbBl)||'—'}</span>
+          <div style="font-size:11.5px;color:var(--muted);font-weight:700">${fmtDate(e.date)}</div></div>
+        <div style="font-weight:800;white-space:nowrap">≈ ${fmtNum(d.due)}</div>
+        <button class="iconbtn" style="background:#FF4F00;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="closeModal('overlay-dues');openPayRec('${e.id}')">💰 Receive</button>
+      </div>`).join('')
     :'<div style="color:#16a34a;font-weight:700">Nothing outstanding — every invoice is paid.</div>';
+}
+/* Settle several invoices at once. One call per invoice, each in full, each idempotent — a repeat
+   of the same invoice/amount/day returns the payment already made instead of taking the money
+   twice. Stops on the first refusal and names it, so nothing is left half-guessed. */
+async function dueReceive(btn){
+  const c=customers.find(x=>x.id===window.__dueCust);if(!c)return;
+  const list=(custQbInvoices(c)||[]).filter(r=>dueSel.has(r.no));
+  if(!list.length)return;
+  const date=document.getElementById('dues_date').value||isoLocal(new Date());
+  const tot=list.reduce((s,r)=>s+r.b,0);
+  if(!confirm('RECORD PAYMENT in QuickBooks?\n\n'+(c.name||c.cno)+'\n\n'
+    +list.map(r=>r.no+'   '+fmtNum(r.b)).join('\n')
+    +'\n\nTotal: MVR '+fmtNum(invMoney(tot))+'\nDated: '+fmtDate(date)
+    +'\n\nThis writes into the accounts. A mistaken payment must be deleted inside QuickBooks.'))return;
+  btn.disabled=true;
+  let done=0,paid=0;
+  try{
+    const tok=await (window.__idToken?window.__idToken():'');
+    if(!tok)throw new Error('You are signed out — reload and sign in again');
+    for(const r of list){
+      btn.textContent='Recording '+(done+1)+' of '+list.length+'…';
+      const res=await fetch(QB_API+'/payment',{method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
+        body:JSON.stringify({invoiceNo:r.no,amount:r.b,date,note:(c.cno||'')+' · '+list.length+' invoices',
+          key:'due_'+r.no+'_'+date+'_'+r.b})});
+      const j=await res.json().catch(()=>({}));
+      if(!res.ok||!j.ok)throw new Error(r.no+': '+(j.error||('refused ('+res.status+')')));
+      done++;paid+=r.b;
+      // keep the shipment in step straight away; the next read confirms it from QuickBooks
+      if(r.entryId){const e=entries.find(x=>x.id===r.entryId);
+        if(e){e.qbBalance=j.balanceAfter;(e.qbPayRec=e.qbPayRec||[]).push({amt:r.b,date,method:'QuickBooks',qbId:j.paymentId||''});}}
+      dueSel.delete(r.no);
+    }
+    saveEntries();
+    toast('💰 '+done+' invoice'+(done>1?'s':'')+' settled — MVR '+fmtNum(invMoney(paid)));
+  }catch(err){
+    console.warn('bulk receive failed',err);
+    alert((done?done+' invoice(s) were recorded, then it stopped.\n\n':'Nothing was recorded.\n\n')
+      +(err.message||err)+'\n\nRe-open this list — anything already paid drops out once it refreshes.');
+  }
+  btn.disabled=false;btn.textContent='💰 Receive';
+  await qbRefresh(null);            // pull the real balances back before redrawing
+  renderCustDues();renderCusts();renderPayments();
 }
 // one-invoice refresh; the fetch Zap writes the balance back through the qbinv collection
 function fetchOneBalance(id){
