@@ -4955,20 +4955,28 @@ function openPayRec(entryId){
   const bn=(e.billNo||'').trim();
   if(!bn){toast('No invoice number yet — bill it first');return;}
   const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
-  // best-guess balance: invoice total (from the known lines) minus advance and payments already recorded here
+  /* Amount is pre-typed so settling in full is just OK: QuickBooks' own balance when we have it
+     (the synced list, or the balance a recorded payment returned), the line-total estimate
+     otherwise. Editable — a part payment is typed over it. */
   let bal='';
-  if(e.qbLines&&e.qbLines.length){
+  const d=entryDue(e);
+  if(d&&!d.est){
+    bal=d.due>0?d.due:'';   // 0 = already settled: leave empty rather than invite a double payment
+  }else if(e.qbLines&&e.qbLines.length){
     const t=e.qbLines.reduce((s,l)=>s+invMoney((Number(l.qty)||0)*(Number(l.rate)||0)*(l.tax?1.08:1)),0);
     const adv=pay&&pay.advance?Number(pay.advance):0;
     const rec=(e.qbPayRec||[]).reduce((s,p)=>s+(Number(p.amt)||0),0);
     bal=invMoney(t-adv-rec);
-  }
+  }else if(d&&d.est&&d.due>0)bal=d.due;
   document.getElementById('pr_entryId').value=e.id;
   document.getElementById('pr_amount').value=bal>0?bal:'';
   document.getElementById('pr_date').value=isoLocal(new Date());
   const prev=(e.qbPayRec||[]).map(p=>'MVR '+invFmt(p.amt)+' ('+p.method+', '+fmtDate(p.date)+')').join(' · ');
   document.getElementById('pr_info').innerHTML=
     `Invoice <b>${esc(bn)}</b> — <b>${esc(e.customer)||''}</b>`+
+    (d&&!d.est?(d.due>0
+      ?`<div style="color:#0369a1;margin-top:4px">QuickBooks balance: <b>MVR ${invFmt(d.due)}</b> — typed in below</div>`
+      :`<div style="color:#16a34a;margin-top:4px">✅ QuickBooks shows this invoice fully paid — nothing is owed</div>`):'')+
     (prev?`<div style="color:#0369a1;margin-top:4px">Already recorded: ${esc(prev)}</div>`:'');
   showModal('overlay-payrec');
 }
@@ -6104,6 +6112,25 @@ async function qbRefresh(btn){
   }
   if(btn){btn.disabled=false;btn.textContent=old||'🔄 Refresh';}
 }
+/* Invoice numbers this device has EVER seen on the open (unpaid) list. An invoice raised today
+   could never be called settled by the date rule below (same-day is not "before the sync"), so a
+   payment taken in QuickBooks minutes after billing left the pill on Delivered even after a
+   Refresh. But "was open in an earlier sync, gone from the newest one" is proof of settlement at
+   any age — the sync lists every invoice still owing, so leaving the list only happens by being
+   paid. Local record only (localStorage), rebuilt harmlessly on a new device by its first sync. */
+let __qbSeen=null;
+function qbSeen(){
+  if(!__qbSeen){
+    try{__qbSeen=new Set(JSON.parse(localStorage.getItem('lion_qbseen_v1')||'[]'));}
+    catch(e){__qbSeen=new Set();}
+  }
+  return __qbSeen;
+}
+function qbSeenAdd(nos){
+  const s=qbSeen();let grew=false;
+  nos.forEach(n=>{if(n&&!s.has(n)){s.add(n);grew=true;}});
+  if(grew)try{localStorage.setItem('lion_qbseen_v1',JSON.stringify([...s]));}catch(e){}
+}
 function entryDue(e){
   const bn=(e.billNo||'').trim();
   if(!bn)return null;                              // not invoiced ⇒ nothing is owed yet
@@ -6111,6 +6138,8 @@ function entryDue(e){
   if(q){
     const hit=q.inv[bn]||q.inv[bn.replace(/\s+/g,'')];
     if(hit)return {due:invMoney(Number(hit.b)||0),est:false,src:'qb'};
+    // gone from the open list: settled — if it was ever ON the list, or predates the sync
+    if(qbSeen().has(bn)||qbSeen().has(bn.replace(/\s+/g,'')))return {due:0,est:false,src:'qb'};
     const syncedThrough=String(q.updated||'').slice(0,10);
     if(e.date&&e.date<syncedThrough)return {due:0,est:false,src:'qb'};   // not owing ⇒ settled
   }
@@ -7731,6 +7760,8 @@ async function startSync(){
           parts.forEach(p=>{if(p&&p.exists())Object.assign(inv,p.data().inv||{});});
           window.__qbbal={inv,updated:meta.updated,count:meta.count,cust:meta.cust||null};
         }
+        // remember every number seen open — leaving this list later is proof of payment
+        try{if(window.__qbbal&&window.__qbbal.inv)qbSeenAdd(Object.keys(window.__qbbal.inv));}catch(e){}
         // entries/MP/STELCO redraw too — their status pills turn Paid from these balances
         try{renderCusts();renderPayments();renderEntries();renderMP();renderStelcoDesk();if(bTab==='air')renderAirProfit();}catch(e){}
       },e=>console.warn('QuickBooks balances unavailable',(e&&e.code)||e));
