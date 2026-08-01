@@ -1555,7 +1555,7 @@ function renderEntries(){
     <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
     <td data-l="File">${r.file?esc(r.file)+(r.fileNo?' - '+r.fileNo:''):'—'}</td>
     <td data-l="R No">${entryCell(r,'rNo')}</td>
-    <td data-l="Bill No">${billCell(r)}</td>
+    <td data-l="Bill No">${billCell(r)}${billPaidBadge(r)}</td>
     <td class="num" data-l="Grs Wt">${entryCell(r,'grsWt',true)}</td>
     <td class="num" data-l="Pkgs">${entryCell(r,'pkgs',true)}</td>
     <td data-l="AWB / BL">${entryCell(r,'awbBl')}</td>
@@ -1622,6 +1622,17 @@ function entrySet(id,field,val){
   e[field]=v;e.u=Date.now();
   if(syncPaymentFromEntry(e))savePayments();              // R No and AWB are mirrored onto the payment
   saveEntries();buildEntryFilters();renderEntries();renderMP();renderPayments();updateCounts();
+}
+/* Paid-or-not at a glance, right on the row. The nightly/on-demand QuickBooks read already tells
+   entryDue() every invoice's real balance — an invoice missing from the unpaid list and older than
+   the sync is PAID. Green 💰 = settled in full; red figure = what is still owed. Nothing shows
+   while the figure would only be the app's own estimate — a wrong "paid" is worse than a blank. */
+function billPaidBadge(r){
+  if(!(r.billNo||'').trim())return '';
+  const d=entryDue(r);
+  if(!d||d.est)return '';
+  if(d.due<=0.5)return ' <span title="Paid in full — from QuickBooks" style="color:#16a34a;font-weight:800;font-size:11px">💰</span>';
+  return ' <span title="Still owed — from QuickBooks" style="color:#dc2626;font-weight:800;font-size:10.5px;white-space:nowrap">'+fmtNum(invMoney(d.due))+'</span>';
 }
 function billCell(r){
   const v=(r.billNo||'');
@@ -2555,7 +2566,7 @@ function renderMP(){
     <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
     <td data-l="File">${r.file?esc(r.file)+(r.fileNo?' - '+r.fileNo:''):'—'}</td>
     <td data-l="R No">${entryCell(r,'rNo')}</td>
-    <td data-l="Bill No">${billCell(r)}</td>
+    <td data-l="Bill No">${billCell(r)}${billPaidBadge(r)}</td>
     <td class="num" data-l="Grs Wt">${entryCell(r,'grsWt',true)}</td>
     <td class="num" data-l="Pkgs">${entryCell(r,'pkgs',true)}</td>
     <td data-l="AWB / BL">${entryCell(r,'awbBl')}</td>
@@ -7605,7 +7616,8 @@ async function startSync(){
           parts.forEach(p=>{if(p&&p.exists())Object.assign(inv,p.data().inv||{});});
           window.__qbbal={inv,updated:meta.updated,count:meta.count,cust:meta.cust||null};
         }
-        try{renderCusts();renderPayments();if(bTab==='air')renderAirProfit();}catch(e){}
+        // entries/MP redraw too — their rows now carry the paid/owed badge next to BILL NO
+        try{renderCusts();renderPayments();renderEntries();renderMP();if(bTab==='air')renderAirProfit();}catch(e){}
       },e=>console.warn('QuickBooks balances unavailable',(e&&e.code)||e));
     }catch(e){}
     // EEMAN payment ledger (admin's 💸 EEMAN Account inside MP Shipments) — same settings collection
