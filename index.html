@@ -105,6 +105,10 @@
   .d-warn{background:var(--warnbg);color:var(--warn)}
   .d-danger{background:var(--dangerbg);color:var(--danger)}
   .d-none{color:#cbd5e1}
+  /* empty inline cells (BILL NO, duty/MACL/MPL/advance) read "—  ＋" in the same grey as every
+     other empty cell, so a blank you can fill looks like a blank, not like a text box */
+  td input::placeholder{color:#cbd5e1;opacity:1}
+  td input:hover::placeholder{color:#f97316}
   tr.row-warn{background:#fffbeb}
   tr.row-danger{background:#fef2f2}
   tr.flashnew{animation:flashbg 2.6s ease}
@@ -1560,7 +1564,9 @@ function cycleEntryStatus(id){
    shipment again. Nothing else on the record is touched. */
 function billCell(r){
   const v=(r.billNo||'');
-  return `<input value="${esc(v)}" placeholder="＋" spellcheck="false"
+  // empty reads "— ＋": the dash matches every other empty cell in the table, the ＋ says you can
+  // type here. A bare ＋ was too easy to miss among columns that all show a dash.
+  return `<input value="${esc(v)}" placeholder="—  ＋" spellcheck="false"
     onchange="billSet('${jatt(r.id)}',this.value)"
     onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value='${esc(v)}';this.blur();}"
     onfocus="this.select();this.style.borderColor='var(--line)'"
@@ -2813,7 +2819,7 @@ function payCell(r,field){
   const v=r[field];
   const shown=(v===''||v==null)?'':String(v);
   return `<input value="${esc(shown)}" data-pid="${jatt(r.id)}" data-f="${field}"
-    placeholder="＋" inputmode="decimal" onfocus="this.select()"
+    placeholder="—  ＋" inputmode="decimal" onfocus="this.select()"
     onchange="payCellSet('${jatt(r.id)}','${field}',this.value)"
     onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value='${esc(shown)}';this.blur();}"
     style="width:92px;text-align:right;padding:2px 6px;border:1px solid transparent;border-radius:6px;
