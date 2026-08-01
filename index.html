@@ -5752,6 +5752,10 @@ function entryDue(e){
 let __qbCustMap=null,__qbCustAt='';
 function qbCustMap(){
   const q=qbSync();if(!q)return null;
+  /* Totals worked out by the sync itself, from every row QuickBooks returned. Preferred, because
+     the invoice list below is keyed by invoice NUMBER — duplicates collapse and un-numbered
+     invoices are missing, which left a customer reading short of their QuickBooks balance. */
+  if(q.cust&&Object.keys(q.cust).length)return q.cust;
   if(__qbCustMap&&__qbCustAt===q.updated)return __qbCustMap;   // rebuilt only when a sync lands
   const m={};
   Object.keys(q.inv).forEach(no=>{
@@ -7251,7 +7255,7 @@ async function startSync(){
             Array.from({length:Number(meta.chunks)||0},(_,i)=>
               fx.getDoc(fx.doc(db,'settings','qbbal_'+i)).catch(()=>null)));
           parts.forEach(p=>{if(p&&p.exists())Object.assign(inv,p.data().inv||{});});
-          window.__qbbal={inv,updated:meta.updated,count:meta.count};
+          window.__qbbal={inv,updated:meta.updated,count:meta.count,cust:meta.cust||null};
         }
         try{renderCusts();renderPayments();if(bTab==='air')renderAirProfit();}catch(e){}
       },e=>console.warn('QuickBooks balances unavailable',(e&&e.code)||e));
