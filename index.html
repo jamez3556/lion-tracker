@@ -4302,7 +4302,9 @@ function openInvoiceForm(entryId){
   // Pre-fill only when the entry already HAS a Bill No; otherwise show the tracker's best guess as a hint.
   const bnEl=document.getElementById('inv_billNo');
   bnEl.value=e.billNo||'';
-  bnEl.placeholder=e.billNo?'L26/…':('blank = QuickBooks assigns (next ≈ '+(nextBillNo()||'L…')+')');
+  // QuickBooks does NOT assign a number here — this company uses custom transaction numbers, so a
+  // blank one creates an invoice with no number. Blank now means "use the tracker's next number".
+  bnEl.placeholder=e.billNo?'L26/…':('blank = use '+(nextBillNo()||'L…'));
   document.getElementById('inv_memo').value=e.billNo?('LION Ref '+e.billNo):(e.rNo?('LION R '+e.rNo):'');
   // customer email: the customer's own INVOICE EMAIL(S) (Customers tab) wins, else the
   // MPL & Custom Logins REGISTERED EMAIL by C-No — editable per invoice
@@ -4383,7 +4385,13 @@ async function qbInvoice(preview){
   if(!inv.lines.length){toast('No lines to invoice');return;}
   const cust=lookupCustomer(e.cno);
   const name=(cust&&cust.qbName)||e.customer||'';
-  const bn=document.getElementById('inv_billNo').value.trim();
+  /* The invoice number must be supplied. This company uses CUSTOM transaction numbers in
+     QuickBooks, which means a blank DocNumber is NOT auto-filled — QuickBooks creates the invoice
+     with no number at all (that is where the un-numbered invoices in the sync came from), and an
+     invoice with no number cannot be matched to a shipment, chased or paid through this app.
+     So fall back to the tracker's own next number. */
+  const bn=document.getElementById('inv_billNo').value.trim()||nextBillNo();
+  if(!bn){toast('Type the invoice number — QuickBooks will not assign one');return;}
   if(!preview&&e.qbInvoiced&&!confirm('⚠ This shipment was already sent to QuickBooks'
     +(e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):'')+'.\n\nCreating again makes a SECOND invoice. Continue?'))return;
   // documents ride with the invoice; the email goes to the customer (or to you if none is typed)
@@ -4393,7 +4401,7 @@ async function qbInvoice(preview){
   const to=mail.emails||'jaamiz25@gmail.com';
   if(!preview&&!confirm('CREATE INVOICE in QuickBooks?\n\n'+name+'\n'
     +invSummaryText(inv.lines)+'\n\nGST 8%: '+fmtNum(inv.gst)+'\nTOTAL: '+fmtNum(inv.total)
-    +(bn?'\nInvoice No: '+bn:'\nNumber: assigned by QuickBooks')
+    +'\nInvoice No: '+bn
     +'\n\nDocuments attached: '+(atts.length?atts.map(a=>a.name||'document').join(', '):'none')
     +'\nEmail to: '+to))return;
   toast(preview?'Checking with QuickBooks…':'Creating the invoice…');
