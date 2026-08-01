@@ -4353,7 +4353,9 @@ async function qbInvoice(preview){
         preview:!!preview,customer:name,docNumber:bn,date:e.date||isoLocal(new Date()),
         memo:document.getElementById('inv_memo').value.trim(),
         email:(cust&&cust.billEmail)||'',
-        lines:inv.lines.map(l=>({item:l.item,desc:l.description,qty:l.qty,rate:l.rate,taxable:!!l.taxable})),
+        // itemId is what QuickBooks matches on — the builder's short name ("Form Filling") is two
+        // different QuickBooks items depending on air or sea, and only this map knows which
+        lines:inv.lines.map(l=>({item:l.item,itemId:l.itemId,desc:l.description,qty:l.qty,rate:l.rate,taxable:!!l.taxable})),
         key:'inv_'+e.id})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
