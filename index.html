@@ -760,6 +760,17 @@
   </div>
 </div>
 
+<!-- WhatsApp customer updates queue -->
+<div class="overlay" id="overlay-wa">
+  <div class="modal" style="max-width:660px">
+    <h2>📱 WhatsApp Updates</h2>
+    <div class="hint" style="margin-bottom:10px">News each customer hasn't been told yet. <b>Send</b> opens WhatsApp
+      with the message already typed — you press Send there. <b>Skip</b> marks it told without sending.</div>
+    <div id="wa_rows" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="actions"><button type="button" class="ghost" onclick="closeModal('overlay-wa')">Close</button></div>
+  </div>
+</div>
+
 <div class="overlay" id="overlay-xpadd">
   <div class="modal" style="max-width:420px">
     <h2 id="xpa_title">＋ Add Expense</h2>
@@ -1535,7 +1546,9 @@ function renderEntries(){
   const notedTomorrow=activeC.filter(r=>r.clearance===tomorrowIso).length;
   const dpPend=dosnaps.filter(d=>d.status==='pending').length;
   const stuckN=entries.filter(invStuck).length;   // invoice sent, number never came back = a failed Zap
+  const waN=isAdmin()?waQueue().length:0;         // customers who should hear from us now
   document.getElementById('e_stats').innerHTML=`
+    ${waN?`<div class="card c-info" style="cursor:pointer;outline:2px solid #25D366" onclick="openWaQueue()" title="Arrived / cleared / delivered news the customer hasn't been told yet — one tap per message"><div class="n">${waN}</div><div class="l">📱 WhatsApp Updates</div></div>`:''}
     ${portalMsgs.length?`<div class="card c-info" style="cursor:pointer${msgUnread()?';outline:2px solid #FF4F00':''}" onclick="openMsgs()" title="Messages your customers sent from their status page — read ones stay here until you delete them"><div class="n">${msgUnread()||portalMsgs.length}</div><div class="l">💬 ${msgUnread()?'New Messages':'Messages'}</div></div>`:''}
     ${dpPend?`<div class="card c-danger" style="cursor:pointer" onclick="openDoQueue()" title="DO photos from the airport waiting to be billed — click to open the queue"><div class="n">${dpPend}</div><div class="l">📸 DO to Bill</div></div>`:''}
     <div class="card c-warn"><div class="n">${pending.toLocaleString()}</div><div class="l">Pending</div></div>
@@ -1570,6 +1583,8 @@ function renderEntries(){
       <button class="iconbtn del" onclick="delEntry('${r.id}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
   pagerHTML(document.getElementById('e_pager'),eState,rows.length,'entries');
+  const waOv=document.getElementById('overlay-wa');
+  if(waOv&&waOv.classList.contains('show'))renderWaQueue(); // queue open during a sync → keep it live
 }
 function cycleEntryStatus(id){
   const r=entries.find(x=>x.id===id);if(!r)return;
@@ -2074,24 +2089,115 @@ function waEnabled(e){
   const c=lookupCustomer(e.cno);
   return !!(c&&c.wa&&((c.contact||'').replace(/\D/g,'').length>=7));
 }
+function waPhone(c){
+  let ph=((c&&c.contact)||'').replace(/\D/g,'');
+  if(ph.length===7)ph='960'+ph; // local Maldives number → add country code
+  return ph;
+}
+/* PROACTIVE updates. The app watches every WhatsApp-ticked customer's shipments for the three
+   moments a customer actually wants to hear about — container discharged, shipment cleared,
+   delivered with the invoice — and queues a ready message for each. `waSent` on the entry records
+   what has been said, so nothing is ever sent twice and a later event quietly supersedes an
+   earlier one that was never sent (a customer told "delivered" doesn't need "arrived").
+   WA_START keeps history out of it: shipments from before the feature never queue. */
+const WA_START='2026-08-01';
+function waEventFor(e){
+  if(!waEnabled(e))return null;
+  if((e.date||'')<WA_START)return null;
+  const s=e.waSent||{};
+  if(e.billNo&&!s.dlv)return 'dlv';
+  if(!e.billNo&&e.status==='Cleared'&&!s.clr&&!s.dlv)return 'clr';
+  if(!e.billNo&&e.status!=='Cleared'&&e.type==='MP'&&!s.arr&&!s.clr&&!s.dlv){
+    const c=containers.find(x=>x.entryId===e.id);
+    if(c&&(c.discharge||contNoList(c).some(cn=>ctnInfo(c,cn).discharge)))return 'arr';
+  }
+  return null;
+}
+// The customer's private status-page link — every message carries it so "where is it" answers itself.
+function waTrackLink(e){
+  const c=lookupCustomer(e.cno);
+  return (c&&c.portalKey)?PORTAL_BASE+'#'+c.portalKey:'';
+}
+function waMessage(e,kind){
+  const c=lookupCustomer(e.cno);
+  const bits=[];
+  if(e.awbBl)bits.push((e.type==='MP'?'BL ':'AWB ')+e.awbBl);
+  if(e.pkgs)bits.push(e.pkgs+' pkgs');
+  if(e.grsWt&&e.type!=='MP')bits.push(e.grsWt+' kg');
+  const what=bits.length?bits.join(', '):'your shipment';
+  let st;
+  if(kind==='arr'){
+    const cont=containers.find(x=>x.entryId===e.id);
+    const nos=cont?contNoList(cont):[];
+    const dis=cont?(cont.discharge||nos.map(cn=>ctnInfo(cont,cn).discharge).find(Boolean)||''):'';
+    const last=cont?(effLast(cont).next||''):'';
+    st='has ARRIVED at the port'+(dis?' — discharged on '+fmtDate(dis):'')+'.'
+      +(nos.length?'\nContainer'+(nos.length>1?'s':'')+': '+nos.join(', ')+'.':'')
+      +'\nClearance is in progress'+(last?' — free storage at the port ends '+fmtDate(last)+' and we are working within it':'')+'.';
+  }else if(kind==='dlv'){
+    st='has been CLEARED and delivered. Invoice '+e.billNo+(e.qbTotal?' — MVR '+Number(e.qbTotal).toLocaleString():'')+' has been sent to your email.';
+  }else if(kind==='clr'){
+    st='has been CLEARED and is ready for delivery.';
+  }else{
+    st='is being processed — we will update you as soon as it clears.';
+  }
+  const link=waTrackLink(e);
+  return '🦁 LION Logistics\nDear '+((c&&c.name)||e.customer||'customer')+',\nYour shipment ('+what+') '+st
+    +(link?'\n\nTrack it any time: '+link:'')
+    +'\nThank you for choosing LION Logistics.';
+}
+// Record what the customer has been told. A bigger event covers the smaller ones below it.
+function waMark(e,kind){
+  const t=isoLocal(new Date());
+  e.waSent=Object.assign({},e.waSent);
+  e.waSent[kind]=t;
+  if(kind==='dlv'){e.waSent.clr=e.waSent.clr||t;e.waSent.arr=e.waSent.arr||t;}
+  if(kind==='clr')e.waSent.arr=e.waSent.arr||t;
+  e.u=Date.now();saveEntries();
+}
+function waQueue(){return entries.map(e=>({e,kind:waEventFor(e)})).filter(x=>x.kind);}
+const WA_LBL={arr:'🚢 Arrived',clr:'✅ Cleared',dlv:'📦 Delivered'};
+function openWaQueue(){renderWaQueue();showModal('overlay-wa');}
+function renderWaQueue(){
+  const box=document.getElementById('wa_rows');if(!box)return;
+  const q=waQueue();
+  box.innerHTML=q.length?q.map(({e,kind})=>`
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+        <div><b>${esc(e.customer||e.cno)}</b> ${e.type?`<span class="typechip">${esc(e.type)}</span>`:''}
+          <span style="color:#25D366;font-weight:800;font-size:12px">${WA_LBL[kind]}</span></div>
+        <div style="display:flex;gap:6px">
+          <button class="ghost" style="color:#dc2626" onclick="waSend('${e.id}','${kind}',true)" title="Don't send this one — the customer already knows">Skip</button>
+          <button class="primary" style="background:#25D366;border-color:#25D366" onclick="waSend('${e.id}','${kind}')">📱 Send</button>
+        </div>
+      </div>
+      <div style="font-size:12px;color:#64748b;margin-top:6px;white-space:pre-wrap">${esc(waMessage(e,kind))}</div>
+    </div>`).join('')
+  :'<div style="color:#94a3b8;padding:14px 4px">Nothing to send — every WhatsApp customer is up to date. 🎉</div>';
+}
+// Send (or Skip) from the queue. Send opens WhatsApp with the message typed — the user presses
+// Send there, so a mis-tap never messages a customer by itself. Either way the event is marked done.
+function waSend(id,kind,skip){
+  if(!isAdmin()){toast('Customer WhatsApp is admin-only for now');return;}
+  const e=entries.find(x=>x.id===id);if(!e)return;
+  if(!skip){
+    const ph=waPhone(lookupCustomer(e.cno));
+    if(!ph){toast('No contact number for '+(e.cno||'this customer')+' — add it in the Customers tab');return;}
+    window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(waMessage(e,kind)),'_blank');
+  }
+  waMark(e,kind);
+  renderWaQueue();renderEntries();
+}
+// The per-row 📱 button — send whatever fits the shipment's state right now, any time.
 function waCustomer(entryId){
   if(!isAdmin()){toast('Customer WhatsApp is admin-only for now');return;}
   const e=entries.find(x=>x.id===entryId);if(!e)return;
-  const c=lookupCustomer(e.cno);
-  let ph=((c&&c.contact)||'').replace(/\D/g,'');
+  const ph=waPhone(lookupCustomer(e.cno));
   if(!ph){toast('No contact number for '+(e.cno||'this customer')+' — add it in the Customers tab');return;}
-  if(ph.length===7)ph='960'+ph; // local Maldives number → add country code
-  const bits=[];
-  if(e.awbBl)bits.push('AWB/BL '+e.awbBl);
-  if(e.pkgs)bits.push(e.pkgs+' pkgs');
-  if(e.grsWt)bits.push(e.grsWt+' kg');
-  const what=bits.length?bits.join(', '):'your shipment';
-  let st;
-  if(e.billNo)st='has been CLEARED and delivered. Invoice '+e.billNo+(e.qbTotal?' — MVR '+Number(e.qbTotal).toLocaleString():'')+'.';
-  else if(e.status==='Cleared')st='has been CLEARED and is ready for delivery.';
-  else st='is being processed — we will update you as soon as it clears.';
-  const msg='🦁 LION Logistics\nDear '+((c&&c.name)||e.customer||'customer')+',\nYour shipment ('+what+') '+st+'\nThank you for choosing LION Logistics.';
-  window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(msg),'_blank');
+  const due=waEventFor(e);
+  const kind=e.billNo?'dlv':e.status==='Cleared'?'clr':due==='arr'?'arr':'proc';
+  window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(waMessage(e,kind)),'_blank');
+  if(due){waMark(e,due);renderEntries();} // a manual send counts — don't queue the same news again
 }
 function delEntry(id){
   const r=entries.find(x=>x.id===id);
