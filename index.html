@@ -1984,8 +1984,7 @@ function saveEntry(e){
     saveContainers();
     if(newSt!=='Pending DO')newContId=null; // don't jump-to/highlight a container that's already done
   }else if(linked){
-    if(rec.containerNo&&linked.containerNo!==rec.containerNo)linked.containerNo=rec.containerNo;
-    linked.logNo=rec.no;
+    mirrorContFromEntry(rec,linked); // R NO / C NO / name / BL / container NO / log NO typed later reach Container Status
     // propagate this entry's clearance change (invoice added/removed OR status Cleared↔Pending) onto its container
     syncContFromEntry(rec,prevEntry,linked);
     saveContainers();renderConts(); // persist containerNo/logNo edits even when no status transition happened
@@ -7113,6 +7112,32 @@ function autoClearFromBill(){
   if(cleared||reopened)saveContainers();
   return cleared+reopened;
 }
+// Container Status mirrors its Form Log entry's identity fields (C NO / R NO / name / BL / container /
+// log NO). These were only copied when the record was CREATED, so an R number typed into the Form Log
+// afterwards never reached Container Status. A blank field on the entry never wipes the container's own
+// value — a number typed straight into Container Status survives.
+function mirrorContFromEntry(e,cont){
+  const c=cont||containers.find(x=>x.entryId===e.id);
+  if(!c)return false;
+  let changed=false;
+  const put=(k,v)=>{if(v!==''&&v!=null&&c[k]!==v){c[k]=v;changed=true;}};
+  put('cno',(e.cno||'').trim());
+  put('rNo',(e.rNo||'').trim());
+  put('name',(e.customer||'').trim());
+  put('blNo',(e.awbBl||'').trim());
+  put('containerNo',(e.containerNo||'').trim());
+  if(c.logNo!==e.no){c.logNo=e.no;changed=true;}
+  return changed;
+}
+// Sweep every linked container against its entry. Runs at boot and after a cloud merge, so an R number
+// typed on one device shows up in Container Status on all of them.
+function syncContIdentity(){
+  const byId=new Map(entries.map(e=>[e.id,e]));
+  let n=0;
+  containers.forEach(c=>{const e=c.entryId&&byId.get(c.entryId);if(e&&mirrorContFromEntry(e,c))n++;});
+  if(n)saveContainers();
+  return n;
+}
 // Sync: every MP entry in the Form Log gets a Container Status record (runs on every load, no duplicates).
 // Invoiced entries land as Delivered; hand-cleared as Cleared; the rest as active (Pending DO).
 function syncMPContainers(){
@@ -7218,6 +7243,7 @@ function renumberEntries(){
 (()=>{
   const flipped=enforceInvoiceRule();
   const synced=syncMPContainers();
+  syncContIdentity(); // backfill: pull identity fields (esp. the R NO) onto existing container records
   const autoCleared=autoClearFromBill();
   if(autoCleared>0)toast(`${autoCleared} container${autoCleared>1?'s':''} synced with invoice status`);
   else if(synced>0)toast('Synced '+synced+' MP shipments → Container Status');
@@ -7406,7 +7432,7 @@ fitTables();setTimeout(fitTables,300);
 window.__app={
   get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,payments:()=>payments,team:()=>team,expenses:()=>expensesData,salary:()=>salaryData,dosnaps:()=>dosnaps},
   set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},payments:v=>{payments=v},team:v=>{team=v},expenses:v=>{expensesData=v},salary:v=>{salaryData=v},dosnaps:v=>{dosnaps=v}},
-  rerender(){syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();applyAdminUI();renderExpenses();renderDoQueue();updateCounts();}
+  rerender(){syncPayments();syncContIdentity();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();applyAdminUI();renderExpenses();renderDoQueue();updateCounts();}
 };
 </script>
 
