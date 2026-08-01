@@ -133,6 +133,7 @@
   .st-Pending{background:var(--warnbg);color:var(--warn)}
   .st-Cleared{background:var(--okbg);color:var(--ok)}
   .st-Delivered{background:var(--infobg);color:var(--info)}
+  .st-Paid{background:#16a34a;color:#fff}
   .st-PendingDO{background:var(--warnbg);color:var(--warn)}
   .st-DONotApproved{background:var(--dangerbg);color:var(--danger)}
   .st-DOApproved{background:var(--infobg);color:var(--info)}
@@ -1555,11 +1556,12 @@ function renderEntries(){
     <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
     <td data-l="File">${r.file?esc(r.file)+(r.fileNo?' - '+r.fileNo:''):'—'}</td>
     <td data-l="R No">${entryCell(r,'rNo')}</td>
-    <td data-l="Bill No">${billCell(r)}${billPaidBadge(r)}</td>
+    <td data-l="Bill No">${billCell(r)}</td>
     <td class="num" data-l="Grs Wt">${entryCell(r,'grsWt',true)}</td>
     <td class="num" data-l="Pkgs">${entryCell(r,'pkgs',true)}</td>
     <td data-l="AWB / BL">${entryCell(r,'awbBl')}</td>
-    <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
+    <td data-l="Status"><button class="status-pill st-${statusShown(r)}" onclick="cycleEntryStatus('${r.id}')"
+      title="${entryPaidUp(r)?'Paid in full — from QuickBooks':''}">${statusShown(r)}</button></td>
     <td class="actcol"><div class="rowact">
       ${((r.type==='AP'||r.type==='MP')&&isAdmin())?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
       <button class="iconbtn" onclick="openAttach('${r.id}')" title="Documents (AWB, receipts, photos…)">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
@@ -1623,17 +1625,19 @@ function entrySet(id,field,val){
   if(syncPaymentFromEntry(e))savePayments();              // R No and AWB are mirrored onto the payment
   saveEntries();buildEntryFilters();renderEntries();renderMP();renderPayments();updateCounts();
 }
-/* Paid-or-not at a glance, right on the row. The nightly/on-demand QuickBooks read already tells
-   entryDue() every invoice's real balance — an invoice missing from the unpaid list and older than
-   the sync is PAID. Green 💰 = settled in full; red figure = what is still owed. Nothing shows
-   while the figure would only be the app's own estimate — a wrong "paid" is worse than a blank. */
-function billPaidBadge(r){
-  if(!(r.billNo||'').trim())return '';
+/* Paid, shown as the STATUS — not stored. QuickBooks is the authority on money: an invoice absent
+   from the unpaid list and older than the sync is settled, whoever received the payment (the app's
+   💰 buttons or staff inside QuickBooks itself). Deriving it at render time means a payment deleted
+   in QuickBooks un-pays the row by itself, and the stored status stays Delivered so every existing
+   rule (invoice rule, container sync, cloud merge) is untouched. No verdict while only the app's
+   own estimate exists — a wrong "Paid" is worse than showing Delivered. */
+function entryPaidUp(r){
+  if(!(r.billNo||'').trim())return false;
   const d=entryDue(r);
-  if(!d||d.est)return '';
-  if(d.due<=0.5)return ' <span title="Paid in full — from QuickBooks" style="color:#16a34a;font-weight:800;font-size:11px">💰</span>';
-  return ' <span title="Still owed — from QuickBooks" style="color:#dc2626;font-weight:800;font-size:10.5px;white-space:nowrap">'+fmtNum(invMoney(d.due))+'</span>';
+  return !!d&&!d.est&&d.due<=0.5;
 }
+// what the status pill shows: Paid dresses over Delivered; clicking still cycles the real status
+function statusShown(r){return entryPaidUp(r)?'Paid':r.status;}
 function billCell(r){
   const v=(r.billNo||'');
   // empty reads "— ＋": the dash matches every other empty cell in the table, the ＋ says you can
@@ -2566,12 +2570,13 @@ function renderMP(){
     <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
     <td data-l="File">${r.file?esc(r.file)+(r.fileNo?' - '+r.fileNo:''):'—'}</td>
     <td data-l="R No">${entryCell(r,'rNo')}</td>
-    <td data-l="Bill No">${billCell(r)}${billPaidBadge(r)}</td>
+    <td data-l="Bill No">${billCell(r)}</td>
     <td class="num" data-l="Grs Wt">${entryCell(r,'grsWt',true)}</td>
     <td class="num" data-l="Pkgs">${entryCell(r,'pkgs',true)}</td>
     <td data-l="AWB / BL">${entryCell(r,'awbBl')}</td>
     <td data-l="Supplier"><input class="mpremark" style="min-width:120px" value="${esc(r.supplier)}" placeholder="Shipper on the BL…" onchange="setSupplier('${jatt(r.id)}',this.value)"></td>
-    <td data-l="Status"><button class="status-pill st-${r.status}" onclick="cycleEntryStatus('${r.id}')">${r.status}</button></td>
+    <td data-l="Status"><button class="status-pill st-${statusShown(r)}" onclick="cycleEntryStatus('${r.id}')"
+      title="${entryPaidUp(r)?'Paid in full — from QuickBooks':''}">${statusShown(r)}</button></td>
     ${isAdmin()?`<td class="num" data-l="💸 EEMAN">${(r.outCost&&r.outCost.amt!=null)
       ?`<span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stOut('${jatt(r.id)}')" title="EEMAN's charge${r.outCost.inv?' · his inv '+esc(r.outCost.inv):''} — click to change">${fmtNum(r.outCost.amt)}</span>`
       :(r.status==='Cleared'||r.status==='Delivered'||r.billNo)
@@ -4892,7 +4897,9 @@ window.sendPaymentReceived=async function(ev){
     if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
     (e.qbPayRec=e.qbPayRec||[]).push({amt:amt,date:date,method:method,qbId:j.paymentId||''});
     e.qbBalance=j.balanceAfter;                    // the REAL balance QuickBooks now holds
-    saveEntries();renderPayments();renderCusts();
+    // patch the synced copy too, so the status pill turns Paid NOW instead of at the next sync
+    const q=window.__qbbal;if(q&&q.inv&&q.inv[e.billNo.trim()])q.inv[e.billNo.trim()].b=j.balanceAfter;
+    saveEntries();renderPayments();renderCusts();renderEntries();renderMP();renderStelcoDesk();
     closeModal('overlay-payrec');
     toast(j.duplicate
       ?('Already recorded — invoice '+e.billNo+' balance MVR '+invFmt(j.balanceAfter))
@@ -6278,7 +6285,9 @@ function renderStelcoDesk(){
       <td class="num" data-l="Demurrage"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stDemur('${e.id}')" title="Click to type the demurrage amount">${dem!=null?fmtNum(dem):'＋'}</span></td>`}
       <td data-l="Bill No">${esc(e.billNo)||'—'}</td>
       <td data-l="Status">${e.billNo
-        ?'<span style="color:#16a34a;font-weight:800">✅ Delivered</span>'
+        ?(entryPaidUp(e)
+          ?'<span class="status-pill st-Paid" title="Paid in full — from QuickBooks">Paid</span>'
+          :'<span style="color:#16a34a;font-weight:800">✅ Delivered</span>')
         :e.status==='Cleared'
           ?`<button style="color:#15803d;background:#dcfce7;border:1px solid #15803d;border-radius:999px;padding:2px 10px;font-weight:800;font-size:12px;cursor:pointer" onclick="stelcoToggleClear('${e.id}')" title="Cleared — ready to bill. Click to undo.">✔ Cleared</button>`
           :`<button style="color:#b45309;background:#fef3c7;border:1px solid #d97706;border-radius:999px;padding:2px 10px;font-weight:800;font-size:12px;cursor:pointer" onclick="stelcoToggleClear('${e.id}')" title="Press when the shipment is CLEARED — then admin makes the bill">⏳ Pending</button>`}</td>
@@ -7616,8 +7625,8 @@ async function startSync(){
           parts.forEach(p=>{if(p&&p.exists())Object.assign(inv,p.data().inv||{});});
           window.__qbbal={inv,updated:meta.updated,count:meta.count,cust:meta.cust||null};
         }
-        // entries/MP redraw too — their rows now carry the paid/owed badge next to BILL NO
-        try{renderCusts();renderPayments();renderEntries();renderMP();if(bTab==='air')renderAirProfit();}catch(e){}
+        // entries/MP/STELCO redraw too — their status pills turn Paid from these balances
+        try{renderCusts();renderPayments();renderEntries();renderMP();renderStelcoDesk();if(bTab==='air')renderAirProfit();}catch(e){}
       },e=>console.warn('QuickBooks balances unavailable',(e&&e.code)||e));
     }catch(e){}
     // EEMAN payment ledger (admin's 💸 EEMAN Account inside MP Shipments) — same settings collection
