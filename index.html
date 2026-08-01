@@ -7170,9 +7170,29 @@ function pushContIdentityToEntry(c){
 function syncContIdentity(){
   const byId=new Map(entries.map(e=>[e.id,e]));
   let n=0;
-  containers.forEach(c=>{const e=c.entryId&&byId.get(c.entryId);if(e&&mirrorContFromEntry(e,c))n++;});
+  containers.forEach(c=>{
+    let e=c.entryId&&byId.get(c.entryId),adopted=false;
+    if(!e){e=adoptEntryForCont(c);adopted=!!e;} // a new link is itself a change worth saving
+    if(e&&(mirrorContFromEntry(e,c)|adopted))n++;
+  });
   if(n)saveContainers();
   return n;
+}
+// Older container rows (typed by hand, or created before records carried an entryId) have no link to
+// the Form Log, so nothing could ever flow between them. Adopt the entry whose BL matches — only when
+// exactly ONE entry matches and neither side's C NO contradicts it, so a wrong shipment is never linked.
+function adoptEntryForCont(c){
+  if(c.entryId)return null;
+  const bl=String(c.blNo||'').trim().toUpperCase();
+  if(!bl)return null;
+  const cno=String(c.cno||'').trim().toUpperCase();
+  const hits=entries.filter(e=>String(e.awbBl||'').trim().toUpperCase()===bl
+    &&!isBillOnly(e)
+    &&!containers.some(o=>o!==c&&o.entryId===e.id)     // that entry already has its own container row
+    &&(!cno||!e.cno||String(e.cno).trim().toUpperCase()===cno));
+  if(hits.length!==1)return null;
+  c.entryId=hits[0].id;
+  return hits[0];
 }
 // Sync: every MP entry in the Form Log gets a Container Status record (runs on every load, no duplicates).
 // Invoiced entries land as Delivered; hand-cleared as Cleared; the rest as active (Pending DO).
