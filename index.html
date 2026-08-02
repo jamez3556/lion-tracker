@@ -301,6 +301,9 @@
     <button data-view="customers">👥 Customers <span class="cnt" id="cnt-customers"></span></button>
     <button data-view="creds">🔐 MPL &amp; Custom Logins <span class="cnt" id="cnt-creds"></span></button>
     <button data-view="expenses" id="tab-expenses" style="display:none">💵 Expenses <span class="cnt" id="cnt-expenses"></span></button>
+    <!-- staff see this instead of the admin tab: same data, on the page built for them -->
+    <button type="button" id="tab-expstaff" style="display:none" onclick="window.open('expenses.html','_blank')"
+      title="Add today's Daily items and other expenses — opens the LION Expenses page">💵 Expenses</button>
   </nav>
 </header>
 <div class="alertbar" id="alertbar" onclick="goToDOList()"></div>
@@ -1460,6 +1463,7 @@ function wireAutofill(cnoInput,nameInput,hintEl){
 /* ============ nav ============ */
 const VIEWTITLES={entries:'Form Log',mp:'MP Shipments',containers:'Container Status',payments:'Payment',billing:'Billing',customers:'Customer List',creds:'MPL & Custom Logins',expenses:'Daily Expenses'};
 document.querySelectorAll('#nav button').forEach(b=>{
+  if(!b.dataset.view)return;   // the staff Expenses button opens its own page, not a view
   b.addEventListener('click',()=>{
     document.querySelectorAll('#nav button').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
@@ -3105,6 +3109,9 @@ function applyAdminUI(){
   const t=document.getElementById('tab-expenses');if(!t)return;
   const ok=isAdmin();
   t.style.display=ok?'':'none';
+  // staff get an Expenses button too — it opens the staff page (same data, staff permissions)
+  const s=document.getElementById('tab-expstaff');
+  if(s)s.style.display=(!ok&&window.__userEmail)?'':'none';
   if(!ok&&document.getElementById('view-expenses').classList.contains('active'))
     document.querySelector('#nav button[data-view="entries"]').dispatchEvent(new MouseEvent('click',{bubbles:true}));
 }
