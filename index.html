@@ -760,6 +760,8 @@
       <option value="billed">✔ Billed</option>
     </select>
     <button class="primary" onclick="finBillOpen()">＋ Enter EEMAN Bill</button>
+    <button class="green" onclick="finPayOpen()">💰 Pay EEMAN</button>
+    <button class="ghost" onclick="finStatement()">📋 Copy account statement</button>
   </div>
   <div class="tablewrap m-cards" style="margin-bottom:18px">
     <div class="scroll">
@@ -776,7 +778,7 @@
       <div style="color:var(--muted);font-size:13px;margin-top:4px">Press ＋ Enter EEMAN Bill and type each BL with its charge — every line is checked against our shipments automatically.</div>
     </div>
   </div>
-  <div class="tablewrap m-cards">
+  <div class="tablewrap m-cards" style="margin-bottom:18px">
     <div class="scroll">
       <table style="min-width:760px">
         <thead><tr>
@@ -787,7 +789,36 @@
       </table>
     </div>
   </div>
+  <div class="tablewrap m-cards">
+    <div class="scroll">
+      <table style="min-width:620px">
+        <thead><tr><th>PAID ON</th><th class="num">AMOUNT (MVR)</th><th>REFERENCE / NOTE</th><th></th></tr></thead>
+        <tbody id="fin_pays"></tbody>
+      </table>
+    </div>
+  </div>
 </section>
+</div>
+
+<!-- finance: record a payment to EEMAN -->
+<div class="overlay" id="overlay-eemanpay">
+  <div class="modal" style="max-width:460px">
+    <h2>💰 Pay EEMAN</h2>
+    <div id="fp_sum" style="background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:13.5px;line-height:1.8"></div>
+    <form onsubmit="return finPaySave(event)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field"><label>AMOUNT PAID (MVR)</label><input id="fp_amt" inputmode="decimal" required></div>
+        <div class="field"><label>DATE PAID</label><input id="fp_date" type="date" required></div>
+      </div>
+      <div class="field"><label>TRANSFER REF / NOTE (optional)</label><input id="fp_note" placeholder="BML ref, which account…"></div>
+      <div class="hint">Recorded on the same EEMAN account both desks read — outstanding updates everywhere at once.
+        This only records the payment; the actual transfer is made in your bank as usual.</div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-eemanpay')">Cancel</button>
+        <button type="submit" class="primary">Record payment</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <!-- finance: enter an EEMAN bill, one line per BL -->
@@ -2792,15 +2823,20 @@ function setMpTab(t){
   document.getElementById('mp_eeman_pane').style.display=t==='eeman'?'':'none';
   if(t==='eeman')renderEemanAcct();
 }
+/* One cloud document, two screens. The Finance desk added bills[] beside pays[] — so BOTH
+   loaders fill the same __eemanDoc and BOTH savers write the whole document, or a payment
+   here would silently erase the bills entered there (and vice versa). */
 async function eemanLoad(){
   if(eemanPays)return eemanPays;
-  try{eemanPays=(window.__eeman&&(await window.__eeman.get()).pays)||[];}
-  catch(e){eemanPays=[];toast('Could not load EEMAN payments (offline?)');}
+  if(!__eemanDoc)await finLoad();
+  eemanPays=(__eemanDoc&&__eemanDoc.pays)||[];
+  if(__eemanDoc)__eemanDoc.pays=eemanPays;   // same array — one truth
   return eemanPays;
 }
 async function eemanSave(){
-  try{await window.__eeman.set({pays:eemanPays,u:Date.now()});}
-  catch(e){toast('⚠ Payment NOT saved to the cloud: '+(e.code||e.message));}
+  if(__eemanDoc)__eemanDoc.pays=eemanPays;
+  if(!(await finSaveDoc()))toast('⚠ Payment NOT saved to the cloud');
+  renderFinance();updateCounts();
 }
 async function renderEemanAcct(){
   const tb=document.getElementById('me_tbody');if(!tb)return;
@@ -3213,6 +3249,7 @@ async function finLoad(){
   try{
     const d=await window.__eeman.get();
     __eemanDoc={pays:(d&&d.pays)||[],bills:(d&&d.bills)||[],u:(d&&d.u)||0};
+    eemanPays=__eemanDoc.pays;   // the MP tab's EEMAN Account reads the very same array
   }catch(e){console.warn('eeman doc read failed',e);}
   renderFinance();
 }
@@ -3379,7 +3416,90 @@ function renderFinance(){
     <div class="card c-purple"><div class="n">${fmtNum(gy.rev-gy.cost)}</div><div class="l">Sea profit — ${nowY}</div></div>
     ${unknownN?`<div class="card c-danger" style="cursor:pointer" onclick="document.getElementById('fin_filter').value='unknown';renderFinance()"><div class="n">${unknownN}</div><div class="l">❌ EEMAN billed, not in tracker</div></div>`:''}
     ${unbilledN?`<div class="card c-warn" style="cursor:pointer" onclick="document.getElementById('fin_filter').value='unbilled';renderFinance()"><div class="n">${unbilledN}</div><div class="l">⚠ We paid EEMAN, customer not billed</div></div>`:''}
-    <div class="card"><div class="n">${fmtNum(costT-paysT)}</div><div class="l">EEMAN outstanding (Σ charges − Σ paid)</div></div>`;
+    <div class="card ${costT-paysT>0.5?'c-danger':'c-info'}" style="cursor:pointer" onclick="finPayOpen()" title="Click to record a payment to EEMAN"><div class="n">${fmtNum(invMoney(costT-paysT))}</div><div class="l">${costT-paysT>=0?'EEMAN outstanding — click to pay':'EEMAN overpaid / advance'}</div></div>`;
+  // payment history — newest first, same ledger as the MP tab's EEMAN Account
+  const pb=document.getElementById('fin_pays');
+  if(pb){
+    const pays=(((__eemanDoc&&__eemanDoc.pays)||[]).slice()).sort((a,b)=>String(b.d||'').localeCompare(String(a.d||'')));
+    pb.innerHTML=pays.length?pays.map((p,i)=>`<tr>
+      <td data-l="Paid on">${fmtDate(p.d)}</td>
+      <td class="num" data-l="Amount" style="font-weight:700">${fmtNum(p.amt)}</td>
+      <td data-l="Note">${esc(p.note)||'<span class="d-none">—</span>'}</td>
+      <td class="actcol"><button class="iconbtn del" onclick="finPayDel(${i})" title="Delete this payment">🗑️</button></td>
+    </tr>`).join('')
+    :'<tr><td colspan="4" style="color:var(--muted)">No payments to EEMAN recorded yet — press 💰 Pay EEMAN after each transfer</td></tr>';
+  }
+}
+/* ── paying EEMAN ─────────────────────────────────────────────────────────────
+   LION pays lump sums on account (his own sheet works TOTAL / Paid / Pending). The modal shows
+   the account as it stands and pre-types the outstanding, so full settlement is just pressing
+   Record. Same pays[] ledger as the MP tab's EEMAN Account — one account, two doors. */
+function finTotals(){
+  const mp=entries.filter(e=>e.type==='MP'&&e.outCost&&e.outCost.amt!=null);
+  const billed=invMoney(mp.reduce((s,e)=>s+(Number(e.outCost.amt)||0),0));
+  const paid=invMoney((((__eemanDoc&&__eemanDoc.pays)||[])).reduce((s,p)=>s+(Number(p.amt)||0),0));
+  return {billed,paid,out:invMoney(billed-paid),n:mp.length};
+}
+function finPayOpen(){
+  if(!isAdmin()){toast('Finance is admin-only');return;}
+  if(!__eemanDoc){finLoad().then(()=>__eemanDoc&&finPayOpen());return;}
+  const t=finTotals();
+  document.getElementById('fp_sum').innerHTML=
+    `Charges recorded (${t.n} shipments): <b>${fmtNum(t.billed)}</b><br>`+
+    `Paid so far: <b>${fmtNum(t.paid)}</b><br>`+
+    `<span style="color:${t.out>0?'#dc2626':'#16a34a'};font-weight:800">Outstanding: ${fmtNum(t.out)}</span>`;
+  document.getElementById('fp_amt').value=t.out>0?t.out:'';
+  document.getElementById('fp_date').value=isoLocal(new Date());
+  document.getElementById('fp_note').value='';
+  showModal('overlay-eemanpay');
+}
+async function finPaySave(ev){
+  ev.preventDefault();
+  if(!isAdmin())return false;
+  const amt=Number(String(document.getElementById('fp_amt').value).replace(/,/g,''));
+  const d=document.getElementById('fp_date').value;
+  const note=document.getElementById('fp_note').value.trim();
+  if(!isFinite(amt)||amt<=0){toast('Enter the amount paid');return false;}
+  if(!d){toast('Enter the date paid');return false;}
+  const t=finTotals();
+  if(amt>t.out+0.5&&!confirm('That is MORE than the outstanding ('+fmtNum(t.out)+') — record as an advance to EEMAN?'))return false;
+  // the same transfer entered twice is the classic mistake — same amount on the same day asks first
+  if(((__eemanDoc&&__eemanDoc.pays)||[]).some(p=>p.d===d&&Math.abs(Number(p.amt)-amt)<0.01)
+     &&!confirm(fmtNum(amt)+' on '+fmtDate(d)+' is already recorded.\n\nRecord it AGAIN as a second payment?'))return false;
+  __eemanDoc.pays.push({d,amt,note});
+  eemanPays=__eemanDoc.pays;
+  if(!(await finSaveDoc())){__eemanDoc.pays.pop();return false;}
+  closeModal('overlay-eemanpay');
+  renderFinance();updateCounts();
+  if(typeof mpTab!=='undefined'&&mpTab==='eeman')renderEemanAcct();
+  const after=finTotals();
+  toast('💰 Paid '+fmtNum(amt)+' recorded — EEMAN outstanding now '+fmtNum(after.out));
+  return false;
+}
+async function finPayDel(i){
+  if(!isAdmin())return;
+  const pays=(((__eemanDoc&&__eemanDoc.pays)||[]).slice()).sort((a,b)=>String(b.d||'').localeCompare(String(a.d||'')));
+  const p=pays[i];if(!p)return;
+  if(!confirm('Delete the payment of '+fmtNum(p.amt)+' on '+fmtDate(p.d)+'?\n\nOutstanding goes back UP by that amount.'))return;
+  __eemanDoc.pays.splice(__eemanDoc.pays.indexOf(p),1);
+  eemanPays=__eemanDoc.pays;
+  await finSaveDoc();
+  renderFinance();updateCounts();
+  if(typeof mpTab!=='undefined'&&mpTab==='eeman')renderEemanAcct();
+}
+// A clean text statement of the whole account — paste straight into WhatsApp/Viber to EEMAN.
+function finStatement(){
+  if(!isAdmin())return;
+  if(!__eemanDoc){finLoad().then(()=>__eemanDoc&&finStatement());return;}
+  const t=finTotals();
+  const pays=(((__eemanDoc&&__eemanDoc.pays)||[]).slice()).sort((a,b)=>String(b.d||'').localeCompare(String(a.d||''))).slice(0,5);
+  const txt='LION Logistics — EEMAN account ('+fmtDate(isoLocal(new Date()))+')\n'
+    +'Charges recorded: MVR '+fmtNum(t.billed)+' ('+t.n+' shipments)\n'
+    +'Paid: MVR '+fmtNum(t.paid)+'\n'
+    +(t.out>=0?'Outstanding: MVR '+fmtNum(t.out):'Advance held: MVR '+fmtNum(-t.out))+'\n'
+    +(pays.length?'\nLast payments:\n'+pays.map(p=>'• '+fmtDate(p.d)+' — MVR '+fmtNum(p.amt)+(p.note?' ('+p.note+')':'')).join('\n'):'');
+  navigator.clipboard.writeText(txt).then(()=>toast('📋 Account statement copied — paste it to EEMAN'))
+    .catch(()=>prompt('Copy this:',txt));
 }
 
 function renderExpenses(){
