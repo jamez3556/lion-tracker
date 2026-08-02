@@ -3268,15 +3268,23 @@ async function finBillSave(ev){
   if(__eemanDoc.bills.some(b=>b.no.toLowerCase()===no.toLowerCase())
      &&!confirm('EEMAN bill "'+no+'" is already entered. Enter it again anyway?'))return false;
   let touched=false;
-  const items=rows.map(r=>{
+  const items=[];
+  for(const r of rows){
     const e=finMatch(r.bl);
     if(e){
+      // never a duplicate: a shipment holds ONE charge — an existing different figure asks first
+      if(e.outCost&&e.outCost.amt!=null&&Number(e.outCost.amt)!==r.amt
+         &&!confirm(r.bl+' already carries EEMAN charge '+fmtNum(e.outCost.amt)
+           +(e.outCost.inv?' (bill '+e.outCost.inv+')':'')+'.\n\nReplace it with '+fmtNum(r.amt)+' from bill '+no+'?')){
+        items.push({bl:r.bl,amt:Number(e.outCost.amt),entryId:e.id});continue;
+      }
       // his charge belongs on the shipment — same field the 💸 buttons use everywhere
-      e.outCost={amt:r.amt,inv:no};e.u=Date.now();touched=true;
-      return {bl:r.bl,amt:r.amt,entryId:e.id};
+      e.outCost={amt:r.amt,inv:no,date};e.u=Date.now();touched=true;
+      items.push({bl:r.bl,amt:r.amt,entryId:e.id});
+    }else{
+      items.push({bl:r.bl,amt:r.amt,entryId:null});
     }
-    return {bl:r.bl,amt:r.amt,entryId:null};
-  });
+  }
   __eemanDoc.bills.push({id:uid(),no,date,items,u:Date.now()});
   if(!(await finSaveDoc()))return false;
   if(touched){saveEntries();renderMP();renderStelcoDesk();}
@@ -3286,16 +3294,26 @@ async function finBillSave(ev){
   renderFinance();updateCounts();
   return false;
 }
-/* every line of every EEMAN bill, re-verified live against today's shipments */
+/* The lines of the desk. ONE source of truth per shipment: its outCost — however the charge was
+   entered (the Finance bill form, or 💸 typed straight on a STELCO/MP row, which lands here
+   automatically). A shipment can never appear twice because a shipment holds exactly one EEMAN
+   charge; re-entering it just updates the figure. The bills ledger only contributes the lines we
+   could NOT match — BLs EEMAN billed that are not in our books at all. */
 function finLines(){
   const doc=__eemanDoc||{bills:[]};
-  return (doc.bills||[]).flatMap(b=>(b.items||[]).map(it=>{
-    const e=(it.entryId&&entries.find(x=>x.id===it.entryId))||finMatch(it.bl);
-    const rev=e?finRevenue(e):null;
-    const status=!e?'unknown':((e.billNo||'').trim()?'billed':'unbilled');
-    return {billNo:b.no,billDate:b.date,bl:it.bl,amt:Number(it.amt)||0,e,rev,status,
-      profit:(status==='billed'&&rev!=null)?Math.round((rev-(Number(it.amt)||0))*100)/100:null};
-  }));
+  const entryLines=entries.filter(e=>e.type==='MP'&&e.outCost&&e.outCost.amt!=null).map(e=>{
+    const rev=finRevenue(e);
+    const status=(e.billNo||'').trim()?'billed':'unbilled';
+    const amt=Number(e.outCost.amt)||0;
+    return {billNo:e.outCost.inv||'💸 typed on row',billDate:e.outCost.date||e.date||'',
+      bl:e.awbBl||'',amt,e,rev,status,
+      profit:(status==='billed'&&rev!=null)?Math.round((rev-amt)*100)/100:null};
+  });
+  const unmatched=(doc.bills||[]).flatMap(b=>(b.items||[]).map(it=>({b,it})))
+    .filter(({it})=>!((it.entryId&&entries.find(x=>x.id===it.entryId))||finMatch(it.bl)))
+    .map(({b,it})=>({billNo:b.no,billDate:b.date,bl:it.bl,amt:Number(it.amt)||0,
+      e:null,rev:null,status:'unknown',profit:null}));
+  return entryLines.concat(unmatched);
 }
 function renderFinance(){
   if(!document.getElementById('view-finance')||!isAdmin())return;
@@ -6256,10 +6274,12 @@ function stOut(id){ // 💸 — what EEMAN (the outsourcer) bills LION for this 
   const n=Number(v.replace(/[^\d.]/g,''));
   if(!isFinite(n)||n<0){toast('Enter a number');return;}
   const inv=prompt("EEMAN's invoice / reference number (optional):",cur.inv||'');
-  e.outCost={amt:n};
+  e.outCost={amt:n,date:cur.date||isoLocal(new Date())};   // lands on the Finance desk automatically
   if(inv&&inv.trim())e.outCost.inv=inv.trim();
   saveEntries();renderStelcoDesk();renderMP();if(typeof renderSeaProfit==='function'&&bTab==='profit')renderSeaProfit();
-  toast('💸 EEMAN '+fmtNum(n)+' recorded — internal only, never on the customer invoice');
+  if(typeof renderFinance==='function')renderFinance();
+  updateCounts();
+  toast('💸 EEMAN '+fmtNum(n)+' recorded to the EEMAN account — internal only, never on the customer invoice');
 }
 // staff button: Pending ↔ Cleared on the STELCO desk (any signed-in user).
 // Cleared = "clearance done, ready to bill"; billing then locks it to Delivered (existing invoice rule).
