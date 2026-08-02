@@ -301,6 +301,7 @@
     <button data-view="customers">👥 Customers <span class="cnt" id="cnt-customers"></span></button>
     <button data-view="creds">🔐 MPL &amp; Custom Logins <span class="cnt" id="cnt-creds"></span></button>
     <button data-view="expenses" id="tab-expenses" style="display:none">💵 Expenses <span class="cnt" id="cnt-expenses"></span></button>
+    <button data-view="finance" id="tab-finance" style="display:none" onclick="finLoad()">💹 Finance <span class="cnt" id="cnt-finance"></span></button>
     <!-- staff see this instead of the admin tab: same data, on the page built for them -->
     <button type="button" id="tab-expstaff" style="display:none" onclick="window.open('expenses.html','_blank')"
       title="Add today's Daily items and other expenses — opens the LION Expenses page">💵 Expenses</button>
@@ -743,6 +744,74 @@
   <div id="xp_panel_labour" style="display:none"></div>
   <div id="xp_panel_salary" style="display:none"></div>
 </section>
+
+<!-- ==================== FINANCE VIEW (admin) ==================== -->
+<section class="view" id="view-finance">
+  <div class="stats" id="fin_stats"></div>
+  <div class="toolbar">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="fin_search" type="text" placeholder="Search BL, customer, EEMAN bill no…" oninput="renderFinance()">
+    </div>
+    <select class="filter" id="fin_filter" onchange="renderFinance()">
+      <option value="">All EEMAN bill lines</option>
+      <option value="unknown">❌ Not in tracker</option>
+      <option value="unbilled">⚠ We have not billed</option>
+      <option value="billed">✔ Billed</option>
+    </select>
+    <button class="primary" onclick="finBillOpen()">＋ Enter EEMAN Bill</button>
+  </div>
+  <div class="tablewrap m-cards" style="margin-bottom:18px">
+    <div class="scroll">
+      <table style="min-width:980px">
+        <thead><tr>
+          <th>EEMAN BILL</th><th>DATE</th><th>BL NUMBER</th><th class="num">EEMAN (MVR)</th>
+          <th>SHIPMENT</th><th>OUR INVOICE</th><th class="num">BILLED (MVR)</th><th class="num">PROFIT</th><th>STATUS</th>
+        </tr></thead>
+        <tbody id="fin_tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="fin_empty" style="display:none"><div class="big">💹</div>
+      <div style="font-weight:700;font-size:16px;color:var(--ink)">No EEMAN bills entered yet</div>
+      <div style="color:var(--muted);font-size:13px;margin-top:4px">Press ＋ Enter EEMAN Bill and type each BL with its charge — every line is checked against our shipments automatically.</div>
+    </div>
+  </div>
+  <div class="tablewrap m-cards">
+    <div class="scroll">
+      <table style="min-width:760px">
+        <thead><tr>
+          <th>MONTH</th><th class="num">SHIPMENTS</th><th class="num">BILLED (MVR)</th>
+          <th class="num">EEMAN (MVR)</th><th class="num">PROFIT (MVR)</th><th>NOT BILLED YET</th>
+        </tr></thead>
+        <tbody id="fin_profit"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- finance: enter an EEMAN bill, one line per BL -->
+<div class="overlay" id="overlay-eeman">
+  <div class="modal" style="max-width:560px">
+    <h2>💸 Enter EEMAN Bill</h2>
+    <form onsubmit="return finBillSave(event)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field"><label>EEMAN BILL / INVOICE NO</label><input id="fb_no" required placeholder="e.g. EMN-2026-114"></div>
+        <div class="field"><label>BILL DATE</label><input id="fb_date" type="date" required></div>
+      </div>
+      <div class="field"><label>SHIPMENTS ON THIS BILL</label>
+        <div id="fin_rows"></div>
+        <button type="button" class="ghost" onclick="finRowAdd()">＋ Add BL</button>
+      </div>
+      <div class="hint">Each BL is checked against our shipments the moment you save: matched ones get
+        EEMAN's charge recorded on the shipment (💸), and anything we don't have is flagged in red —
+        that is a shipment EEMAN billed us for that never went through our books.</div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-eeman')">Cancel</button>
+        <button type="submit" class="primary">Save bill</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <!-- expenses: add expense -->
@@ -1461,7 +1530,7 @@ function wireAutofill(cnoInput,nameInput,hintEl){
 }
 
 /* ============ nav ============ */
-const VIEWTITLES={entries:'Form Log',mp:'MP Shipments',containers:'Container Status',payments:'Payment',billing:'Billing',customers:'Customer List',creds:'MPL & Custom Logins',expenses:'Daily Expenses'};
+const VIEWTITLES={entries:'Form Log',mp:'MP Shipments',containers:'Container Status',payments:'Payment',billing:'Billing',customers:'Customer List',creds:'MPL & Custom Logins',expenses:'Daily Expenses',finance:'Finance'};
 document.querySelectorAll('#nav button').forEach(b=>{
   if(!b.dataset.view)return;   // the staff Expenses button opens its own page, not a view
   b.addEventListener('click',()=>{
@@ -1483,6 +1552,12 @@ function updateCounts(){
   document.getElementById('cnt-expenses').textContent=expensesData.filter(r=>r.kind==='exp'&&!r.paid).length.toLocaleString();
   const bp=dosnaps.filter(d=>d.status==='pending').length;
   document.getElementById('cnt-billing').textContent=bp?bp.toLocaleString():'';
+  // Finance badge = lines needing a human: EEMAN billed us for it but it's unknown or unbilled
+  const fc=document.getElementById('cnt-finance');
+  if(fc&&typeof finLines==='function'&&isAdmin()){
+    const n=finLines().filter(l=>l.status!=='billed').length;
+    fc.textContent=n?n.toLocaleString():'';
+  }
 }
 
 /* ============ FORM LOG ============ */
@@ -3109,13 +3184,185 @@ function applyAdminUI(){
   const t=document.getElementById('tab-expenses');if(!t)return;
   const ok=isAdmin();
   t.style.display=ok?'':'none';
+  const fin=document.getElementById('tab-finance');
+  if(fin)fin.style.display=ok?'':'none';
   // staff get an Expenses button too — it opens the staff page (same data, staff permissions)
   const s=document.getElementById('tab-expstaff');
   if(s)s.style.display=(!ok&&window.__userEmail)?'':'none';
-  if(!ok&&document.getElementById('view-expenses').classList.contains('active'))
+  if(!ok&&(document.getElementById('view-expenses').classList.contains('active')
+        ||document.getElementById('view-finance').classList.contains('active')))
     document.querySelector('#nav button[data-view="entries"]').dispatchEvent(new MouseEvent('click',{bubbles:true}));
+  // first admin sign-in of the session: pull EEMAN's bill ledger so the Finance badge is live
+  if(ok&&!__eemanDoc&&window.__eeman)finLoad();
 }
 function xpSub(s){xpState.sub=s;renderExpenses();}
+
+/* ============ FINANCE DESK (admin) ============
+   EEMAN clears sea shipments for LION and sends bills by BL. This desk is the control point:
+   every line of his bill is verified against OUR shipments — a BL we don't have means we are
+   being charged for work that never entered our books (or a shipment we cleared-and-billed
+   without documentation that was never recorded). Matched lines write his charge onto the
+   shipment (outCost), and profit = what WE billed − what EEMAN charged, rolled up by month
+   and year. Bills live beside his payment ledger in Firestore settings/eeman (bills[]),
+   so no security-rules change is needed. */
+const finState={};
+const finN=s=>String(s||'').replace(/[^A-Z0-9]/gi,'').toUpperCase();
+let __eemanDoc=null;
+async function finLoad(){
+  if(!window.__eeman||!isAdmin())return;
+  try{
+    const d=await window.__eeman.get();
+    __eemanDoc={pays:(d&&d.pays)||[],bills:(d&&d.bills)||[],u:(d&&d.u)||0};
+  }catch(e){console.warn('eeman doc read failed',e);}
+  renderFinance();
+}
+async function finSaveDoc(){
+  if(!window.__eeman||!__eemanDoc){toast('Not connected to the cloud yet — try again in a moment');return false;}
+  try{await window.__eeman.set({...__eemanDoc,u:Date.now()});return true;}
+  catch(e){toast('Could not save to the cloud: '+(e.code||e.message||e));return false;}
+}
+function finMatch(bl){
+  const n=finN(bl);if(!n)return null;
+  return entries.find(e=>finN(e.awbBl)===n)||null;
+}
+// what WE invoiced for a shipment — the app's own record first, the QuickBooks sync as fallback
+function finRevenue(e){
+  const bn=(e.billNo||'').trim();if(!bn)return null;
+  if(e.qbTotal!=null)return Number(e.qbTotal);
+  const q=window.__qbbal;
+  const hit=q&&q.inv&&(q.inv[bn]||q.inv[bn.replace(/\s+/g,'')]);
+  return hit?Number(hit.t):null;
+}
+function finBillOpen(){
+  if(!isAdmin()){toast('Finance is admin-only');return;}
+  document.getElementById('fb_no').value='';
+  document.getElementById('fb_date').value=isoLocal(new Date());
+  document.getElementById('fin_rows').innerHTML='';
+  finRowAdd();
+  showModal('overlay-eeman');
+}
+function finRowAdd(bl,amt){
+  const d=document.createElement('div');
+  d.style.cssText='display:flex;gap:8px;margin-bottom:6px;align-items:center';
+  d.innerHTML=`<input placeholder="BL number" value="${esc(bl||'')}" style="flex:2" class="fb_bl" spellcheck="false"
+      oninput="this.nextElementSibling.nextElementSibling.textContent=''">
+    <input placeholder="Amount" value="${amt!=null?amt:''}" inputmode="decimal" style="flex:1;text-align:right" class="fb_amt">
+    <span style="min-width:20px"></span>
+    <button type="button" class="ghost" style="padding:4px 9px" onclick="this.parentElement.remove()">✕</button>`;
+  document.getElementById('fin_rows').appendChild(d);
+  d.querySelector('.fb_bl').focus();
+}
+async function finBillSave(ev){
+  ev.preventDefault();
+  if(!isAdmin())return false;
+  const no=document.getElementById('fb_no').value.trim();
+  const date=document.getElementById('fb_date').value;
+  const rows=[...document.querySelectorAll('#fin_rows > div')].map(d=>({
+    bl:d.querySelector('.fb_bl').value.trim(),
+    amt:Number(String(d.querySelector('.fb_amt').value).replace(/,/g,''))
+  })).filter(r=>r.bl);
+  if(!no||!date||!rows.length){toast('Bill no, date and at least one BL are needed');return false;}
+  if(rows.some(r=>!isFinite(r.amt)||r.amt<0)){toast('Check the amounts — one of them is not a number');return false;}
+  if(!__eemanDoc)await finLoad();
+  if(!__eemanDoc){toast('Cloud not ready — try again in a moment');return false;}
+  if(__eemanDoc.bills.some(b=>b.no.toLowerCase()===no.toLowerCase())
+     &&!confirm('EEMAN bill "'+no+'" is already entered. Enter it again anyway?'))return false;
+  let touched=false;
+  const items=rows.map(r=>{
+    const e=finMatch(r.bl);
+    if(e){
+      // his charge belongs on the shipment — same field the 💸 buttons use everywhere
+      e.outCost={amt:r.amt,inv:no};e.u=Date.now();touched=true;
+      return {bl:r.bl,amt:r.amt,entryId:e.id};
+    }
+    return {bl:r.bl,amt:r.amt,entryId:null};
+  });
+  __eemanDoc.bills.push({id:uid(),no,date,items,u:Date.now()});
+  if(!(await finSaveDoc()))return false;
+  if(touched){saveEntries();renderMP();renderStelcoDesk();}
+  closeModal('overlay-eeman');
+  const unknown=items.filter(i=>!i.entryId).length;
+  toast('EEMAN bill '+no+' saved — '+(items.length-unknown)+' matched'+(unknown?', ⚠ '+unknown+' NOT in our shipments':''));
+  renderFinance();updateCounts();
+  return false;
+}
+/* every line of every EEMAN bill, re-verified live against today's shipments */
+function finLines(){
+  const doc=__eemanDoc||{bills:[]};
+  return (doc.bills||[]).flatMap(b=>(b.items||[]).map(it=>{
+    const e=(it.entryId&&entries.find(x=>x.id===it.entryId))||finMatch(it.bl);
+    const rev=e?finRevenue(e):null;
+    const status=!e?'unknown':((e.billNo||'').trim()?'billed':'unbilled');
+    return {billNo:b.no,billDate:b.date,bl:it.bl,amt:Number(it.amt)||0,e,rev,status,
+      profit:(status==='billed'&&rev!=null)?Math.round((rev-(Number(it.amt)||0))*100)/100:null};
+  }));
+}
+function renderFinance(){
+  if(!document.getElementById('view-finance')||!isAdmin())return;
+  const q=(document.getElementById('fin_search').value||'').trim().toLowerCase();
+  const f=document.getElementById('fin_filter').value;
+  const all=finLines();
+  const lines=all.filter(l=>{
+    if(f&&l.status!==f)return false;
+    if(q&&![l.bl,l.billNo,(l.e&&l.e.customer)||'',(l.e&&l.e.billNo)||''].join(' ').toLowerCase().includes(q))return false;
+    return true;
+  }).sort((a,b)=>String(b.billDate).localeCompare(String(a.billDate)));
+  const CH={unknown:'<span class="status-pill" style="background:#dc2626;color:#fff">❌ Not in tracker</span>',
+    unbilled:'<span class="status-pill" style="background:#f59e0b;color:#fff">⚠ Not billed</span>',
+    billed:'<span class="status-pill" style="background:#16a34a;color:#fff">✔ Billed</span>'};
+  document.getElementById('fin_empty').style.display=all.length?'none':'block';
+  document.getElementById('fin_tbody').innerHTML=lines.map(l=>`<tr>
+    <td data-l="EEMAN Bill">${esc(l.billNo)}</td>
+    <td data-l="Date">${fmtDate(l.billDate)}</td>
+    <td data-l="BL">${esc(l.bl)}</td>
+    <td class="num" data-l="EEMAN">${fmtNum(l.amt)}</td>
+    <td data-l="Shipment">${l.e?esc(l.e.customer||l.e.cno||'')+(isBillOnly(l.e)?' 💳':''):'<span style="color:#dc2626;font-weight:700">no shipment — investigate</span>'}</td>
+    <td data-l="Our Invoice">${l.e&&l.e.billNo?esc(l.e.billNo):'<span class="d-none">—</span>'}</td>
+    <td class="num" data-l="Billed">${l.rev!=null?fmtNum(l.rev):'<span class="d-none">—</span>'}</td>
+    <td class="num" data-l="Profit">${l.profit!=null?`<b style="color:${l.profit>=0?'#16a34a':'#dc2626'}">${fmtNum(l.profit)}</b>`:'<span class="d-none">—</span>'}</td>
+    <td data-l="Status">${CH[l.status]}</td></tr>`).join('');
+  /* profit by month/year — from the SHIPMENTS (every MP with an EEMAN charge, however it was
+     entered), so shipments typed via 💸 before this desk existed count too */
+  const mp=entries.filter(e=>e.type==='MP'&&e.outCost&&e.outCost.amt!=null);
+  const months={};
+  mp.forEach(e=>{
+    const m=String(e.date||'').slice(0,7);if(!/^\d{4}-\d{2}$/.test(m))return;
+    const g=months[m]=months[m]||{n:0,rev:0,cost:0,unb:0};
+    g.n++;g.cost+=Number(e.outCost.amt)||0;
+    const r=finRevenue(e);
+    if((e.billNo||'').trim()&&r!=null)g.rev+=r;else if(!(e.billNo||'').trim())g.unb++;
+  });
+  const keys=Object.keys(months).sort().reverse();
+  const years={};
+  keys.forEach(m=>{const y=m.slice(0,4);const g=months[m];
+    const t=years[y]=years[y]||{n:0,rev:0,cost:0,unb:0};
+    t.n+=g.n;t.rev+=g.rev;t.cost+=g.cost;t.unb+=g.unb;});
+  let html='';let lastYear='';
+  keys.forEach(m=>{
+    const y=m.slice(0,4);
+    if(lastYear&&y!==lastYear){const t=years[lastYear];
+      html+=`<tr style="background:#f8fafc;font-weight:800"><td>${lastYear} TOTAL</td><td class="num">${t.n}</td><td class="num">${fmtNum(t.rev)}</td><td class="num">${fmtNum(t.cost)}</td><td class="num" style="color:${t.rev-t.cost>=0?'#16a34a':'#dc2626'}">${fmtNum(t.rev-t.cost)}</td><td>${t.unb||''}</td></tr>`;}
+    lastYear=y;
+    const g=months[m];
+    html+=`<tr><td>${xpMonthLabel(m+'-01')}</td><td class="num">${g.n}</td><td class="num">${fmtNum(g.rev)}</td><td class="num">${fmtNum(g.cost)}</td><td class="num" style="font-weight:700;color:${g.rev-g.cost>=0?'#16a34a':'#dc2626'}">${fmtNum(g.rev-g.cost)}</td><td>${g.unb?'⚠ '+g.unb+' shipment'+(g.unb>1?'s':''):''}</td></tr>`;
+  });
+  if(lastYear){const t=years[lastYear];
+    html+=`<tr style="background:#f8fafc;font-weight:800"><td>${lastYear} TOTAL</td><td class="num">${t.n}</td><td class="num">${fmtNum(t.rev)}</td><td class="num">${fmtNum(t.cost)}</td><td class="num" style="color:${t.rev-t.cost>=0?'#16a34a':'#dc2626'}">${fmtNum(t.rev-t.cost)}</td><td>${t.unb||''}</td></tr>`;}
+  document.getElementById('fin_profit').innerHTML=html||'<tr><td colspan="6" style="color:var(--muted)">No sea shipments carry an EEMAN charge yet</td></tr>';
+  // stats cards
+  const nowM=isoLocal(new Date()).slice(0,7),nowY=nowM.slice(0,4);
+  const gm=months[nowM]||{rev:0,cost:0};const gy=years[nowY]||{rev:0,cost:0};
+  const unknownN=all.filter(l=>l.status==='unknown').length;
+  const unbilledN=all.filter(l=>l.status==='unbilled').length;
+  const paysT=((__eemanDoc&&__eemanDoc.pays)||[]).reduce((s,p)=>s+(Number(p.amt)||0),0);
+  const costT=mp.reduce((s,e)=>s+(Number(e.outCost.amt)||0),0);
+  document.getElementById('fin_stats').innerHTML=`
+    <div class="card c-info"><div class="n">${fmtNum(gm.rev-gm.cost)}</div><div class="l">Sea profit — this month</div></div>
+    <div class="card c-purple"><div class="n">${fmtNum(gy.rev-gy.cost)}</div><div class="l">Sea profit — ${nowY}</div></div>
+    ${unknownN?`<div class="card c-danger" style="cursor:pointer" onclick="document.getElementById('fin_filter').value='unknown';renderFinance()"><div class="n">${unknownN}</div><div class="l">❌ EEMAN billed, not in tracker</div></div>`:''}
+    ${unbilledN?`<div class="card c-warn" style="cursor:pointer" onclick="document.getElementById('fin_filter').value='unbilled';renderFinance()"><div class="n">${unbilledN}</div><div class="l">⚠ We paid EEMAN, customer not billed</div></div>`:''}
+    <div class="card"><div class="n">${fmtNum(costT-paysT)}</div><div class="l">EEMAN outstanding (Σ charges − Σ paid)</div></div>`;
+}
 
 function renderExpenses(){
   if(!document.getElementById('view-expenses'))return;
@@ -7416,7 +7663,7 @@ fitTables();setTimeout(fitTables,300);
 window.__app={
   get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,payments:()=>payments,team:()=>team,expenses:()=>expensesData,salary:()=>salaryData,dosnaps:()=>dosnaps},
   set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},payments:v=>{payments=v},team:v=>{team=v},expenses:v=>{expensesData=v},salary:v=>{salaryData=v},dosnaps:v=>{dosnaps=v}},
-  rerender(){syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();applyAdminUI();renderExpenses();renderDoQueue();updateCounts();}
+  rerender(){syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();applyAdminUI();renderExpenses();renderFinance();renderDoQueue();updateCounts();}
 };
 </script>
 
