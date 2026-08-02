@@ -98,7 +98,26 @@
   <div id="pane_labour" style="display:none"></div>
 </main>
 
-<div class="addbar" id="addbar"><div class="inner"><button class="primary" onclick="openAdd()">＋ Add Expense</button></div></div>
+<div class="addbar" id="addbar"><div class="inner" style="display:flex;gap:8px">
+  <button class="primary" style="flex:1.2" onclick="openDaily()">⚡ Daily items</button>
+  <button class="primary" style="flex:1;background:#0f172a" onclick="openAdd()">＋ Add Expense</button>
+</div></div>
+
+<div class="overlay" id="ov_daily">
+  <div class="modal">
+    <h2>⚡ Daily items</h2>
+    <form onsubmit="return saveDaily(event)">
+      <div class="field"><label>DATE</label><input id="d_date" type="date" required onchange="dailyRows()"></div>
+      <div id="d_rows" style="margin-bottom:10px"></div>
+      <div class="muted" style="margin-bottom:12px">Untick anything that didn't come today, and change an amount
+        if it was different. Items already on the list for this date can't be added twice.</div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="hide('ov_daily')">Cancel</button>
+        <button type="submit" class="primary">Add ticked</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <div class="overlay" id="ov_add">
   <div class="modal">
@@ -482,6 +501,43 @@ window.saveAdd=ev=>{
   put({id:uid(),kind:'exp',date,item,amount,paid:false,paidAt:null,addedBy:me});
   hide('ov_add');
   toast('Added '+item+' · '+rf(amount));
+  return false;
+};
+/* ⚡ Daily items — the three regulars in one tap, same rules as the admin tracker:
+   tick what came, fix an amount if it differed, and a date that already has an item
+   shows it locked instead of letting it in twice. */
+const DAILY=[{item:'Dhoni mehi',amount:660},{item:'Airport mehi',amount:360},{item:'Dhoni kappi',amount:400}];
+window.openDaily=()=>{
+  document.getElementById('d_date').value=today();
+  dailyRows();
+  show('ov_daily');
+};
+window.dailyRows=()=>{
+  const date=document.getElementById('d_date').value;
+  document.getElementById('d_rows').innerHTML=DAILY.map((p,i)=>{
+    const dup=kind('exp').find(e=>e.date===date&&e.item.toLowerCase()===p.item.toLowerCase());
+    return `<div class="item">
+      <input type="checkbox" id="d_ck${i}" ${dup?'disabled':'checked'} style="width:20px;height:20px">
+      <span class="nm"><b>${esc(p.item)}</b>${dup?`<br><span class="muted" style="font-size:11px">already added${dup.paid?' · PAID':''}${dup.addedBy?' · '+esc(dup.addedBy):''}</span>`:''}</span>
+      <input id="d_amt${i}" type="number" inputmode="numeric" value="${dup?dup.amount:p.amount}" ${dup?'disabled':''}
+        style="width:88px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;text-align:right;font-size:14.5px">
+    </div>`;}).join('');
+};
+window.saveDaily=ev=>{
+  ev.preventDefault();
+  const date=document.getElementById('d_date').value;
+  if(!date)return false;
+  let n=0,total=0;
+  DAILY.forEach((p,i)=>{
+    const ck=document.getElementById('d_ck'+i);
+    if(!ck||ck.disabled||!ck.checked)return;
+    const amount=parseInt(document.getElementById('d_amt'+i).value,10);
+    if(!amount||amount<1)return;
+    put({id:uid(),kind:'exp',date,item:p.item,amount,paid:false,paidAt:null,addedBy:me});
+    n++;total+=amount;
+  });
+  hide('ov_daily');
+  toast(n?('Added '+n+' item'+(n>1?'s':'')+' · '+rf(total)+' — '+fmtD(date)):'Nothing new to add');
   return false;
 };
 window.delExp=id=>{
