@@ -963,6 +963,31 @@
   </div>
 </div>
 
+<!-- expenses: salary payment (date paid + how paid) -->
+<div class="overlay" id="overlay-xpsalpay">
+  <div class="modal" style="max-width:460px">
+    <h2 id="xpsp_title">💵 Record Salary Payment</h2>
+    <form onsubmit="return saveXpSalPay(event)">
+      <input type="hidden" id="xpsp_staff"><input type="hidden" id="xpsp_type">
+      <div id="xpsp_head" style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px"></div>
+      <div class="grid2">
+        <div class="field"><label>AMOUNT PAID (Rf)</label><input id="xpsp_amount" type="number" min="1" step="1" required></div>
+        <div class="field"><label>DATE PAID</label><input id="xpsp_date" type="date" required></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>HOW PAID</label><select id="xpsp_method">
+          <option>Cash</option><option>Bank Transfer</option><option>CHQ</option><option>Advance</option>
+        </select></div>
+        <div class="field"><label>REFERENCE / NOTE</label><input id="xpsp_ref" placeholder="BML ref, cheque no…" autocomplete="off"></div>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="closeModal('overlay-xpsalpay')">Cancel</button>
+        <button type="submit" class="primary">Save Payment</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- expenses: receipt -->
 <div class="overlay" id="overlay-xprec">
   <div class="modal" style="max-width:420px">
@@ -4210,17 +4235,19 @@ function xpVanPayAll(vendorId){
   document.getElementById('xpr_text').value=
     `✅ PAID ${rf(total)} on ${xpD(isoLocal(new Date()))}\nAcct ${vd.account}${vd.name?' ('+vd.name+')':''}\n\n`+
     lines.join('\n')+`\n\nTotal: ${rf(total)}\nLion Logistics`;
-  window.__lastVanPay=up.map(v=>v.id);
+  window.__lastVanPay=up.map(v=>v.id);window.__lastSalPay='';
   const sb=document.getElementById('xpr_slipBtn');
   sb.style.display='';sb.textContent='📎 Attach transfer slip';
   showModal('overlay-xprec');
 }
-// attach the bank transfer slip to the payment just made (stored on each paid line)
+// attach the bank transfer slip to the payment just made (stored on each paid line —
+// van charges, or the single salary payment record just entered)
 function xpAttachSlip(){
   if(!xpGuard())return;
   if(!window.__att){toast('Cloud storage not ready — check connection');return;}
+  const salId=window.__lastSalPay||'';
   const ids=window.__lastVanPay||[];
-  if(!ids.length)return;
+  if(!salId&&!ids.length)return;
   const inp=document.createElement('input');
   inp.type='file';inp.accept='image/*,.pdf';
   inp.onchange=async()=>{
@@ -4228,11 +4255,18 @@ function xpAttachSlip(){
     if(file.size>25*1024*1024){toast('File too big (max 25 MB)');return;}
     toast('Uploading slip…');
     try{
-      const path='expenses/vanpay/'+Date.now()+'_'+file.name.replace(/[^\w.\-]+/g,'_');
+      const path='expenses/'+(salId?'salpay/':'vanpay/')+Date.now()+'_'+file.name.replace(/[^\w.\-]+/g,'_');
       const url=await window.__att.upload(path,file);
       const meta={name:file.name,path,url,size:file.size};
-      xpKind('van').filter(v=>ids.includes(v.id)).forEach(v=>{v.slip=meta;});
-      saveExpensesData();renderExpenses();
+      if(salId){
+        const p=salKind('salpay').find(x=>x.id===salId);
+        if(p)p.slip=meta;
+        saveSalaryData();
+      }else{
+        xpKind('van').filter(v=>ids.includes(v.id)).forEach(v=>{v.slip=meta;});
+        saveExpensesData();
+      }
+      renderExpenses();
       const sb=document.getElementById('xpr_slipBtn');
       if(sb)sb.textContent='🧾 Slip attached ✓';
       toast('🧾 Transfer slip attached');
@@ -4340,7 +4374,14 @@ function xpSalMonths(){
   return out;
 }
 const xpSalPeriod=t=>t.yearly?xpState.salMonth.slice(0,4):xpState.salMonth;
-const xpFindPay=(staffId,t)=>salKind('salpay').find(p=>p.staffId===staffId&&p.type===t.key&&p.period===xpSalPeriod(t));
+/* A salary payment is a record, not a tick: {staffId,type,period,amount,date (paid on),
+   method (how), ref, slip?, paidAt (entered at)}. More than one payment may sit against the
+   same staff+type+period — an advance now and the balance later — so everything sums.
+   Legacy ticks carry only paidAt: read the date off it and show the method as "—". */
+const xpPaysFor=(staffId,t)=>salKind('salpay').filter(p=>p.staffId===staffId&&p.type===t.key&&p.period===xpSalPeriod(t));
+const xpPaidSum=(staffId,t)=>xpPaysFor(staffId,t).reduce((s,p)=>s+(Number(p.amount)||0),0);
+const salPayDate=p=>p.date||(p.paidAt||'').slice(0,10);
+const salPayMethod=p=>p.method||'—';
 function renderXpSalary(){
   const months=xpSalMonths();
   if(!months.includes(xpState.salMonth))xpState.salMonth=months[0];
@@ -4362,11 +4403,16 @@ function renderXpSalary(){
     if(!full)return '<td class="num">—</td>';
     const amt=t.prorate?salProrate(full,s,m):full;
     const w=salWorked(s,m);
-    const p=xpFindPay(s.id,t);
+    const ps=xpPaysFor(s.id,t).slice().sort((a,b)=>salPayDate(a)<salPayDate(b)?-1:1);
+    const got=ps.reduce((x,p)=>x+(Number(p.amount)||0),0),bal=amt-got;
+    const last=ps[ps.length-1];
     return `<td class="num" style="white-space:nowrap">${rf(amt)}${t.yearly?'<span style="color:var(--muted);font-size:10.5px">/yr</span>':''}
-      ${t.prorate&&amt!==full?`<br><span style="color:var(--warn,#d97706);font-size:10.5px">pro-rata ${w.worked}/${w.dm} days of ${rf(full)}</span>`:''}<br>
-      ${p?`<button class="ghost" style="padding:2px 8px;font-size:11px;color:#16a34a;border-color:#16a34a" onclick="xpSalUnpay('${p.id}')" title="Paid ${xpD(p.paidAt.slice(0,10))} — click to undo">✓ PAID</button>`
-         :`<button class="ghost" style="padding:2px 8px;font-size:11px" onclick="xpSalPay('${s.id}','${t.key}')">Mark paid</button>`}</td>`;
+      ${t.prorate&&amt!==full?`<br><span style="color:var(--warn,#d97706);font-size:10.5px">pro-rata ${w.worked}/${w.dm} days of ${rf(full)}</span>`:''}
+      ${ps.length?`<br><span style="font-size:10.5px;color:${bal>0?'#d97706':'#16a34a'}">${bal>0
+          ?`${rf(got)} paid · ${rf(bal)} left`
+          :`${xpD(salPayDate(last))} · ${esc(salPayMethod(last))}${ps.length>1?` (${ps.length} payments)`:''}`}</span>`:''}<br>
+      ${bal>0?`<button class="ghost" style="padding:2px 8px;font-size:11px" onclick="xpSalPay('${s.id}','${t.key}')">${ps.length?'Pay balance':'Mark paid'}</button>`
+             :`<button class="ghost" style="padding:2px 8px;font-size:11px;color:#16a34a;border-color:#16a34a" onclick="xpSalUnpay('${last.id}')" title="Paid ${xpD(salPayDate(last))} · ${esc(salPayMethod(last))}${last.ref?' · '+esc(last.ref):''} — click to undo">✓ PAID</button>`}</td>`;
   };
   const sub=s=>{
     const w=salWorked(s,m);
@@ -4395,7 +4441,40 @@ function renderXpSalary(){
         </td>
       </tr>`).join('')||`<tr><td colspan="8" style="color:var(--muted)">${all.length?'Nobody was on the payroll in '+xpMonthLabel(m):'No staff added yet'}</td></tr>`}</tbody>
     </table></div></div>
-    ${all.length!==staff.length?`<div style="color:var(--muted);font-size:12px;margin-top:8px">${all.length-staff.length} staff hidden — not employed in ${xpMonthLabel(m)}.</div>`:''}`;
+    ${all.length!==staff.length?`<div style="color:var(--muted);font-size:12px;margin-top:8px">${all.length-staff.length} staff hidden — not employed in ${xpMonthLabel(m)}.</div>`:''}
+    ${xpSalRecordHtml(m,all)}`;
+}
+/* the payment record: every salary payment made for this month (and this year's insurance),
+   with the date it was paid, how it was paid and the reference — the proof line for the books */
+function xpSalRecordHtml(m,all){
+  const yr=m.slice(0,4);
+  const recs=salKind('salpay').filter(p=>p.period===m||p.period===yr)
+    .slice().sort((a,b)=>(salPayDate(a)+(a.paidAt||''))<(salPayDate(b)+(b.paidAt||''))?1:-1);
+  const nameOf=id=>{const s=all.find(x=>x.id===id);return s?s.name:'(removed staff)';};
+  const labelOf=k=>{const t=XP_SALTYPES.find(x=>x.key===k);return t?t.label:k;};
+  const total=recs.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  return `<h3 style="margin:18px 0 8px;font-size:14px">🧾 Payment record — ${xpMonthLabel(m)}${recs.length?` <span style="color:var(--muted);font-weight:400;font-size:12px">${recs.length} payment(s) · ${rf(total)}</span>`:''}
+      ${recs.length?`<button class="ghost" style="padding:2px 8px;font-size:11px;margin-left:6px" onclick="xpSalExcel()">⬇ Excel</button>`:''}</h3>
+    <div class="tablewrap"><div class="scroll"><table style="min-width:820px">
+      <thead><tr><th>DATE PAID</th><th>STAFF</th><th>FOR</th><th class="num">AMOUNT</th><th>HOW PAID</th><th>REFERENCE</th><th class="actcol"></th></tr></thead>
+      <tbody>${recs.map(p=>`<tr>
+        <td>${xpD(salPayDate(p))||'—'}</td>
+        <td>${esc(nameOf(p.staffId))}</td>
+        <td>${esc(labelOf(p.type))}${p.period===yr?' '+yr:''}</td>
+        <td class="num"><b>${rf(p.amount)}</b></td>
+        <td>${esc(salPayMethod(p))}</td>
+        <td>${esc(p.ref||'')}${p.slip?` <a href="${esc(p.slip.url)}" target="_blank" rel="noopener" title="${esc(p.slip.name)}">🧾</a>`:''}</td>
+        <td class="actcol"><button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpSalUnpay('${p.id}')">🗑</button></td>
+      </tr>`).join('')||`<tr><td colspan="7" style="color:var(--muted)">No salary paid yet for ${xpMonthLabel(m)}</td></tr>`}</tbody>
+    </table></div></div>`;
+}
+function xpSalExcel(){
+  const staff=salKind('staff');
+  const nameOf=id=>{const s=staff.find(x=>x.id===id);return s?s.name:'(removed staff)';};
+  const labelOf=k=>{const t=XP_SALTYPES.find(x=>x.key===k);return t?t.label:k;};
+  const rows=salKind('salpay').slice().sort((a,b)=>salPayDate(a)<salPayDate(b)?-1:1)
+    .map(p=>[salPayDate(p)?xpD(salPayDate(p)):'',p.period,nameOf(p.staffId),labelOf(p.type),p.amount,salPayMethod(p),p.ref||'',p.slip?'yes':'']);
+  xlsExport('lion-salary-payments',['DATE PAID','PERIOD','STAFF','FOR','AMOUNT (Rf)','HOW PAID','REFERENCE','SLIP'],rows);
 }
 function openXpStaff(id){
   if(!xpGuard())return;
@@ -4447,29 +4526,64 @@ function xpDelStaff(id){
   salaryData=salaryData.filter(x=>x.id!==id&&!(x.kind==='salpay'&&x.staffId===id));
   saveSalaryData();renderExpenses();
 }
+// open the payment entry — the amount due is pre-filled but stays editable, so an advance now
+// and the balance later are two records against the same month
 function xpSalPay(staffId,typeKey){
   if(!xpGuard())return;
   const s=salKind('staff').find(x=>x.id===staffId);
   const t=XP_SALTYPES.find(x=>x.key===typeKey);
   if(!s||!t)return;
-  if(!salActive(s,xpState.salMonth)){toast(`${s.name} was not on the payroll in ${xpMonthLabel(xpState.salMonth)}`);return;}
+  const m=xpState.salMonth;
+  if(!salActive(s,m)){toast(`${s.name} was not on the payroll in ${xpMonthLabel(m)}`);return;}
   const full=s[t.field]||0;
-  const amount=t.prorate?salProrate(full,s,xpState.salMonth):full;
-  if(!amount||xpFindPay(staffId,t))return;
-  const w=salWorked(s,xpState.salMonth);
-  const note=(t.prorate&&amount!==full)?`\nPro-rata ${w.worked}/${w.dm} days of ${rf(full)}`:'';
-  if(!confirm(`Mark ${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)} for ${s.name} (${rf(amount)}) as PAID?${note}`))return;
-  salaryData.push({id:uid(),kind:'salpay',staffId,type:t.key,period:xpSalPeriod(t),amount,paidAt:new Date().toISOString()});
-  saveSalaryData();renderExpenses();
+  const due=t.prorate?salProrate(full,s,m):full;
+  if(!due)return;
+  const bal=due-xpPaidSum(staffId,t);
+  if(bal<=0){toast(`${t.label} ${xpSalPeriod(t)} is already fully paid`);return;}
+  const w=salWorked(s,m);
+  document.getElementById('xpsp_staff').value=staffId;
+  document.getElementById('xpsp_type').value=t.key;
+  document.getElementById('xpsp_title').textContent='💵 '+t.label+' — '+s.name;
+  document.getElementById('xpsp_head').innerHTML=
+    `<b>${esc(s.name)}</b> · ${esc(t.label)} <b>${t.yearly?xpSalPeriod(t):xpMonthLabel(m)}</b><br>
+     Due ${rf(due)}${t.prorate&&due!==full?` <span style="color:var(--warn,#d97706)">(pro-rata ${w.worked}/${w.dm} days of ${rf(full)})</span>`:''}
+     ${bal!==due?`<br>Already paid ${rf(due-bal)} — balance <b>${rf(bal)}</b>`:''}`;
+  document.getElementById('xpsp_amount').value=bal;
+  document.getElementById('xpsp_date').value=isoLocal(new Date());
+  document.getElementById('xpsp_method').value='Cash';
+  document.getElementById('xpsp_ref').value='';
+  showModal('overlay-xpsalpay');
+}
+function saveXpSalPay(ev){
+  ev.preventDefault();
+  if(!xpGuard())return false;
+  const s=salKind('staff').find(x=>x.id===document.getElementById('xpsp_staff').value);
+  const t=XP_SALTYPES.find(x=>x.key===document.getElementById('xpsp_type').value);
+  if(!s||!t)return false;
+  const amount=Math.max(0,Math.round(Number(document.getElementById('xpsp_amount').value)||0));
+  const date=document.getElementById('xpsp_date').value;
+  const method=document.getElementById('xpsp_method').value;
+  const ref=document.getElementById('xpsp_ref').value.trim();
+  if(!amount||!date)return false;
+  if(date>isoLocal(new Date())&&!confirm('That payment date is in the future — save anyway?'))return false;
+  const period=xpSalPeriod(t);
+  const rec={id:uid(),kind:'salpay',staffId:s.id,type:t.key,period,amount,date,method,ref,paidAt:new Date().toISOString()};
+  salaryData.push(rec);
+  saveSalaryData();closeModal('overlay-xpsalpay');renderExpenses();
+  toast(`${s.name} — ${t.label} ${rf(amount)} paid ${xpD(date)} (${method})`);
+  window.__lastSalPay=rec.id;window.__lastVanPay=[];
   document.getElementById('xpr_text').value=
-    `✅ PAID — ${s.name}\n${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)}: ${rf(amount)}${note}\nPaid ${xpD(isoLocal(new Date()))}\nLion Logistics`;
-  document.getElementById('xpr_slipBtn').style.display='none';
+    `✅ PAID — ${s.name}\n${t.label} ${t.yearly?period:xpMonthLabel(period)}: ${rf(amount)}\nPaid ${xpD(date)} · ${method}${ref?' · '+ref:''}\nLion Logistics`;
+  const sb=document.getElementById('xpr_slipBtn');
+  sb.style.display='';sb.textContent='📎 Attach transfer slip';
   showModal('overlay-xprec');
+  return false;
 }
 function xpSalUnpay(payId){
   if(!xpGuard())return;
   const p=salKind('salpay').find(x=>x.id===payId);if(!p)return;
-  if(!confirm('Undo this salary payment?'))return;
+  const s=salKind('staff').find(x=>x.id===p.staffId);
+  if(!confirm(`Delete this salary payment?\n${s?s.name:''} · ${rf(p.amount)}${salPayDate(p)?' paid '+xpD(salPayDate(p)):''}${p.method?' · '+p.method:''}`))return;
   salaryData=salaryData.filter(x=>x.id!==payId);
   saveSalaryData();renderExpenses();
 }
