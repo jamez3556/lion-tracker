@@ -6552,7 +6552,13 @@ function qbAutoBill(){
     if(!hit||!hit.no||hit.dup)return;                // no match, or the same AWB on two invoices
     const c=lookupCustomer(e.cno);
     const mine=[e.customer,c&&c.qbName,c&&c.name].filter(Boolean).map(nk);
-    if(!mine.includes(nk(hit.c))){odd.push({no:hit.no,awb:e.awbBl,ours:e.customer,theirs:hit.c});return;}
+    /* QuickBooks often holds a longer version of the same name — "RUMMAN FRUIT & VEG" here against
+       "RUMMAN FRUIT & VEG H.MOONIMAA HIYA…" there, or INVESTMENT vs INVESTMENTS. One name starting
+       with the other is the same customer; anything else is a real mismatch and stays flagged. */
+    const theirs=nk(hit.c);
+    const same=mine.some(m=>m&&theirs&&(m===theirs
+      ||(m.length>=6&&theirs.startsWith(m))||(theirs.length>=6&&m.startsWith(theirs))));
+    if(!same){odd.push({no:hit.no,awb:e.awbBl,ours:e.customer,theirs:hit.c});return;}
     const before={...e};
     e.billNo=hit.no;e.status='Delivered';            // the invoice rule, exactly as typing it by hand
     e.qbTotal=hit.t;e.qbBalance=hit.b;e.u=Date.now();
