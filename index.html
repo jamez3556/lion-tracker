@@ -1664,6 +1664,7 @@ function renderEntries(){
     <div class="card c-warn"><div class="n">${pending.toLocaleString()}</div><div class="l">Pending</div></div>
     <div class="card c-danger" style="cursor:pointer" onclick="showInvoicePending()" title="Entries with no BILL NO — click to list them"><div class="n">${invPending.toLocaleString()}</div><div class="l">🧾 Invoice Pending</div></div>
     ${stuckN?`<div class="card c-danger" style="cursor:pointer;outline:2px solid #dc2626" onclick="showInvoiceStuck()" title="Sent to QuickBooks but no invoice number came back — the Zap failed. Click to list them."><div class="n">${stuckN}</div><div class="l">⚠ No Invoice No Back</div></div>`:''}
+    ${(window.__qbOdd&&window.__qbOdd.length)?`<div class="card c-warn" style="cursor:pointer" onclick="qbOddShow()" title="A QuickBooks invoice carries one of our AWBs but under a different customer — click to see"><div class="n">${window.__qbOdd.length}</div><div class="l">⚠ Invoice / Customer Mismatch</div></div>`:''}
     <div class="card c-danger" style="cursor:pointer" onclick="goToContFilter('soon')" title="Containers due within 3 days — click to view"><div class="n">${dueSoon}</div><div class="l">Due ≤ 3 Days</div></div>
     <div class="card c-info" style="cursor:pointer" onclick="goToContFilter('notedtoday')" title="Containers noted for today — click to view"><div class="n">${notedToday}</div><div class="l">Noted for Today</div></div>
     <div class="card c-purple" style="cursor:pointer" onclick="goToContFilter('notedtomorrow')" title="Containers noted for tomorrow — click to view"><div class="n">${notedTomorrow}</div><div class="l">Noted for Tomorrow</div></div>
@@ -6528,6 +6529,52 @@ function qbSeenAdd(nos){
   nos.forEach(n=>{if(n&&!s.has(n)){s.add(n);grew=true;}});
   if(grew)try{localStorage.setItem('lion_qbseen_v1',JSON.stringify([...s]));}catch(e){}
 }
+/* ── invoices raised OUTSIDE the app ──────────────────────────────────────────
+   Staff type invoices straight into QuickBooks. Those never came through the 🧾 builder, so the
+   shipment kept an empty BILL NO — and pressing 🧾 on it would have raised a SECOND invoice for
+   work already billed. Each QuickBooks invoice carries the shipment's AWB/BL and R number in its
+   own fields, so the sync sends that back and the shipment is filled in here.
+
+   Deliberately strict, because this writes an invoice number onto a job:
+   - only shipments with NO bill number are ever touched
+   - the AWB must match exactly (normalised) AND the customer must agree
+   - one AWB on two different invoices is left alone entirely — that is a question for a human
+   - anything that matches on AWB but not on customer is reported, never guessed at. */
+function qbAutoBill(){
+  const mm=window.__qbmatch;
+  if(!mm||!mm.m||!isAdmin())return {filled:0,odd:0};
+  const nk=s=>String(s||'').replace(/[^A-Z0-9]/gi,'').toUpperCase();
+  const filled=[],odd=[];
+  entries.forEach(e=>{
+    if((e.billNo||'').trim())return;                 // already invoiced — never overwrite
+    const ka=nk(e.awbBl), kr=nk(e.rNo);
+    const hit=(ka&&mm.m[ka])||(kr&&mm.r&&mm.r[kr])||null;
+    if(!hit||!hit.no||hit.dup)return;                // no match, or the same AWB on two invoices
+    const c=lookupCustomer(e.cno);
+    const mine=[e.customer,c&&c.qbName,c&&c.name].filter(Boolean).map(nk);
+    if(!mine.includes(nk(hit.c))){odd.push({no:hit.no,awb:e.awbBl,ours:e.customer,theirs:hit.c});return;}
+    const before={...e};
+    e.billNo=hit.no;e.status='Delivered';            // the invoice rule, exactly as typing it by hand
+    e.qbTotal=hit.t;e.qbBalance=hit.b;e.u=Date.now();
+    try{if(syncPaymentFromEntry(e))savePayments();syncContFromEntry(e,before,null);}catch(err){console.warn('automatch bookkeeping',err);}
+    filled.push(hit.no);
+  });
+  window.__qbOdd=odd;
+  if(filled.length){
+    saveEntries();
+    try{buildEntryFilters();renderEntries();renderMP();renderPayments();renderStelcoDesk();updateCounts();}catch(e){}
+    toast('🔗 '+filled.length+' invoice'+(filled.length>1?'s':'')+' matched from QuickBooks — '+filled.slice(0,3).join(', ')+(filled.length>3?'…':''));
+  }
+  if(odd.length)console.warn('AWB matched but customer differs — not filled:',odd);
+  return {filled:filled.length,odd:odd.length};
+}
+function qbOddShow(){
+  const o=window.__qbOdd||[];
+  if(!o.length)return;
+  alert('These QuickBooks invoices carry an AWB we have, but under a DIFFERENT customer name.\n'
+    +'Nothing was changed — check whether the invoice or the shipment is wrong:\n\n'
+    +o.map(x=>'• '+x.no+'  AWB '+x.awb+'\n   ours: '+(x.ours||'—')+'\n   QuickBooks: '+(x.theirs||'—')).join('\n\n'));
+}
 function entryDue(e){
   const bn=(e.billNo||'').trim();
   if(!bn)return null;                              // not invoiced ⇒ nothing is owed yet
@@ -8159,6 +8206,13 @@ async function startSync(){
         }
         // remember every number seen open — leaving this list later is proof of payment
         try{if(window.__qbbal&&window.__qbbal.inv)qbSeenAdd(Object.keys(window.__qbbal.inv));}catch(e){}
+        /* …and the AWB→invoice map written by the same sync run, so an invoice typed straight into
+           QuickBooks finds its way back onto its shipment. One small document, once per sync. */
+        try{
+          const ms=await fx.getDoc(fx.doc(db,'settings','qbmatch'));
+          window.__qbmatch=ms.exists()?ms.data():null;
+          qbAutoBill();
+        }catch(e){console.warn('invoice match map unavailable',(e&&e.code)||e);}
         // entries/MP/STELCO redraw too — their status pills turn Paid from these balances
         try{renderCusts();renderPayments();renderEntries();renderMP();renderStelcoDesk();if(bTab==='air')renderAirProfit();}catch(e){}
       },e=>console.warn('QuickBooks balances unavailable',(e&&e.code)||e));
