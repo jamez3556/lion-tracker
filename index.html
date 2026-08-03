@@ -950,7 +950,11 @@
         <div class="field"><label>WORK VISA FEE (Rf / month)</label><input id="xps_visa" type="number" min="0" value="0"></div>
         <div class="field"><label>INSURANCE (Rf / YEAR)</label><input id="xps_insurance" type="number" min="0" value="0"></div>
       </div>
-      <div class="field"><label>JOINED (month)</label><input id="xps_start" type="month"></div>
+      <div class="grid2">
+        <div class="field"><label>JOINED (date)</label><input id="xps_start" type="date"></div>
+        <div class="field"><label>LEFT (date — empty = still working)</label><input id="xps_end" type="date"></div>
+      </div>
+      <div style="color:var(--muted);font-size:11.5px;margin:-4px 0 10px">Salary starts from the joined date — earlier months are not shown. A mid-month join is paid pro-rata (days worked ÷ days in month) for that first month only.</div>
       <div class="actions">
         <button type="button" class="ghost" onclick="closeModal('overlay-xpstaff')">Cancel</button>
         <button type="submit" class="primary">Save Staff</button>
@@ -1357,10 +1361,7 @@ service cloud.firestore {
 <div class="toast" id="toast"></div>
 
 <script id="seed">
-const SEED_DATA=[];
-const SEED_CUSTOMERS=[];
-const SEED_CREDS=[];
-const SEED_CONTAINERS=[];
+const SEED_DATA=[];const SEED_CUSTOMERS=[];const SEED_CREDS=[];const SEED_CONTAINERS=[];
 </script>
 <script>
 /* ============ shared helpers ============ */
@@ -3193,10 +3194,10 @@ function exportPayments(){
 //   exp    {date,item,amount,paid,paidAt}        — daily expense line
 //   fill   {date,liters,cost}                    — dhoni oil fill
 //   trip   {date,count,routes:{route:n}}         — dhoni trips per day
-//   staff  {no,name,salary,house,visa,insurance,startMonth}
+//   staff  {no,name,salary,house,visa,insurance,startDate,startMonth,endDate}
 //   salpay {staffId,type,period,amount,paidAt}   — period = YYYY-MM (or YYYY for insurance)
 const XP_PRESETS=[{label:'Airport mehi',amount:360},{label:'Dhoni mehi',amount:660},{label:'Dhoni kappi',amount:400},{label:'Dhoni oil',amount:''},{label:'Labour',amount:''},{label:'Other',amount:''}];
-const XP_SALTYPES=[{key:'salary',label:'Salary',field:'salary',yearly:false},{key:'house',label:'House + food',field:'house',yearly:false},{key:'visa',label:'Work visa fee',field:'visa',yearly:false},{key:'insurance',label:'Insurance',field:'insurance',yearly:true}];
+const XP_SALTYPES=[{key:'salary',label:'Salary',field:'salary',yearly:false,prorate:true},{key:'house',label:'House + food',field:'house',yearly:false,prorate:true},{key:'visa',label:'Work visa fee',field:'visa',yearly:false},{key:'insurance',label:'Insurance',field:'insurance',yearly:true}];
 const XP_MAIN_ROUTE='Airport–Malé';
 const xpState={sub:'exp',month:'',item:'',sel:[],vsel:[],salMonth:isoLocal(new Date()).slice(0,7)};
 const xpKind=k=>expensesData.filter(r=>r.kind===k);
@@ -4304,51 +4305,97 @@ function xpImportVans(){
   toast('Imported — vans '+rf(total)+' + labour '+rf(lab));
 }
 
-/* ---- salary ---- */
+/* ---- salary ----
+   Employment period drives everything: a staff's salary exists only from their JOINED date
+   (s.startDate, YYYY-MM-DD; legacy records carry only s.startMonth) up to their LEFT date
+   (s.endDate, optional). Months before the first join are never offered in the picker and a
+   staff never appears in a month they were not employed in.
+   Mid-month join/leave = pro-rata on salary + house/food (days worked ÷ days in the month),
+   the way a partial month is actually paid. The work-visa fee is a flat monthly government
+   charge and insurance is yearly — neither is pro-rated. */
+const salJoin=s=>s.startDate||(s.startMonth?s.startMonth+'-01':'');
+const salJoinM=s=>salJoin(s).slice(0,7);
+const salEndM=s=>(s.endDate||'').slice(0,7);
+const salActive=(s,m)=>{const j=salJoinM(s);return !!j&&j<=m&&(!salEndM(s)||m<=salEndM(s));};
+const salDaysIn=m=>new Date(+m.slice(0,4),+m.slice(5,7),0).getDate();
+function salWorked(s,m){            // days actually employed inside month m
+  const dm=salDaysIn(m);let a=1,b=dm;
+  if(salJoin(s).slice(0,7)===m)a=+salJoin(s).slice(8,10)||1;
+  if(salEndM(s)===m)b=+s.endDate.slice(8,10)||dm;
+  return {worked:Math.max(0,b-a+1),dm};
+}
+const salProrate=(amt,s,m)=>{const w=salWorked(s,m);return w.worked>=w.dm?amt:Math.round(amt*w.worked/w.dm);};
+const salMonthDue=(s,m)=>salProrate((s.salary||0)+(s.house||0),s,m)+(s.visa||0);
+const xpPrevMonth=m=>{const d=new Date(+m.slice(0,4),+m.slice(5,7)-1,1);d.setMonth(d.getMonth()-1);return isoLocal(d).slice(0,7);};
+// months offered in the picker: earliest join month → latest of (this month, latest join month)
+function xpSalMonths(){
+  const now=isoLocal(new Date()).slice(0,7);
+  const joins=salKind('staff').map(salJoinM).filter(Boolean).sort();
+  let first=joins[0]||now,last=now;
+  if(joins.length&&joins[joins.length-1]>last)last=joins[joins.length-1];
+  salKind('salpay').forEach(p=>{if(p.period&&p.period.length===7&&p.period<first)first=p.period;});
+  if(first>last)first=last;
+  const out=[];let m=last;
+  while(m>=first&&out.length<240){out.push(m);m=xpPrevMonth(m);}
+  return out;
+}
 const xpSalPeriod=t=>t.yearly?xpState.salMonth.slice(0,4):xpState.salMonth;
 const xpFindPay=(staffId,t)=>salKind('salpay').find(p=>p.staffId===staffId&&p.type===t.key&&p.period===xpSalPeriod(t));
 function renderXpSalary(){
-  const staff=salKind('staff').slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const months=xpSalMonths();
+  if(!months.includes(xpState.salMonth))xpState.salMonth=months[0];
+  const m=xpState.salMonth;
+  const all=salKind('staff').slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const staff=all.filter(s=>salActive(s,m));      // only staff employed in this month
   const pays=salKind('salpay');
   let due=0,paid=0;
-  staff.forEach(s=>{if((s.startMonth||'')<=xpState.salMonth)due+=(s.salary||0)+(s.house||0)+(s.visa||0);});
-  pays.forEach(p=>{if(p.period===xpState.salMonth&&p.type!=='insurance')paid+=p.amount;});
+  staff.forEach(s=>{due+=salMonthDue(s,m);});
+  pays.forEach(p=>{if(p.period===m&&p.type!=='insurance'&&staff.some(s=>s.id===p.staffId))paid+=p.amount;});
   document.getElementById('xp_stats').innerHTML=`
-    <div class="card c-warn"><div class="n">${rf(due-paid)}</div><div class="l">Still to pay — ${xpMonthLabel(xpState.salMonth)}</div></div>
-    <div class="card c-info"><div class="n">${rf(paid)}</div><div class="l">Paid this month</div></div>
-    <div class="card c-purple"><div class="n">${rf(due)}</div><div class="l">Monthly total due</div></div>
-    <div class="card c-purple"><div class="n">${staff.length}</div><div class="l">Staff</div></div>`;
-  const months=[];
-  {const d=new Date();for(let i=0;i<12;i++){months.push(isoLocal(d).slice(0,7));d.setMonth(d.getMonth()-1);}}
-  const cost=s=>(s.salary||0)+(s.house||0)+(s.visa||0)+Math.round((s.insurance||0)/12);
+    <div class="card c-warn"><div class="n">${rf(due-paid)}</div><div class="l">Still to pay — ${xpMonthLabel(m)}</div></div>
+    <div class="card c-info"><div class="n">${rf(paid)}</div><div class="l">Paid — ${xpMonthLabel(m)}</div></div>
+    <div class="card c-purple"><div class="n">${rf(due)}</div><div class="l">Total due — ${xpMonthLabel(m)}</div></div>
+    <div class="card c-purple"><div class="n">${staff.length}</div><div class="l">Staff on payroll${all.length!==staff.length?` (of ${all.length})`:''}</div></div>`;
+  const cost=s=>salProrate((s.salary||0)+(s.house||0),s,m)+(s.visa||0)+Math.round((s.insurance||0)/12);
   const cell=(s,t)=>{
-    const amt=s[t.field]||0;
-    if(!amt)return '<td class="num">—</td>';
+    const full=s[t.field]||0;
+    if(!full)return '<td class="num">—</td>';
+    const amt=t.prorate?salProrate(full,s,m):full;
+    const w=salWorked(s,m);
     const p=xpFindPay(s.id,t);
-    return `<td class="num" style="white-space:nowrap">${rf(amt)}${t.yearly?'<span style="color:var(--muted);font-size:10.5px">/yr</span>':''}<br>
+    return `<td class="num" style="white-space:nowrap">${rf(amt)}${t.yearly?'<span style="color:var(--muted);font-size:10.5px">/yr</span>':''}
+      ${t.prorate&&amt!==full?`<br><span style="color:var(--warn,#d97706);font-size:10.5px">pro-rata ${w.worked}/${w.dm} days of ${rf(full)}</span>`:''}<br>
       ${p?`<button class="ghost" style="padding:2px 8px;font-size:11px;color:#16a34a;border-color:#16a34a" onclick="xpSalUnpay('${p.id}')" title="Paid ${xpD(p.paidAt.slice(0,10))} — click to undo">✓ PAID</button>`
          :`<button class="ghost" style="padding:2px 8px;font-size:11px" onclick="xpSalPay('${s.id}','${t.key}')">Mark paid</button>`}</td>`;
+  };
+  const sub=s=>{
+    const w=salWorked(s,m);
+    const bits=[`joined ${xpD(salJoin(s))||'—'}`];
+    if(s.endDate)bits.push(`left ${xpD(s.endDate)}`);
+    if(w.worked<w.dm)bits.push(`${w.worked}/${w.dm} days this month`);
+    return bits.join(' · ');
   };
   document.getElementById('xp_panel_salary').innerHTML=`
     <div class="toolbar" style="margin-top:0">
       <select class="filter" onchange="xpState.salMonth=this.value;renderExpenses()">
-        ${months.map(m=>`<option value="${m}" ${m===xpState.salMonth?'selected':''}>${xpMonthLabel(m)}</option>`).join('')}
+        ${months.map(x=>`<option value="${x}" ${x===m?'selected':''}>${xpMonthLabel(x)}</option>`).join('')}
       </select>
       <button class="primary" onclick="openXpStaff()">＋ Add Staff</button>
     </div>
     <div class="tablewrap"><div class="scroll"><table style="min-width:860px">
-      <thead><tr><th>ID</th><th>NAME</th><th class="num">SALARY</th><th class="num">HOUSE+FOOD</th><th class="num">VISA</th><th class="num">INSURANCE</th><th class="num">TRUE COST/MO</th><th class="actcol"></th></tr></thead>
+      <thead><tr><th>ID</th><th>NAME</th><th class="num">SALARY</th><th class="num">HOUSE+FOOD</th><th class="num">VISA</th><th class="num">INSURANCE</th><th class="num">COST — ${xpMonthLabel(m).toUpperCase()}</th><th class="actcol"></th></tr></thead>
       <tbody>${staff.map(s=>`<tr>
         <td>${String(s.no||0).padStart(2,'0')}</td>
-        <td><b>${esc(s.name)}</b><br><span style="color:var(--muted);font-size:11px">joined ${s.startMonth||'—'}</span></td>
+        <td><b>${esc(s.name)}</b><br><span style="color:var(--muted);font-size:11px">${sub(s)}</span></td>
         ${XP_SALTYPES.map(t=>cell(s,t)).join('')}
         <td class="num"><b>${rf(cost(s))}</b></td>
         <td class="actcol" style="white-space:nowrap">
           <button class="ghost" style="padding:3px 8px;font-size:12px" onclick="openXpStaff('${s.id}')">✎</button>
           <button class="ghost" style="padding:3px 8px;font-size:12px" onclick="xpDelStaff('${s.id}')">🗑</button>
         </td>
-      </tr>`).join('')||'<tr><td colspan="8" style="color:var(--muted)">No staff added yet</td></tr>'}</tbody>
-    </table></div></div>`;
+      </tr>`).join('')||`<tr><td colspan="8" style="color:var(--muted)">${all.length?'Nobody was on the payroll in '+xpMonthLabel(m):'No staff added yet'}</td></tr>`}</tbody>
+    </table></div></div>
+    ${all.length!==staff.length?`<div style="color:var(--muted);font-size:12px;margin-top:8px">${all.length-staff.length} staff hidden — not employed in ${xpMonthLabel(m)}.</div>`:''}`;
 }
 function openXpStaff(id){
   if(!xpGuard())return;
@@ -4360,7 +4407,8 @@ function openXpStaff(id){
   document.getElementById('xps_house').value=s?(s.house||0):0;
   document.getElementById('xps_visa').value=s?(s.visa||0):0;
   document.getElementById('xps_insurance').value=s?(s.insurance||0):0;
-  document.getElementById('xps_start').value=s?(s.startMonth||''):isoLocal(new Date()).slice(0,7);
+  document.getElementById('xps_start').value=s?salJoin(s):isoLocal(new Date());
+  document.getElementById('xps_end').value=s?(s.endDate||''):'';
   showModal('overlay-xpstaff');
 }
 function saveXpStaff(ev){
@@ -4382,8 +4430,12 @@ function saveXpStaff(ev){
   }
   s.name=name;s.salary=num('xps_salary');s.house=num('xps_house');
   s.visa=num('xps_visa');s.insurance=num('xps_insurance');
-  s.startMonth=document.getElementById('xps_start').value||isoLocal(new Date()).slice(0,7);
+  s.startDate=document.getElementById('xps_start').value||isoLocal(new Date());
+  s.startMonth=s.startDate.slice(0,7);          // kept in sync for older code / records
+  s.endDate=document.getElementById('xps_end').value||'';
+  if(s.endDate&&s.endDate<s.startDate){toast('Left date is before the joined date');return false;}
   saveSalaryData();closeModal('overlay-xpstaff');
+  xpState.salMonth=xpSalMonths().includes(xpState.salMonth)?xpState.salMonth:isoLocal(new Date()).slice(0,7);
   renderExpenses();
   toast(name+' saved ✓');
   return false;
@@ -4400,13 +4452,17 @@ function xpSalPay(staffId,typeKey){
   const s=salKind('staff').find(x=>x.id===staffId);
   const t=XP_SALTYPES.find(x=>x.key===typeKey);
   if(!s||!t)return;
-  const amount=s[t.field]||0;
+  if(!salActive(s,xpState.salMonth)){toast(`${s.name} was not on the payroll in ${xpMonthLabel(xpState.salMonth)}`);return;}
+  const full=s[t.field]||0;
+  const amount=t.prorate?salProrate(full,s,xpState.salMonth):full;
   if(!amount||xpFindPay(staffId,t))return;
-  if(!confirm(`Mark ${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)} for ${s.name} (${rf(amount)}) as PAID?`))return;
+  const w=salWorked(s,xpState.salMonth);
+  const note=(t.prorate&&amount!==full)?`\nPro-rata ${w.worked}/${w.dm} days of ${rf(full)}`:'';
+  if(!confirm(`Mark ${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)} for ${s.name} (${rf(amount)}) as PAID?${note}`))return;
   salaryData.push({id:uid(),kind:'salpay',staffId,type:t.key,period:xpSalPeriod(t),amount,paidAt:new Date().toISOString()});
   saveSalaryData();renderExpenses();
   document.getElementById('xpr_text').value=
-    `✅ PAID — ${s.name}\n${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)}: ${rf(amount)}\nPaid ${xpD(isoLocal(new Date()))}\nLion Logistics`;
+    `✅ PAID — ${s.name}\n${t.label} ${t.yearly?xpSalPeriod(t):xpMonthLabel(xpState.salMonth)}: ${rf(amount)}${note}\nPaid ${xpD(isoLocal(new Date()))}\nLion Logistics`;
   document.getElementById('xpr_slipBtn').style.display='none';
   showModal('overlay-xprec');
 }
