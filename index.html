@@ -1175,7 +1175,7 @@
       <div class="field"><label id="inv_lbl_total">TOTAL</label><input id="inv_total" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:800"></div>
     </div>
     <div class="grid3">
-      <div class="field"><label id="inv_lbl_adv">ADVANCE PAID (MVR) — recorded as a payment</label><input id="inv_advance" type="number" step="any" min="0" oninput="invCalc()"></div>
+      <div class="field"><label id="inv_lbl_adv">ADVANCE ALREADY PAID (MVR) — deducted on the invoice, customer sees the balance</label><input id="inv_advance" type="number" step="any" min="0" oninput="invCalc()"></div>
       <div class="field"><label>BALANCE DUE (total − advance)</label><input id="inv_balance" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:800"></div>
       <div class="field"><label>INVOICE NO (saved as Bill No)</label><input id="inv_billNo" placeholder="L26/…" oninput="invBillNoChanged()"></div>
     </div>
@@ -5213,7 +5213,8 @@ function openInvoiceForm(entryId){
   document.getElementById('inv_title').textContent='🧾 Create QuickBooks Invoice — '+(sea?'Sea (MP)':'Air (AP)')+(cur!=='MVR'?' · '+cur:'');
   document.getElementById('inv_lbl_sub').textContent='SUBTOTAL ('+cur+')';
   document.getElementById('inv_lbl_total').textContent='TOTAL ('+cur+')';
-  document.getElementById('inv_lbl_adv').textContent='ADVANCE PAID ('+cur+') — recorded as a payment';
+  document.getElementById('inv_lbl_adv').textContent=
+    'ADVANCE ALREADY PAID ('+cur+') — deducted on the invoice, customer sees the balance';
   const ownTpl=cust&&cust[sea?'mpTemplate':'apTemplate'];
   const ownRates=sea?(cust&&cust.mpRates&&Object.keys(cust.mpRates).length):(cust&&cust.apRates&&Object.keys(cust.apRates).length);
   const noRates=(ownTpl&&ownTpl.length)
@@ -5280,8 +5281,11 @@ async function qbInvoice(preview){
   const mail=qbEmails(document.getElementById('inv_email').value.trim()
     ||(cust&&cust.billEmail)||'jaamiz25@gmail.com');
   const to=mail.emails||'jaamiz25@gmail.com';
+  const advNow=Number(document.getElementById('inv_advance').value)||0;
   if(!preview&&!confirm('CREATE INVOICE in QuickBooks?\n\n'+name+'\n'
     +invSummaryText(inv.lines)+'\n\nGST 8%: '+fmtNum(inv.gst)+'\nTOTAL: '+fmtNum(inv.total)
+    +(advNow?'\nLess advance received: '+fmtNum(advNow)
+            +'\nBALANCE DUE: '+fmtNum(invMoney(inv.total-advNow)):'')
     +'\nInvoice No: '+bn
     +'\n\nDocuments attached: '+(atts.length?atts.map(a=>a.name||'document').join(', '):'none')
     +'\nEmail to: '+to))return;
@@ -5304,6 +5308,9 @@ async function qbInvoice(preview){
         // itemId is what QuickBooks matches on — the builder's short name ("Form Filling") is two
         // different QuickBooks items depending on air or sea, and only this map knows which
         lines:inv.lines.map(l=>({item:l.item,itemId:l.itemId,desc:l.description,qty:l.qty,rate:l.rate,taxable:!!l.taxable})),
+        // money already collected: applied to the invoice as a payment, so the customer's copy
+        // shows TOTAL, what they paid, and the BALANCE still due
+        advance:Number(document.getElementById('inv_advance').value)||0,
         key:'inv_'+e.id})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
@@ -5329,6 +5336,15 @@ async function qbInvoice(preview){
       e.qbInvoiced=true;e.qbInvoicedAt=isoLocal(new Date());delete e.qbSentMs;
       e.qbLines=inv.lines.map(l=>({item:l.item,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
       e.qbTotal=j.total;e.qbBalance=j.balance;
+      /* An advance that QuickBooks accepted is money genuinely received against this shipment —
+         record it on the Payment tab and in the receipts list, so it is never collected twice and
+         the customer's status page shows the same balance the invoice does. */
+      if(j.advance>0){
+        const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
+        if(pay&&pay.advance==null){pay.advance=j.advance;pay.u=Date.now();savePayments();}
+        (e.qbPayRec=e.qbPayRec||[]).push({amt:j.advance,date:e.date||isoLocal(new Date()),
+          method:'Advance',qbId:j.advancePaymentId||''});
+      }
       saveEntries();renderEntries();renderMP();renderPayments();renderCusts();updateCounts();
     }catch(err2){
       console.warn('invoice created, but updating the shipment failed',err2);
@@ -5342,6 +5358,10 @@ async function qbInvoice(preview){
       +'\n\nNumber: '+(j.invoiceNo||'(QuickBooks did not return one — find it in QuickBooks and type it into BILL NO)')
       +'\nCustomer: '+j.customer
       +'\nTotal: MVR '+fmtNum(j.total)
+      +(j.advance>0?'\nAdvance applied: MVR '+fmtNum(j.advance)
+                   +'\nBALANCE DUE: MVR '+fmtNum(j.balanceDue):'')
+      +(j.advanceError?'\n⚠ Advance NOT applied: '+j.advanceError
+                      +'\n   (the invoice is correct — record the payment separately)':'')
       +'\nDocuments attached: '+((j.attached&&j.attached.length)?j.attached.join(', '):'none')
       +(j.attachErrors&&j.attachErrors.length?'\n⚠ Not attached: '+j.attachErrors.join(' · '):'')
       +'\nEmailed to: '+(j.emailed||'not sent')
