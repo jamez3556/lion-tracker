@@ -476,6 +476,13 @@
 
 <!-- ==================== PAYMENT VIEW ==================== -->
 <section class="view" id="view-payments">
+  <!-- Air and sea collect different money: air is MACL + MPL, sea is THC + Quay Wall + other port
+       charges. One table cannot carry both without half the columns being blank, so the desk is
+       split the same way the STELCO desk is. -->
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <button type="button" class="ghost" id="paymode-AIR" onclick="paySetMode('AIR')">✈ Air</button>
+    <button type="button" class="ghost" id="paymode-SEA" onclick="paySetMode('SEA')">🚢 Sea</button>
+  </div>
   <div class="stats" id="pay_stats"></div>
   <div class="toolbar">
     <div class="search">
@@ -1101,14 +1108,12 @@
     <form onsubmit="return savePay(event)">
       <input type="hidden" id="pay_id">
       <div class="payhdr" id="pay_info"></div>
-      <div class="grid3">
-        <div class="field"><label>DUTY (MVR)</label><input id="pay_duty" type="number" step="any" min="0"></div>
-        <div class="field"><label>MACL / DELIVERY ORDER (actual, incl GST)</label><input id="pay_macl" type="number" step="any" min="0"></div>
-        <div class="field"><label>MPL (MVR)</label><input id="pay_mpl" type="number" step="any" min="0"></div>
-      </div>
+      <!-- the charge boxes are built from the shipment's own type: air collects MACL and MPL,
+           sea collects THC, quay wall and other port charges (see PAY_CHARGES) -->
+      <div class="grid3" id="pay_charges"></div>
       <div class="grid3">
         <div class="field"><label>ADVANCE PAID (MVR)</label><input id="pay_advance" type="number" step="any" min="0"></div>
-        <div class="field"><label>TOTAL (duty+MACL+MPL)</label><input id="pay_total" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:700"></div>
+        <div class="field"><label id="pay_totalLbl">TOTAL</label><input id="pay_total" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:700"></div>
         <div class="field"><label>BALANCE (total − advance)</label><input id="pay_balance" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:800"></div>
       </div>
       <div class="field"><label>REMARKS</label><input id="pay_remark" placeholder="Notes about this payment…"></div>
@@ -1155,12 +1160,15 @@
       <button type="button" class="ghost" onclick="invAddLine({name:'Storage Fee (Air)',qty:1,tax:0})" title="MACL demurrage pass-through — actual amount, no GST">＋ Storage/Demurrage</button>
       <button type="button" class="ghost" onclick="invAddLine({name:'',tax:8})">＋ Custom (GST)</button>
       <button type="button" class="ghost" onclick="invAddLine({name:'',tax:0})">＋ Custom (non-tax)</button>
+      <button type="button" class="ghost" onclick="invFocusAdvance()" style="color:#7c3aed;font-weight:700"
+        title="The customer already paid something towards this shipment — put it in ADVANCE PAID below, never as a line">💵 Advance received</button>
       <button type="button" class="ghost" id="inv_tmplBtn" onclick="saveInvTemplate()" title="Remember these lines as this customer's own invoice format — every future shipment starts from them">📋 Save as this customer's format</button>
       <input type="file" id="inv_file" multiple style="display:none" onchange="invAttach(this.files)">
       <button type="button" class="ghost" id="inv_attBtn" onclick="document.getElementById('inv_file').click()"
         title="Attach the DO / MACL bill / receipts right here — the builder stays open and your lines are kept">📎 Documents</button>
       <span id="inv_attStatus" style="font-size:12px;color:var(--muted)"></span>
     </div>
+    <div id="inv_negwarn" style="display:none;margin:0 0 10px;padding:9px 12px;border:1px solid #dc2626;border-radius:9px;background:#fef2f2;color:#991b1b;font-size:13px"></div>
     <div class="grid3">
       <div class="field"><label id="inv_lbl_sub">SUBTOTAL</label><input id="inv_subtotal" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:600"></div>
       <div class="field"><label>GST 8% (taxable lines)</label><input id="inv_gst" type="text" readonly tabindex="-1" style="background:#f1f5f9;font-weight:600"></div>
@@ -1386,7 +1394,10 @@ service cloud.firestore {
 <div class="toast" id="toast"></div>
 
 <script id="seed">
-const SEED_DATA=[];const SEED_CUSTOMERS=[];const SEED_CREDS=[];const SEED_CONTAINERS=[];
+const SEED_DATA=[];
+const SEED_CUSTOMERS=[];
+const SEED_CREDS=[];
+const SEED_CONTAINERS=[];
 </script>
 <script>
 /* ============ shared helpers ============ */
@@ -2937,7 +2948,7 @@ function exportMP(){
    are MIRRORED from the entry and refreshed by syncPaymentFromEntry on every entry save; the
    money fields (duty/macl/mpl/advance/remark) are entered here and never touched by that sync.
    "Bill Done" is derived from the mirrored billNo (an invoice in the Form Log = billed). */
-const payState={key:'no',dir:-1,page:1};
+const payState={key:'no',dir:-1,page:1,mode:(localStorage.getItem('lion_pay_mode')||'AIR')};
 // Payment tracking starts on this date — only shipments dated on/after it appear in the Payment tab.
 // Older shipments are intentionally excluded (fresh start, no historical clutter).
 const PAY_START='2026-07-22';
@@ -3001,7 +3012,11 @@ function notifyZapierPayment(p){
     awbBl:p.blNo||'',
     dutyAmount:Number(p.duty)||0,
     macl:Number(p.macl)||0,
-    mpl:Number(p.mpl)||0,
+    mpl:Number(payPortCharge(p))||0,          // sea: THC + quay wall + other
+    thc:Number(p.thc)||0,
+    quay:Number(p.quay)||0,
+    otherCharge:Number(p.other)||0,
+    shipmentType:p.type||'',
     total:payTotal(p),
     advance:Number(p.advance)||0,
     balance:payBalance(p),
@@ -3015,9 +3030,43 @@ function notifyZapierPayment(p){
 function payEligible(e){return e&&(e.date||'')>=PAY_START;}
 function paymentsPage(p){payState.page=p;renderPayments();}
 const payId=e=>'pm_'+e.id;
-function payTotal(p){return (Number(p.duty)||0)+(Number(p.macl)||0)+(Number(p.mpl)||0);}
+/* What gets collected in advance is not the same for a plane and a ship.
+
+   Air: the duty, then MACL (airport) and MPL. Sea: the duty, then THC, the quay wall charge and
+   whatever else the port bills — the seaport charges have no air equivalent at all. Rather than
+   carry five mostly-empty columns on every row, the desk shows the set that belongs to the
+   shipment's own type. The FIELD NAMES are distinct (`thc`/`quay`/`other` are never air fields), so
+   a shipment that is somehow retyped keeps whatever was already entered instead of losing it. */
+const PAY_CHARGES={
+  AIR:[{f:'macl',h:'MACL',lbl:'MACL / DELIVERY ORDER (actual, incl GST)'},
+       {f:'mpl', h:'MPL', lbl:'MPL (MVR)'}],
+  SEA:[{f:'thc',  h:'THC',       lbl:'THC (MVR)'},
+       {f:'quay', h:'QUAY WALL', lbl:'QUAY WALL (MVR)'},
+       {f:'other',h:'OTHER',     lbl:'OTHER CHARGE (MVR)'}]
+};
+function payMode(p){return (p&&p.type)==='MP'?'SEA':'AIR';}
+// duty is charged on both sides, so it leads every mode
+function payFields(mode){return ['duty'].concat(PAY_CHARGES[mode||'AIR'].map(c=>c.f));}
+function payTotal(p){return payFields(payMode(p)).reduce((s,f)=>s+(Number(p[f])||0),0);}
 function payBalance(p){return payTotal(p)-(Number(p.advance)||0);}
-function payHasMoney(p){return p.duty!=null||p.macl!=null||p.mpl!=null||p.advance!=null;}
+function payHasMoney(p){
+  return payFields(payMode(p)).some(f=>p[f]!=null)||p.advance!=null;
+}
+/* The sea invoice's "MPL Charge" pass-through — the port's own bill, at cost.
+
+   It used to be one figure typed into an MPL box. Now the seaport charges are collected in their
+   parts (THC, quay wall, other), so the pass-through is their sum; the old single `mpl` figure is
+   still honoured for shipments entered before the split, which is why this is a fallback and not a
+   replacement. Returns null when nothing has been entered, so the invoice line stays blank and is
+   flagged as an estimate rather than silently billing zero. */
+function payPortCharge(p){
+  if(!p)return null;
+  if(payMode(p)==='SEA'){
+    const got=['thc','quay','other'].filter(f=>p[f]!=null);
+    if(got.length)return invMoney(got.reduce((s,f)=>s+Number(p[f]),0));
+  }
+  return p.mpl!=null?p.mpl:null;
+}
 // keep a payment row's mirrored identity fields aligned with its Form Log entry
 function syncPaymentFromEntry(e){
   if(!e)return false;
@@ -3026,9 +3075,11 @@ function syncPaymentFromEntry(e){
     if(idx>=0){payments.splice(idx,1);return true;}
     return false;
   }
-  const mirror={cno:e.cno||'',name:e.customer||'',rNo:e.rNo||'',blNo:e.awbBl||'',date:e.date||'',no:e.no,billNo:e.billNo||''};
+  // `type` rides along with the other mirrored fields so the desk knows which charges this shipment
+  // collects (air: MACL/MPL, sea: THC/quay/other) without looking the entry up on every row
+  const mirror={cno:e.cno||'',name:e.customer||'',rNo:e.rNo||'',blNo:e.awbBl||'',date:e.date||'',no:e.no,billNo:e.billNo||'',type:e.type||''};
   if(idx<0){
-    const p={id:payId(e),entryId:e.id,duty:null,macl:null,mpl:null,advance:null,remark:'',...mirror};
+    const p={id:payId(e),entryId:e.id,duty:null,macl:null,mpl:null,thc:null,quay:null,other:null,advance:null,remark:'',...mirror};
     if(e.duty!=null)p.duty=e.duty;if(e.advance!=null)p.advance=e.advance; // carry over any legacy entry money
     payments.push(p);return true;
   }
@@ -3057,6 +3108,7 @@ function filteredPayments(){
   const balf=document.getElementById('pay_balFilter').value;
   const mf=document.getElementById('pay_monthFilter').value;
   let rows=payments.filter(r=>{
+    if(payMode(r)!==payState.mode)return false;          // ✈ Air / 🚢 Sea are separate worklists
     if(q&&![r.cno,r.name,r.rNo,r.blNo,r.remark].join(' ').toLowerCase().includes(q))return false;
     if(bf==='done'&&!r.billNo)return false;
     if(bf==='pending'&&r.billNo)return false;
@@ -3067,7 +3119,7 @@ function filteredPayments(){
   });
   if(payState.key==='total')return rows.sort((a,b)=>(payTotal(a)-payTotal(b))*payState.dir);
   if(payState.key==='balance')return rows.sort((a,b)=>(payBalance(a)-payBalance(b))*payState.dir);
-  return sortRows(rows,payState,['no','duty','macl','mpl','advance']);
+  return sortRows(rows,payState,['no','advance'].concat(payFields(payState.mode)));
 }
 function buildPayMonthFilter(){
   const sel=document.getElementById('pay_monthFilter');if(!sel)return;
@@ -3078,15 +3130,43 @@ function buildPayMonthFilter(){
   }).join('');
   sel.value=cur;
 }
+function paySetMode(m){
+  payState.mode=m;payState.page=1;
+  try{localStorage.setItem('lion_pay_mode',m);}catch(e){}
+  renderPayments();
+}
+/* The charge columns are rebuilt with the table, because air and sea do not even have the same
+   NUMBER of them. Sorting is re-armed straight after: makeSortable binds to the th elements
+   themselves, and these are new ones. */
+function payHeadHTML(){
+  const th=(k,label,cls)=>`<th data-k="${k}"${cls?' class="'+cls+'"':''}>${label} <span class="arrow">▲▼</span></th>`;
+  return `<th class="nosort actcol"></th>`
+    +th('no','NO','num')+th('date','DATE')+th('cno','C NO')+th('name','CUSTOMER')
+    +th('rNo','R NO')+th('blNo',payState.mode==='SEA'?'BL NO':'AWB NO')
+    +th('duty','DUTY','num')
+    +PAY_CHARGES[payState.mode].map(c=>th(c.f,c.h,'num')).join('')
+    +th('total','TOTAL','num')+th('advance','ADVANCE','num')+th('balance','BALANCE','num')
+    +th('remark','REMARKS')+th('bill','BILL')
+    +`<th class="nosort">INVOICE</th>`;
+}
 function renderPayments(){
   buildPayMonthFilter();
+  ['AIR','SEA'].forEach(m=>{
+    const b=document.getElementById('paymode-'+m);if(!b)return;
+    const on=payState.mode===m;
+    b.style.background=on?'#FF4F00':'';b.style.color=on?'#fff':'';
+    b.style.borderColor=on?'#FF4F00':'';b.style.fontWeight=on?'700':'';
+  });
+  const head=document.getElementById('pay_head');
+  if(head){head.innerHTML=payHeadHTML();makeSortable('pay_head',payState,renderPayments);}
   const sl=document.getElementById('pay_startLabel');if(sl)sl.textContent=fmtDate(PAY_START);
-  const withMoney=payments.filter(payHasMoney);
+  // stats describe the side you are looking at — a sea outstanding total mixed with air tells you nothing
+  const withMoney=payments.filter(p=>payMode(p)===payState.mode&&payHasMoney(p));
   const totalDuty=withMoney.reduce((s,p)=>s+(Number(p.duty)||0),0);
   const totalCharges=withMoney.reduce((s,p)=>s+payTotal(p),0);
   const totalAdvance=withMoney.reduce((s,p)=>s+(Number(p.advance)||0),0);
   const outstanding=withMoney.reduce((s,p)=>s+Math.max(0,payBalance(p)),0);
-  const billPending=payments.filter(p=>!p.billNo).length;
+  const billPending=payments.filter(p=>payMode(p)===payState.mode&&!p.billNo).length;
   document.getElementById('pay_stats').innerHTML=`
     <div class="card c-warn"><div class="n">${fmtNum(outstanding)}</div><div class="l">Balance Outstanding</div></div>
     <div class="card c-info"><div class="n">${fmtNum(totalCharges)}</div><div class="l">Total Charged</div></div>
@@ -3124,10 +3204,9 @@ function renderPayments(){
       <td class="cno" data-l="C No">${esc(r.cno)||'—'}</td>
       <td class="name" data-l="Customer" title="${esc(r.name)}">${esc(r.name)||'—'}</td>
       <td data-l="R No">${esc(r.rNo)||'—'}</td>
-      <td data-l="AWB / BL">${esc(r.blNo)||'—'}</td>
+      <td data-l="${payState.mode==='SEA'?'BL':'AWB'}">${esc(r.blNo)||'—'}</td>
       <td class="num" data-l="Duty">${payCell(r,'duty')}</td>
-      <td class="num" data-l="MACL">${payCell(r,'macl')}</td>
-      <td class="num" data-l="MPL">${payCell(r,'mpl')}</td>
+      ${PAY_CHARGES[payState.mode].map(c=>`<td class="num" data-l="${c.h}">${payCell(r,c.f)}</td>`).join('')}
       <td class="num" data-l="Total">${has?fmtNum(payTotal(r)):'—'}</td>
       <td class="num" data-l="Advance">${payCell(r,'advance')}</td>
       <td class="num" data-l="Balance">${balCell}</td>
@@ -3163,9 +3242,12 @@ function payCellSet(id,field,val){
   p[field]=n;p.u=Date.now();
   savePayments();renderPayments();renderCusts();
 }
+// which charge boxes the open form is showing (set by openPayForm from the shipment's type)
+let payFormFields=['duty','macl','mpl'];
+function payInput(f){return document.getElementById('pay_'+f);}
 function updatePayCalc(){
-  const t=(Number(pay_duty.value)||0)+(Number(pay_macl.value)||0)+(Number(pay_mpl.value)||0);
-  const anyCharge=pay_duty.value!==''||pay_macl.value!==''||pay_mpl.value!=='';
+  const t=payFormFields.reduce((s,f)=>s+(Number(payInput(f).value)||0),0);
+  const anyCharge=payFormFields.some(f=>payInput(f).value!=='');
   pay_total.value=anyCharge?fmtNum(t):'';
   const anyMoney=anyCharge||pay_advance.value!=='';
   pay_balance.value=anyMoney?fmtNum(t-(Number(pay_advance.value)||0)):'';
@@ -3173,7 +3255,19 @@ function updatePayCalc(){
 function openPayForm(id){
   const p=payments.find(x=>x.id===id);if(!p)return;
   pay_id.value=p.id;
-  pay_duty.value=p.duty??'';pay_macl.value=p.macl??'';pay_mpl.value=p.mpl??'';
+  const mode=payMode(p);
+  payFormFields=payFields(mode);
+  document.getElementById('pay_charges').innerHTML=
+    `<div class="field"><label>DUTY (MVR)</label><input id="pay_duty" type="number" step="any" min="0"></div>`
+    +PAY_CHARGES[mode].map(c=>
+      `<div class="field"><label>${c.lbl}</label><input id="pay_${c.f}" type="number" step="any" min="0"></div>`).join('');
+  document.getElementById('pay_totalLbl').textContent=
+    'TOTAL ('+(mode==='SEA'?'duty+THC+quay+other':'duty+MACL+MPL')+')';
+  payFormFields.forEach(f=>{
+    const el=payInput(f);
+    el.value=p[f]??'';
+    el.addEventListener('input',updatePayCalc);   // fresh elements each open, so no double-binding
+  });
   pay_advance.value=p.advance??'';pay_remark.value=p.remark||'';
   const bill=p.billNo?`<span class="billbadge bill-done">✓ Bill Done · ${esc(p.billNo)}</span>`:'<span class="billbadge bill-pending">Bill Pending</span>';
   document.getElementById('pay_info').innerHTML=
@@ -3186,9 +3280,7 @@ function openPayForm(id){
 function savePay(e){
   e.preventDefault();
   const p=payments.find(x=>x.id===pay_id.value);if(!p)return false;
-  p.duty=pay_duty.value===''?null:Number(pay_duty.value);
-  p.macl=pay_macl.value===''?null:Number(pay_macl.value);
-  p.mpl=pay_mpl.value===''?null:Number(pay_mpl.value);
+  payFormFields.forEach(f=>{const v=payInput(f).value;p[f]=v===''?null:Number(v);});
   p.advance=pay_advance.value===''?null:Number(pay_advance.value);
   p.remark=pay_remark.value.trim();
   savePayments();renderPayments();updateCounts();closeModal('overlay-pay');
@@ -3209,9 +3301,14 @@ function payInvoiceSend(id){
   openInvoiceForm(e.id);   // review the lines, then Send to QuickBooks from there
 }
 function exportPayments(){
-  xlsExport('lion-payments',
-    ['NO','DATE','C NO','CUSTOMER','R NO','AWB / BL NO','DUTY','MACL','MPL','TOTAL','ADVANCE','BALANCE','REMARKS','BILL NO','BILL STATUS'],
-    filteredPayments().map(r=>[r.no,r.date,r.cno,r.name,r.rNo,r.blNo,r.duty,r.macl,r.mpl,payHasMoney(r)?payTotal(r):null,r.advance,payHasMoney(r)?payBalance(r):null,r.remark,r.billNo,r.billNo?'Bill Done':'Pending']));
+  const cols=PAY_CHARGES[payState.mode];
+  xlsExport('lion-payments-'+payState.mode.toLowerCase(),
+    ['NO','DATE','C NO','CUSTOMER','R NO',payState.mode==='SEA'?'BL NO':'AWB NO','DUTY']
+      .concat(cols.map(c=>c.h),['TOTAL','ADVANCE','BALANCE','REMARKS','BILL NO','BILL STATUS']),
+    filteredPayments().map(r=>[r.no,r.date,r.cno,r.name,r.rNo,r.blNo,r.duty]
+      .concat(cols.map(c=>r[c.f]),
+        [payHasMoney(r)?payTotal(r):null,r.advance,payHasMoney(r)?payBalance(r):null,
+         r.remark,r.billNo,r.billNo?'Bill Done':'Pending'])));
 }
 
 /* ============ EXPENSES (admin only) ============ */
@@ -4611,7 +4708,8 @@ function mpExpectedLines(e,cust,pay){
   if(!prof.noProc)L.push({name:'Processing Charges',qty:1,rate:rate('Processing Charges'),tax:8});
   L.push({name:'MPL Clearance',qty:1,rate:rate('MPL Clearance'),tax:8,qtyAny:true});
   // pass-throughs — MPL port charges and customs duty come straight from the Payment tab when entered
-  L.push({name:'MPL Charge',qty:1,rate:(pay&&pay.mpl!=null?pay.mpl:''),tax:0,est:!(pay&&pay.mpl!=null)});
+  const port=payPortCharge(pay);   // THC + quay wall + other, or the legacy single MPL figure
+  L.push({name:'MPL Charge',qty:1,rate:(port!=null?port:''),tax:0,est:port==null});
   L.push({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0,est:!(pay&&pay.duty!=null)});
   if(!prof.noLorry)L.push({name:'Lorry Charges',qty:1,rate:rate('Lorry Charges'),tax:0,est:true});
   return L;
@@ -4666,7 +4764,9 @@ function tmplLines(tpl,e,pay){
     // {mpl} / {duty} / {macl} → the real amount from the Payment tab (blank until it's entered)
     if(typeof o.rate==='string'&&o.rate.charAt(0)==='{'){
       const k=o.rate.replace(/[{}]/g,'');
-      o.rate=(pay&&pay[k]!=null)?pay[k]:'';o.est=true;
+      // {mpl} on a sea shipment now means the whole port bill (THC + quay wall + other)
+      const v=k==='mpl'?payPortCharge(pay):(pay&&pay[k]!=null?pay[k]:null);
+      o.rate=v!=null?v:'';o.est=true;
     }
     // "Clearance 20' / 40' / LCL" lines: qty = how many containers of that size this shipment has.
     // Sizes the shipment doesn't have are dropped, so the invoice only lists what was actually cleared.
@@ -4905,6 +5005,55 @@ function invCalc(){
   document.getElementById('inv_gst').value=invFmt(gst);
   document.getElementById('inv_total').value=invFmt(total);
   document.getElementById('inv_balance').value=invFmt(invMoney(total-adv));
+  /* An advance the customer has already paid is highlighted, because the number that matters then is
+     the BALANCE, not the total — and a quiet grey box is exactly how a 34,000 deduction gets missed. */
+  const bal=document.getElementById('inv_balance');
+  bal.style.background=adv>0?'#f5f3ff':'#f1f5f9';
+  bal.style.color=adv>0?'#6d28d9':'';
+  invNegWarn();
+}
+/* An advance is NOT an invoice line.
+
+   Deducting it as a negative line (the obvious instinct) quietly wrecks the invoice: the subtotal
+   drops below the work actually done, so the GST no longer matches anything, and QuickBooks ends up
+   holding a document whose total is not what was billed. An advance is money RECEIVED — it belongs
+   in ADVANCE PAID, which leaves the invoice at its true value and records the money as a payment
+   applied against it. So a negative line is caught here and offered a one-click move. */
+function invNegLines(){
+  const out=[];
+  document.querySelectorAll('#inv_lines .invline').forEach(tr=>{
+    const amt=invMoney((Number(tr.querySelector('.invqty').value)||0)*(Number(tr.querySelector('.invrate').value)||0));
+    if(amt<0)out.push({tr,amt,name:(tr.querySelector('.invname').value||'').trim()||'line'});
+  });
+  return out;
+}
+function invNegWarn(){
+  const box=document.getElementById('inv_negwarn');if(!box)return;
+  const neg=invNegLines();
+  if(!neg.length){box.style.display='none';box.innerHTML='';return;}
+  const tot=invMoney(neg.reduce((s,n)=>s+n.amt,0));
+  box.style.display='block';
+  box.innerHTML=`<b>⚠ A minus line does not deduct an advance.</b><br>
+    ${neg.map(n=>esc(n.name)+' '+invFmt(n.amt)).join(' · ')} —
+    this lowers the invoice total and its GST, so QuickBooks would hold an invoice for less than the
+    work actually done. An advance is money already received: it goes in <b>ADVANCE PAID</b> below,
+    which keeps the invoice at its true value and records the money as a payment against it.
+    <button type="button" class="ghost" style="margin-left:8px;border-color:#dc2626;color:#991b1b;font-weight:700"
+      onclick="invMoveAdvance()">Move ${invFmt(-tot)} to ADVANCE PAID</button>`;
+}
+function invMoveAdvance(){
+  const neg=invNegLines();if(!neg.length)return;
+  const add=invMoney(-neg.reduce((s,n)=>s+n.amt,0));
+  neg.forEach(n=>n.tr.remove());
+  const f=document.getElementById('inv_advance');
+  f.value=invMoney((Number(f.value)||0)+add);
+  invCalc();
+  toast('💵 '+invFmt(add)+' moved to ADVANCE PAID — the invoice is back at its full value');
+}
+function invFocusAdvance(){
+  const f=document.getElementById('inv_advance');
+  f.scrollIntoView({block:'center',behavior:'smooth'});
+  setTimeout(()=>{f.focus();f.select();},200);
 }
 // Billing is admin-only: the 🧾 button is hidden and all invoice actions are blocked for other users.
 const ADMIN_EMAILS=['jaamiz25@gmail.com'];
@@ -5236,6 +5385,11 @@ async function sendInvoice(){
     'Continuing here tries to create a SECOND invoice. QuickBooks will reject it if the number is already used (you get an error email).\n\n'+
     'Create another invoice anyway?'))return;
   const gst=inv.gst, subtotal=inv.subtotal, total=inv.total;
+  // a minus line would send QuickBooks an invoice worth less than the work done — see invNegWarn()
+  if(invNegLines().length){
+    toast('⚠ Remove the minus line first — use ADVANCE PAID to deduct an advance');
+    invFocusAdvance();return;
+  }
   const advance=Number(document.getElementById('inv_advance').value)||0;
   // Final review gate — spell out every charge and the totals before anything leaves the app.
   // Nothing is sent and the entry isn't flagged unless the user presses OK.
@@ -7860,7 +8014,9 @@ makeSortable('mp_head',mpState,renderMP);
   const el=document.getElementById(id);
   el.addEventListener(el.tagName==='INPUT'?'input':'change',()=>{st.page=1;fn();});
 });
-['pay_duty','pay_macl','pay_mpl','pay_advance'].forEach(id=>document.getElementById(id).addEventListener('input',updatePayCalc));
+// only ADVANCE is a fixed box — the charge inputs are built per shipment in openPayForm, which
+// wires its own listeners (they don't exist yet at boot)
+document.getElementById('pay_advance').addEventListener('input',updatePayCalc);
 document.getElementById('printdate').textContent='Generated '+new Date().toLocaleString('en-GB');
 // Fit each table to the window so its horizontal scrollbar is always on screen
 function fitTables(){
