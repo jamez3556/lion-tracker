@@ -1711,7 +1711,9 @@ function renderEntries(){
   document.getElementById('e_empty').style.display=rows.length===0?'block':'none';
   document.getElementById('e_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}${apToday(r)?' ap-today':''}">
     <td class="num" data-l="No" ${isBillOnly(r)?'title="Billing only — no documentation"':''}>${isBillOnly(r)?'💳':(r.no??'—')}</td>
-    <td class="cno" data-l="C No">${esc(r.cno)}</td>
+    ${r.cno?`<td class="cno" data-l="C No" style="cursor:pointer" onclick="window.open('?cust=${encodeURIComponent(r.cno)}','_blank')"
+      title="Open ${esc(r.cno)} in its own tab — only this customer's shipments show there">${esc(r.cno)}</td>`
+      :'<td class="cno" data-l="C No">—</td>'}
     <td data-l="Date">${fmtDate(r.date)}${r.time?`<div class="sub">${esc(r.time)}</div>`:''}</td>
     <td class="name" data-l="Customer" title="${esc(r.customer)}">${esc(r.customer)}</td>
     <td data-l="Type">${r.type?`<span class="typechip">${esc(r.type)}</span>`:'—'}</td>
@@ -1725,6 +1727,7 @@ function renderEntries(){
       title="${entryPaidUp(r)?'Paid in full — from QuickBooks':''}">${statusShown(r)}</button></td>
     <td class="actcol"><div class="rowact">
       ${((r.type==='AP'||r.type==='MP')&&isAdmin())?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
+      ${isAdmin()?`<button class="iconbtn" onclick="window.open('?bill=${encodeURIComponent(r.id)}','_blank')" title="Open THIS shipment in its own tab — only ${esc(r.customer)}'s work shows there, and the invoice opens by itself">↗</button>`:''}
       <button class="iconbtn" onclick="openAttach('${r.id}')" title="Documents (AWB, receipts, photos…)">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
       ${isAdmin()&&waEnabled(r)?`<button class="iconbtn" onclick="waCustomer('${r.id}')" title="WhatsApp the customer a status update"><svg viewBox="0 0 32 32" width="15" height="15" fill="#25D366"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.1.6 4.2 1.7 6L4 29l8.2-1.6c1.2.6 2.5.9 3.8.9 6.6 0 12-5.4 12-12S22.6 3 16 3zm0 21.8c-1.2 0-2.4-.3-3.5-.8l-.5-.3-4.9 1 1-4.7-.3-.5c-1-1.6-1.6-3.5-1.6-5.5 0-5.5 4.4-9.9 9.8-9.9s9.8 4.4 9.8 9.9-4.4 9.8-9.8 9.8zm5.4-7.3c-.3-.2-1.8-.9-2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.1-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6l.5-.5c.2-.2.2-.3.3-.5.1-.2 0-.4 0-.6l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4 0-.1-.2-.2-.5-.3z"/></svg></button>`:''}
       <button class="iconbtn" onclick="openEntryForm('${r.id}')" title="Edit">✏️</button>
@@ -2843,7 +2846,8 @@ function renderMP(){
     <td class="actcol"><div class="rowact">
       <button class="iconbtn" onclick="openEntryForm('${jatt(r.id)}')" title="Edit">✏️</button>
       <button class="iconbtn" onclick="openAttach('${jatt(r.id)}')" title="Documents (BL, DO, MPL bills, receipts…) — these go out with the invoice">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
-      ${isAdmin()?`<button class="iconbtn" onclick="openInvoiceForm('${jatt(r.id)}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to open':'Create the sea QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
+      ${isAdmin()?`<button class="iconbtn" onclick="openInvoiceForm('${jatt(r.id)}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to open':'Create the sea QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>
+      <button class="iconbtn" onclick="window.open('?bill=${encodeURIComponent(r.id)}','_blank')" title="Open THIS shipment in its own tab to finish the billing without the rest of the list">↗</button>`:''}
       <button class="iconbtn del" onclick="delEntry('${jatt(r.id)}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
   pagerHTML(document.getElementById('mp_pager'),mpState,rows.length,'mp');
@@ -8053,6 +8057,42 @@ makeSortable('mp_head',mpState,renderMP);
 // only ADVANCE is a fixed box — the charge inputs are built per shipment in openPayForm, which
 // wires its own listeners (they don't exist yet at boot)
 document.getElementById('pay_advance').addEventListener('input',updatePayCalc);
+/* ── Focused tab (?bill=<entryId> / ?cust=<C no>) ────────────────────────────
+   Billing one customer in the middle of 1,200 rows means the search box, the filters and the open
+   invoice all share one screen — switch away for a moment and you are looking at somebody else's
+   shipment. The ↗ on a row (and clicking a C NO) opens the SAME app in a fresh tab that locks
+   itself onto that one shipment or customer: the search is pre-filled, a banner names who the tab
+   belongs to, the tab's title says it too, and for ?bill= the invoice builder opens by itself.
+   Nothing else is different — it is the ordinary app, synced as always; the lock is only the
+   search text, so it can be cleared if the tab needs to become general again. */
+(function(){
+  const p=new URLSearchParams(location.search);
+  const billId=p.get('bill'),custQ=(p.get('cust')||'').trim();
+  if(!billId&&!custQ)return;
+  const timer=setInterval(()=>{
+    const r=window.__trackerReady?window.__trackerReady():null;
+    if(!r||!r.ok)return;                       // wait for sign-in + cloud + entries, same gate as automation
+    clearInterval(timer);
+    const e=billId?entries.find(x=>x.id===billId):null;
+    if(billId&&!e){toast('⚠ That shipment no longer exists — it may have been deleted');return;}
+    // one shipment → its AWB/BL is unique, so the log shows exactly that row; a customer → the C no
+    const q=e?(e.awbBl||e.cno||''):custQ;
+    const s=document.getElementById('e_search');
+    if(s&&q){s.value=q;eState.page=1;renderEntries();}
+    const who=e?((e.customer||'')+' · '+(e.awbBl||'')):custQ;
+    document.title=who+' — LION billing';
+    const bar=document.createElement('div');
+    bar.style.cssText='position:sticky;top:0;z-index:60;background:#6d28d9;color:#fff;padding:8px 16px;'
+      +'font-weight:700;font-size:13.5px;display:flex;gap:10px;align-items:center';
+    bar.innerHTML='🎯 This tab is only for <span style="background:#fff;color:#6d28d9;border-radius:6px;padding:1px 8px">'
+      +esc(who)+'</span> — finish the bill here, then close the tab.'
+      +'<button onclick="this.parentNode.remove();document.getElementById(\'e_search\').value=\'\';renderEntries();"'
+      +' style="margin-left:auto;background:transparent;border:1px solid #fff;color:#fff;border-radius:6px;'
+      +'padding:2px 10px;cursor:pointer;font-weight:700">Unlock tab</button>';
+    document.body.prepend(bar);
+    if(e&&isAdmin())setTimeout(()=>{try{openInvoiceForm(e.id);}catch(err){console.warn('focused open failed',err);}},400);
+  },600);
+})();
 document.getElementById('printdate').textContent='Generated '+new Date().toLocaleString('en-GB');
 // Fit each table to the window so its horizontal scrollbar is always on screen
 function fitTables(){
