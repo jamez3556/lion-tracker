@@ -1825,6 +1825,9 @@ function billSet(id,val){
   }
   const before={...e};
   e.billNo=bn;
+  // when the invoice came to exist — entryDue judges "was this on the last sync's list?" by this,
+  // so a bill typed today on an old shipment is never mistaken for one already settled
+  if(bn)e.billAt=isoLocal(new Date());else delete e.billAt;
   /* Invoice exists ⇒ Delivered. Invoice removed ⇒ back to Pending — NOT Cleared. Cleared is a
      state a person chooses by hand; the app must never award it, or a shipment nobody has cleared
      sits there looking cleared. */
@@ -5352,6 +5355,11 @@ async function qbInvoice(preview){
         +', but the app could not update the shipment.\n\n'+(err2.message||err2)
         +'\n\nType the number into BILL NO by hand. Do NOT create it again.');
     }
+    /* Pull the fresh balances by itself: the invoice just created is not on the last sync's open
+       list, and until a sync runs every OTHER device judges it by that stale list. Nobody should
+       have to press Refresh to make the screen tell the truth. Fire-and-forget — the figures
+       update through the listener the moment the service finishes writing. */
+    setTimeout(()=>{try{qbRefresh(null);}catch(e){}},3000);
     closeModal('overlay-invoice');
     // an alert, not a toast: this is the number that has to reach the Form Log, and a toast fades
     alert((j.duplicate?'Already created earlier.':'🧾 Invoice created in QuickBooks.')
@@ -5447,7 +5455,7 @@ async function sendInvoice(){
   // (an existing Bill No is never cleared by leaving the field blank).
   if(bn&&bn!==(e.billNo||'')){
     const before={...e};
-    e.billNo=bn;e.status='Delivered';
+    e.billNo=bn;e.status='Delivered';e.billAt=isoLocal(new Date());
     if(syncPaymentFromEntry(e))savePayments();
     syncContFromEntry(e,before,null);
   }
@@ -5574,7 +5582,7 @@ function resendInvoice(){
   let saved=false;
   if(bn!==(e.billNo||'')){
     const before={...e};
-    e.billNo=bn;e.status='Delivered';
+    e.billNo=bn;e.status='Delivered';e.billAt=isoLocal(new Date());
     if(syncPaymentFromEntry(e))savePayments();
     syncContFromEntry(e,before,null);
     saveEntries();renderEntries();renderMP();renderPayments();updateCounts();
@@ -5817,7 +5825,7 @@ window.__applyQbBill=function(entryId,billNo){
   if((e.billNo||'').trim())return true; // already has a number — nothing to do (treat as handled)
   if(!billNo)return false;
   const before={...e};
-  e.billNo=String(billNo).trim();e.status='Delivered';
+  e.billNo=String(billNo).trim();e.status='Delivered';e.billAt=isoLocal(new Date());
   if(syncPaymentFromEntry(e))savePayments();
   syncContFromEntry(e,before,null);
   saveEntries();renderEntries();renderMP();renderPayments();updateCounts();
@@ -6905,6 +6913,7 @@ function qbAutoBill(){
     if(!same){odd.push({no:hit.no,awb:e.awbBl,ours:e.customer,theirs:hit.c});return;}
     const before={...e};
     e.billNo=hit.no;e.status='Delivered';            // the invoice rule, exactly as typing it by hand
+    e.billAt=hit.d||isoLocal(new Date());            // the invoice's own date — its true birth
     e.qbTotal=hit.t;e.qbBalance=hit.b;e.u=Date.now();
     try{if(syncPaymentFromEntry(e))savePayments();syncContFromEntry(e,before,null);}catch(err){console.warn('automatch bookkeeping',err);}
     filled.push(hit.no);
@@ -6934,8 +6943,15 @@ function entryDue(e){
     if(hit)return {due:invMoney(Number(hit.b)||0),est:false,src:'qb'};
     // gone from the open list: settled — if it was ever ON the list, or predates the sync
     if(qbSeen().has(bn)||qbSeen().has(bn.replace(/\s+/g,'')))return {due:0,est:false,src:'qb'};
+    /* "Predates the sync" must be judged by when the INVOICE came to exist, never by the shipment's
+       date: a shipment logged on 02 Jul can be billed on 04 Aug, and last night's sync could not
+       have listed an invoice created this morning — yet the shipment-date test called exactly that
+       one "Paid" the moment the bill was typed, until a refresh corrected it. billAt/qbInvoicedAt
+       is stamped whenever a bill number lands on an entry; the shipment date remains only as the
+       fallback for entries billed before the stamp existed. */
     const syncedThrough=String(q.updated||'').slice(0,10);
-    if(e.date&&e.date<syncedThrough)return {due:0,est:false,src:'qb'};   // not owing ⇒ settled
+    const born=String(e.qbInvoicedAt||e.billAt||'').slice(0,10);
+    if(born?born<syncedThrough:(e.date&&e.date<syncedThrough))return {due:0,est:false,src:'qb'};
   }
   if(e.qbBalance!=null)return {due:invMoney(Number(e.qbBalance)),est:false};
   const t=invTotalOf(e);if(!t)return null;
