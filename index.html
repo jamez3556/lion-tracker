@@ -5900,6 +5900,24 @@ function setBTab(t){
 }
 function renderDoQueue(){
   autoLinkSnaps(); // pick up snaps synced in from do.html and attach them to their shipments
+  /* A snap only heard about billing when the bill went through ITS OWN button. A shipment billed
+     later from the desk / a typed number / the QuickBooks write-back left the snap shouting
+     "Bill now" for a job already invoiced — and a snap whose number was later CORRECTED on the
+     entry kept showing the old one. The entry is the single truth for billing, so every snap is
+     reconciled against its shipment here: billed follows the entry's bill, the number shown is the
+     entry's, and a bill that was removed puts the snap back in the queue. */
+  let snCh=false;
+  dosnaps.forEach(dp=>{
+    const e=dp.entryId?entries.find(x=>x.id===dp.entryId):null;
+    if(dp.status==='billed'){
+      if(e&&(e.billNo||'')&&dp.billNo!==e.billNo){dp.billNo=e.billNo;snCh=true;}
+      else if(e&&!(e.billNo||'')){dp.status='pending';delete dp.billNo;snCh=true;}
+      return;
+    }
+    const t=e||dpMatch(dp);
+    if(t&&(t.billNo||'')){dp.status='billed';dp.billNo=t.billNo;dp.billedAt=dp.billedAt||isoLocal(new Date());snCh=true;}
+  });
+  if(snCh)saveDosnaps();
   renderStelcoDesk();
   const pb=document.getElementById('bt_profit');
   if(pb)pb.style.display=isAdmin()?'':'none';
