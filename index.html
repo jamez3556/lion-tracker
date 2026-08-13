@@ -5388,8 +5388,15 @@ async function qbInvoice(preview){
        update through the listener the moment the service finishes writing. */
     setTimeout(()=>{try{qbRefresh(null);}catch(e){}},3000);
     closeModal('overlay-invoice');
+    /* The one check that catches a tax gone missing THE MOMENT it happens: the app knows what the
+       invoice should total (lines + 8% on the taxable ones); if QuickBooks came back with anything
+       else, the invoice is wrong NOW — not at month-end when the customer queries it. */
+    const drift=invMoney(Math.abs((Number(j.total)||0)-inv.total));
     // an alert, not a toast: this is the number that has to reach the Form Log, and a toast fades
     alert((j.duplicate?'Already created earlier.':'🧾 Invoice created in QuickBooks.')
+      +(drift>0.5&&!j.duplicate?'\n\n🛑 CHECK THIS INVOICE — QuickBooks total MVR '+fmtNum(j.total)
+        +' but the app calculated MVR '+fmtNum(inv.total)
+        +' (difference '+fmtNum(drift)+', usually GST not applied). Open it in QuickBooks and correct the TAX column before sending on.':'')
       +'\n\nNumber: '+(j.invoiceNo||'(QuickBooks did not return one — find it in QuickBooks and type it into BILL NO)')
       +'\nCustomer: '+j.customer
       +'\nTotal: MVR '+fmtNum(j.total)
