@@ -1056,6 +1056,10 @@
         <div id="e_contSizes" style="margin-top:8px"></div>
       </div>
       <div class="actions">
+        <!-- delete lives here too: desk rows (STELCO, MP) only offer ✏️, so without this the only
+             way to remove a duplicate was hunting the same entry down in the Form Log -->
+        <button type="button" class="ghost" id="e_delBtn" style="display:none;color:#dc2626;border-color:#dc2626;margin-right:auto"
+          onclick="delEntryFromForm()">🗑️ Delete entry</button>
         <button type="button" class="ghost" onclick="closeModal('overlay-entry')">Cancel</button>
         <button type="submit" class="primary">Save</button>
       </div>
@@ -2000,8 +2004,10 @@ function openEntryForm(id,defaultType){
     entryPendingFiles=[];
     document.getElementById('e_docs').innerHTML=
       `<button type="button" class="ghost" onclick="closeModal('overlay-entry');openAttach('${r.id}')">📎 Documents (${(r.attachments||[]).length}) — view / add</button>`;
+    document.getElementById('e_delBtn').style.display='';   // an existing entry can be deleted from here
     toggleContBox();
   }else{
+    document.getElementById('e_delBtn').style.display='none';
     t.textContent='Add Entry';f.reset();e_id.value='';
     document.getElementById('e_billOnly').checked=false;
     e_no.disabled=false;
@@ -2362,6 +2368,13 @@ function waCustomer(entryId){
   const kind=e.billNo?'dlv':e.status==='Cleared'?'clr':due==='arr'?'arr':'proc';
   window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(waMessage(e,kind)),'_blank');
   if(due){waMark(e,due);renderEntries();} // a manual send counts — don't queue the same news again
+}
+// 🗑 inside the Edit form — delEntry's own confirm still runs, and closing only follows a real delete
+function delEntryFromForm(){
+  const id=e_id.value;if(!id)return;
+  const before=entries.length;
+  delEntry(id);
+  if(entries.length<before){closeModal('overlay-entry');try{renderStelcoDesk();renderDoQueue();}catch(e){}}
 }
 function delEntry(id){
   const r=entries.find(x=>x.id===id);
