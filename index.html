@@ -1826,6 +1826,16 @@ function billSet(id,val){
       renderEntries();renderMP();return;
     }
   }
+  /* Catch an AWB (or anything else) typed into BILL NO at the moment it happens. A number that is
+     not an invoice number can never be matched against QuickBooks, so its shipment leaves the
+     billing worklists looking done while the real invoice was never made. Warn, don't block —
+     the rare genuine odd number can still be confirmed through. */
+  if(bn&&!/^[A-Za-z]{1,3}\d{2}\/\d+$/.test(bn)
+     &&!confirm('"'+bn+'" does not look like an invoice number (ours are L26/…).\n\n'
+       +'It looks like an AWB or something else typed in the wrong box — a wrong BILL NO makes this shipment\n'
+       +'look billed when no invoice exists.\n\nSave it as the BILL NO anyway?')){
+    renderEntries();renderMP();return;
+  }
   const before={...e};
   e.billNo=bn;
   // when the invoice came to exist — entryDue judges "was this on the last sync's list?" by this,
@@ -6952,10 +6962,16 @@ function entryDue(e){
        have listed an invoice created this morning — yet the shipment-date test called exactly that
        one "Paid" the moment the bill was typed, until a refresh corrected it. billAt/qbInvoicedAt
        is stamped whenever a bill number lands on an entry; the shipment date remains only as the
-       fallback for entries billed before the stamp existed. */
+       fallback for entries billed before the stamp existed.
+
+       And the whole "absent from the unpaid list ⇒ paid" idea presupposes the number IS an invoice
+       number. An AWB typed into BILL NO by mistake ("176 63565504") is absent from every list
+       forever, so it read as Paid for good. A number that doesn't look like one of ours (L26/…)
+       is never concluded paid by absence — only by being seen open and then leaving. */
+    const looksInv=/^[A-Za-z]{1,3}\d{2}\/\d+$/.test(bn);
     const syncedThrough=String(q.updated||'').slice(0,10);
     const born=String(e.qbInvoicedAt||e.billAt||'').slice(0,10);
-    if(born?born<syncedThrough:(e.date&&e.date<syncedThrough))return {due:0,est:false,src:'qb'};
+    if(looksInv&&(born?born<syncedThrough:(e.date&&e.date<syncedThrough)))return {due:0,est:false,src:'qb'};
   }
   if(e.qbBalance!=null)return {due:invMoney(Number(e.qbBalance)),est:false};
   const t=invTotalOf(e);if(!t)return null;
@@ -7209,6 +7225,12 @@ function renderStelcoDesk(){
           :'<div style="margin-top:6px;color:var(--muted)">Check the number, or clear the search to see everything.</div>')
       :'<div class="big">⚡</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No STELCO shipments yet</div>';
   }
+  /* The same AWB entered twice means the same job can be billed twice — one row already invoiced,
+     its twin still showing a 🧾 Bill button. Count across ALL of this customer's shipments (not
+     just the rows on screen) and mark every twin in red, so the spare gets deleted instead of
+     billed. */
+  const awbCnt={};
+  all.forEach(x=>{const k=String(x.awbBl||'').replace(/[^A-Z0-9]/gi,'').toUpperCase();if(k)awbCnt[k]=(awbCnt[k]||0)+1;});
   tb.innerHTML=rows.map(e=>{
     const dp=dosnaps.find(d=>d.entryId===e.id);
     const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
@@ -7216,12 +7238,13 @@ function renderStelcoDesk(){
     const dem=(dp&&dp.demur)||e.demur||null;
     const wt=Number(e.grsWt)||0;
     const below=wt&&wt<=50;
+    const dupTwin=awbCnt[String(e.awbBl||'').replace(/[^A-Z0-9]/gi,'').toUpperCase()]>1;
     return `<tr class="t-${esc(e.type)}">
       <td data-l="Date">${fmtDate(e.date)}</td>
       <td class="num" data-l="No">${isBillOnly(e)?'💳':(e.no??'—')}</td>
       <td data-l="Type">${e.type?`<span class="typechip">${esc(e.type)}</span>`:'—'}</td>
       <td data-l="R No">${esc(e.rNo)||'—'}</td>
-      <td data-l="AWB / BL">${esc(e.awbBl)||'—'}</td>
+      <td data-l="AWB / BL">${esc(e.awbBl)||'—'}${dupTwin?`<div style="color:#dc2626;font-size:10.5px;font-weight:800" title="Another entry carries this same AWB — bill only ONE, delete the spare with ✏️ → Delete">⚠ ENTERED TWICE</div>`:''}</td>
       ${e.type==='MP'?(()=>{
         const cLbl=seaContLabel(e);
         const out=(e.outCost&&e.outCost.amt!=null)?e.outCost.amt:null;
