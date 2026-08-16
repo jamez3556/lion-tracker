@@ -4719,7 +4719,10 @@ function xpSalUnpay(payId){
 // AP invoice = activity lines (Qty × Rate) with 8% GST on taxable lines only.
 // Standard rates below are the defaults; each customer can override them (customer.apRates).
 // Line names MUST match a Product/Service item in QuickBooks (Zapier maps by name).
-const AP_STD_RATES={'Form Filling':30,'Processing Charges':150,'Clearance KG':0.50,'Clearance Box':5,'Dhoni Charges':0.50};
+/* Clearance KG and Dhoni went 0.50 → 1.00 on 2026-08-15 (owner's instruction): 1.00/kg is the
+   normal-cargo rate. PERISHABLE customers stay on 0.50 — set apRates {'Clearance KG':0.5,
+   'Dhoni Charges':0.5} on each of them (Customers tab ✏️), which overrides this card. */
+const AP_STD_RATES={'Form Filling':30,'Processing Charges':150,'Clearance KG':1,'Clearance Box':5,'Dhoni Charges':1};
 // MP (sea) standard invoice — the port format: two flat service lines + MPL Clearance (taxable),
 // then the pass-throughs (MPL Charge, Customs Duty, Lorry Charges) which carry NO GST and are typed
 // per shipment (MPL Charge and Duty pre-fill from the Payment tab). Sea is flat-rate: nothing is
