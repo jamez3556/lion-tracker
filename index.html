@@ -4794,12 +4794,23 @@ function tmplLines(tpl,e,pay){
     const o={name:l.name,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.tax};
     // the number of forms changes with every shipment — audit its rate, never its quantity
     if(/^form filling$/i.test(o.name))o.qtyAny=true;
+    /* AIR quantities always come from the shipment, never from the day the format was saved. A
+       format saved off a 2,200 kg job otherwise put 2,200 kg on every later invoice — the owner
+       pressed "Save as this customer's format" expecting rates to stick, not weights. The saved
+       qty survives only as the fallback for a shipment with no weight/pkgs typed yet. */
+    if(e.type!=='MP'){
+      const label=o.name+' '+o.desc;
+      if(/clearance\s*box/i.test(label)){if(e.pkgs!=null)o.qty=e.pkgs;}
+      else if(/clearance/i.test(label)||/dhoni/i.test(o.name)){if(e.grsWt!=null)o.qty=e.grsWt;}
+    }
     // {mpl} / {duty} / {macl} → the real amount from the Payment tab (blank until it's entered)
     if(typeof o.rate==='string'&&o.rate.charAt(0)==='{'){
       const k=o.rate.replace(/[{}]/g,'');
       // {mpl} on a sea shipment now means the whole port bill (THC + quay wall + other)
       const v=k==='mpl'?payPortCharge(pay):(pay&&pay[k]!=null?pay[k]:null);
-      o.rate=v!=null?v:'';o.est=true;
+      // air DO fee with no MACL typed yet: the weight-based estimate, same as the standard draft
+      o.rate=v!=null?v:(k==='macl'&&e.type!=='MP'&&e.grsWt!=null?maclEstimate(e.grsWt):'');
+      o.est=true;
     }
     // "Clearance 20' / 40' / LCL" lines: qty = how many containers of that size this shipment has.
     // Sizes the shipment doesn't have are dropped, so the invoice only lists what was actually cleared.
@@ -4825,8 +4836,10 @@ function saveInvTemplate(){
   const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
   const old=cust[e.type==='MP'?'mpTemplate':'apTemplate']||[];
   const oldRate={};old.forEach(l=>{oldRate[(l.name||'')+'|'+(l.desc||'')]=l.rate;});
-  // pass-through lines default to the Payment-tab placeholder, so a blank box never freezes as 0
-  const PASS={'mpl charge':'{mpl}','customs duty':'{duty}','macl charge':'{macl}'};
+  // pass-through lines default to the Payment-tab placeholder, so a blank box never freezes as 0.
+  // Delivery Order Fee is only a placeholder when the box matched the MACL actual or was blank —
+  // a customer with a FLAT DO fee (SEASIDE's Liner Charge 54) keeps their typed number.
+  const PASS={'mpl charge':'{mpl}','customs duty':'{duty}','macl charge':'{macl}','delivery order fee':'{macl}'};
   const tpl=[];
   document.querySelectorAll('#inv_lines .invline').forEach(tr=>{
     const name=tr.querySelector('.invname').value.trim();if(!name)return;
