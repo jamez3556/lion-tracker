@@ -8096,13 +8096,25 @@ function autoClearFromBill(){
 // Invoiced entries land as Delivered; hand-cleared as Cleared; the rest as active (Pending DO).
 function syncMPContainers(){
   const linked=new Set(containers.map(c=>c.entryId).filter(Boolean));
-  let addedActive=0,addedHistory=0;
+  let addedActive=0,addedHistory=0,adopted=0;
   let nextNo=containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0);
   entries.forEach(r=>{
     if(r.type!=='MP'||linked.has(r.id))return;
     // billing-only sea (STELCO desk) NEVER creates Container Status records — the desk is its whole
     // world (user: "container status you have added stelco shipment. remove all that").
     if(isBillOnly(r))return;
+    // A record added by HAND for the same BL (before the form was logged) is this same shipment —
+    // adopt it instead of creating a second record (a dup pair lights up the shared-container bar).
+    const bl=(r.awbBl||'').replace(/[\s-]/g,'').toUpperCase();
+    const orphan=bl?containers.find(c=>!c.entryId&&!isDone(c)&&(c.blNo||'').replace(/[\s-]/g,'').toUpperCase()===bl):null;
+    if(orphan){
+      orphan.entryId=r.id;orphan.logNo=r.no;orphan.name=r.customer||orphan.name;
+      if(!orphan.cno)orphan.cno=r.cno;
+      if(!orphan.rNo)orphan.rNo=r.rNo;
+      if(!orphan.containerNo)orphan.containerNo=r.containerNo||'';
+      linked.add(r.id);adopted++;
+      return;
+    }
     const st=r.billNo?'Delivered':((r.status==='Cleared'||r.status==='Delivered')?'Cleared':'Pending DO');
     const done=st!=='Pending DO';
     containers.push({id:'ct_'+r.id,entryId:r.id,no:++nextNo, // deterministic id — every device creates the SAME doc (no cloud duplicates)
@@ -8112,7 +8124,7 @@ function syncMPContainers(){
       status:st,remark:''});
     if(done)addedHistory++;else addedActive++;
   });
-  if(addedActive+addedHistory>0)saveContainers();
+  if(addedActive+addedHistory+adopted>0)saveContainers();
   return addedActive+addedHistory;
 }
 // migration: merge duplicate containers pointing at the same Form Log entry (old boot races on
@@ -8126,6 +8138,30 @@ function syncMPContainers(){
     const score=c=>(c.discharge?8:0)+(c.portInfo&&Object.keys(c.portInfo).length?4:0)+(c.doDate?2:0)+(c.clearance?1:0);
     list.sort((a,b)=>score(b)-score(a));
     list.slice(1).forEach(dup=>drop.add(dup.id));
+  });
+  if(drop.size){containers=containers.filter(c=>!drop.has(c.id));saveContainers();}
+})();
+// migration: merge hand-added + auto-created copies of the SAME shipment (identical BL, both
+// still active). Keep the entry-linked/richest one, carry over anything it's missing, drop the
+// rest. True LCL shares are different BLs in one box — never touched by this.
+(()=>{
+  const byBl={};
+  containers.forEach(c=>{
+    if(isDone(c))return;
+    const bl=(c.blNo||'').replace(/[\s-]/g,'').toUpperCase();
+    if(bl)(byBl[bl]=byBl[bl]||[]).push(c);
+  });
+  const drop=new Set();
+  Object.values(byBl).forEach(list=>{
+    if(list.length<2)return;
+    const score=c=>(c.entryId?16:0)+(c.discharge?8:0)+(c.portInfo&&Object.keys(c.portInfo).length?4:0)+(c.doDate?2:0)+(c.clearance?1:0);
+    list.sort((a,b)=>score(b)-score(a));
+    const keep=list[0];
+    list.slice(1).forEach(dup=>{
+      ['discharge','lastDate','doDate','clearance','remark','rNo','cno','containerNo','logNo'].forEach(f=>{if(!keep[f]&&dup[f])keep[f]=dup[f];});
+      if(dup.portInfo&&Object.keys(dup.portInfo).length&&!(keep.portInfo&&Object.keys(keep.portInfo).length))keep.portInfo=dup.portInfo;
+      drop.add(dup.id);
+    });
   });
   if(drop.size){containers=containers.filter(c=>!drop.has(c.id));saveContainers();}
 })();
