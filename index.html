@@ -111,6 +111,12 @@
   td input:hover::placeholder{color:#f97316}
   tr.row-warn{background:#fffbeb}
   tr.row-danger{background:#fef2f2}
+  /* One physical container carrying two (or more) LCL shipments for different consignees:
+     separate records, one box → they must be cleared on the SAME DAY. Coloured left bar on
+     every row of the group (one colour per container) so the pair is impossible to miss. */
+  tr.row-share{box-shadow:inset 5px 0 0 var(--sharec,#6d28d9)}
+  .sharechip{display:inline-block;font-size:11px;font-weight:800;padding:1px 7px;border-radius:6px;white-space:nowrap;cursor:pointer}
+  .sharechip:hover{filter:brightness(.94)}
   tr.flashnew{animation:flashbg 2.6s ease}
   @keyframes flashbg{0%,60%{background:#dbeafe}100%{background:transparent}}
   /* Light zebra tint on every row so the page isn't all-white and is easy to read */
@@ -234,6 +240,7 @@
     .m-cards tr:hover{background:#fff}
     .m-cards tr.row-danger{border-color:#fca5a5;background:#fff}
     .m-cards tr.row-warn{border-color:#fcd34d;background:#fff}
+    .m-cards tr.row-share{box-shadow:var(--shadow),inset 5px 0 0 var(--sharec,#6d28d9)}
     .m-cards td{display:flex;justify-content:space-between;align-items:center;gap:12px;border:none;padding:6px 14px;white-space:normal;text-align:right}
     .m-cards td:first-child{padding-top:12px}
     .m-cards td[data-l]::before{content:attr(data-l);font-size:10.5px;font-weight:700;letter-spacing:.4px;color:var(--muted);text-transform:uppercase;flex:0 0 auto;text-align:left}
@@ -2465,6 +2472,7 @@ function filteredConts(){
 }
 function renderConts(){
   const active=containers.filter(r=>!isDone(r));
+  buildShare(); // container numbers carrying more than one live shipment
   const inPort=containers.reduce((s,r)=>s+inPortCount(r),0);
   // once noted (clearance set) a container is under control — exclude from overdue/soon warnings
   const overdue=active.filter(r=>!isNoted(r)&&(()=>{const d=daysLeft(effLast(r).next);return d!==null&&d<0})()).length;
@@ -2475,7 +2483,9 @@ function renderConts(){
   const tomorrowIso=addDays(todayIso,1);
   const notedToday=active.filter(r=>r.clearance===todayIso).length;
   const notedTomorrow=active.filter(r=>r.clearance===tomorrowIso).length;
-  document.getElementById('c_stats').innerHTML=`
+  const shareKeys=Object.keys(SHARE);
+  const shareCard=shareKeys.length?`<div class="card c-purple" title="${esc(shareKeys.map(k=>k+' · '+SHARE[k].recs.length+' shipments').join('\n'))}"><div class="n">${shareKeys.length}</div><div class="l">🔗 Same Container${shareKeys.some(k=>shareMismatch(SHARE[k]))?' ⚠':''}</div></div>`:'';
+  document.getElementById('c_stats').innerHTML=shareCard+`
     <div class="card c-warn"><div class="n">${inPort}</div><div class="l">In Port / Active</div></div>
     <div class="card c-info"><div class="n">${notedToday}</div><div class="l">Noted for Today</div></div>
     <div class="card c-purple"><div class="n">${notedTomorrow}</div><div class="l">Noted for Tomorrow</div></div>
@@ -2499,7 +2509,10 @@ function renderConts(){
       else{badge=`<span class="daysbadge d-ok">${fmtDate(effNext)} · ${d}d left</span>`;}
     }else if(noted&&effNext){badge=`<span class="daysbadge d-ok">${fmtDate(effNext)} ✓ noted</span>`;}
     const stCls='st-'+r.status.replace(/\s/g,'');
-    return `<tr class="${rowcls}" id="crow-${r.id}">
+    const sh=shareOf(r); // shares a physical container with another live shipment → same-day clearance
+    let shareAttr='';
+    if(sh.length){rowcls=(rowcls+' row-share').trim();shareAttr=` style="--sharec:${sh[0].color[1]}"`;}
+    return `<tr class="${rowcls}"${shareAttr} id="crow-${r.id}">
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="showCreds('${jatt(r.cno)}')" title="Port login for this customer">🔑</button>
         <button class="iconbtn" onclick="openContForm('${r.id}')" title="Edit">✏️</button>
@@ -2534,6 +2547,39 @@ function renderConts(){
 function contNoList(r){
   return (r.containerNo||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean);
 }
+// ── Same physical container, several shipments ──────────────────────────────────
+// A container can hold two (or more) LCL consignments for different consignees. Each
+// gets its own record (own BL, own C No), but there is only ONE box, so the whole
+// group has to be cleared on the same day — miss one and the container can't leave.
+// SHARE maps container number → {recs, color}; renderConts paints those rows.
+// Only ACTIVE records count: container numbers are reused across voyages, so an old
+// cleared record carrying the same number is a different box, not a shared one.
+const SHARE_COLORS=[['#ede9fe','#6d28d9'],['#ffedd5','#c2410c'],['#cffafe','#0e7490'],['#fce7f3','#be185d'],['#dcfce7','#15803d'],['#fef9c3','#a16207']];
+let SHARE={};
+function buildShare(){
+  const m={};
+  containers.filter(r=>!isDone(r)).forEach(r=>contNoList(r).forEach(cn=>{
+    const k=cn.toUpperCase();(m[k]=m[k]||[]).push(r);
+  }));
+  SHARE={};
+  Object.keys(m).sort().forEach(k=>{
+    if(m[k].length>1)SHARE[k]={recs:m[k],color:SHARE_COLORS[Object.keys(SHARE).length%SHARE_COLORS.length]};
+  });
+  return SHARE;
+}
+// a finished record never shares: its number may simply have been recycled onto a live voyage
+function shareOf(r){return isDone(r)?[]:contNoList(r).map(cn=>SHARE[cn.toUpperCase()]).filter(Boolean);}
+// the group's clearance dates disagree (or one side isn't noted yet) → same-day clearance at risk
+function shareMismatch(g){return new Set(g.recs.map(r=>r.clearance||'')).size>1;}
+// jump from one shipment to the other one sitting in the same container
+function focusShare(cn,fromId){
+  const g=SHARE[(cn||'').toUpperCase()];if(!g)return;
+  const other=g.recs.filter(x=>x.id!==fromId)[0];if(!other)return;
+  const el=document.getElementById('crow-'+other.id);
+  if(!el){toast('The other shipment in this container is on another page');return;}
+  el.scrollIntoView({behavior:'smooth',block:'center'});
+  el.classList.remove('flashnew');void el.offsetWidth;el.classList.add('flashnew');
+}
 // distinct colour per container position — same colour in the table and in the edit-form chips
 const CTN_COLORS=[['#e0f2fe','#0369a1'],['#dcfce7','#15803d'],['#fef9c3','#a16207'],['#fce7f3','#be185d'],['#ede9fe','#6d28d9'],['#ffedd5','#c2410c'],['#cffafe','#0e7490'],['#f1f5f9','#334155']];
 function ctnColor(idx){return CTN_COLORS[idx%CTN_COLORS.length];}
@@ -2544,7 +2590,16 @@ function containerNoCell(r){
   return list.map((cn,idx)=>{
     const info=ctnInfo(r,cn);
     const [bg,fg]=ctnColor(idx);
-    const numHtml=multi?`<span style="background:${bg};color:${fg};padding:1px 7px;border-radius:6px">${esc(cn)}</span>`:esc(cn);
+    const grp=isDone(r)?null:SHARE[cn.toUpperCase()]; // same box, another consignee's LCL → must clear the same day
+    const numHtml=(multi||grp)?`<span style="background:${grp?grp.color[0]:bg};color:${grp?grp.color[1]:fg};padding:1px 7px;border-radius:6px">${esc(cn)}</span>`:esc(cn);
+    let shareTag='';
+    if(grp){
+      const others=grp.recs.filter(x=>x.id!==r.id);
+      const bad=shareMismatch(grp);
+      const tip='Same physical container as: '+others.map(o=>(o.name||'?')+' · BL '+(o.blNo||'—')+(o.clearance?' · noted '+fmtDate(o.clearance):' · NOT noted')).join(' | ')
+        +(bad?' — ⚠ clearance dates do not match; both shipments must be cleared the SAME DAY':' — clear both on the same day');
+      shareTag=` <span class="sharechip" style="background:${grp.color[0]};color:${grp.color[1]}" title="${esc(tip)}" onclick="event.stopPropagation();focusShare('${jatt(cn)}','${jatt(r.id)}')">🔗 ${grp.recs.length} shipments${bad?' ⚠':''}</span>`;
+    }
     const sizeTag=info.size?` <span class="typechip" style="background:#e0f2fe;color:#0369a1">${esc(info.size)}${(info.size==='LCL'&&info.cbm)?' · '+esc(info.cbm)+'cbm':''}</span>`:'';
     let badge='';
     const outBtn=(!isDone(r))?`<button class="copybtn" onclick="markCtnOut('${r.id}','${jatt(cn)}')" title="Mark this container taken out of port">📤</button>`:'';
@@ -2564,7 +2619,7 @@ function containerNoCell(r){
     }else if(info.arrival){
       badge=` <span class="daysbadge d-warn" title="Arrived ${fmtDate(info.arrival)} — not discharged">arrived</span>`;
     }
-    return `<div style="font-weight:600;margin:1px 0">${numHtml}${sizeTag}${badge}</div>`;
+    return `<div style="font-weight:600;margin:1px 0">${numHtml}${sizeTag}${shareTag}${badge}</div>`;
   }).join('');
 }
 function markCtnOut(id,cn){
@@ -3693,12 +3748,21 @@ function renderXpExp(){
   const selTotal=sel.reduce((s,e)=>s+e.amount,0);
   let list=xpState.month?exps.filter(e=>e.date.startsWith(xpState.month)):exps;
   if(xpState.item)list=list.filter(e=>e.item===xpState.item);
+  /* Paid lines used to stay in the list forever, burying the handful still owed under weeks of
+     green PAID rows. The list is now one side at a time: ⏳ Pending is the working view (and the
+     default — it is the money that still needs attention), ✔ Paid is the archive, where the PAID
+     button still un-pays a mistake. */
+  list=list.filter(e=>xpState.paidView?e.paid:!e.paid);
   const fUnpaid=list.filter(e=>!e.paid);
   const fUnpaidT=fUnpaid.reduce((s,e)=>s+e.amount,0);
   const byDate={};
   list.forEach(e=>{(byDate[e.date]=byDate[e.date]||[]).push(e)});
   const days=Object.keys(byDate).sort().reverse();
   document.getElementById('xp_panel_exp').innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="${!xpState.paidView?'primary':'ghost'}" onclick="xpPaidView(false)">⏳ Pending (${unpaid.length})</button>
+      <button class="${xpState.paidView?'primary':'ghost'}" onclick="xpPaidView(true)">✔ Paid</button>
+    </div>
     <div class="toolbar" style="margin-top:0">
       <select class="filter" onchange="xpMonth(this.value)">
         <option value="">All months</option>
@@ -3724,7 +3788,9 @@ function renderXpExp(){
       <button class="primary" onclick="xpMarkPaid()">✓ Mark PAID + receipt</button>
       <button class="ghost" onclick="xpState.sel=[];renderExpenses()">Clear</button>
     </div>`:''}
-    ${days.length===0?'<div class="empty" style="display:block"><div class="big">💵</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No expenses yet</div><div style="margin-top:4px">Add one, or import the old Viber list.</div></div>':''}
+    ${days.length===0?(xpState.paidView
+      ?'<div class="empty" style="display:block"><div class="big">✔</div><div style="font-weight:700;font-size:16px;color:var(--ink)">Nothing paid here yet</div><div style="margin-top:4px">Paid expenses land on this side.</div></div>'
+      :'<div class="empty" style="display:block"><div class="big">🎉</div><div style="font-weight:700;font-size:16px;color:var(--ink)">Nothing pending</div><div style="margin-top:4px">Everything is paid — new expenses appear here.</div></div>'):''}
     ${days.map(d=>{
       const items=byDate[d];
       const dayTotal=items.reduce((s,e)=>s+e.amount,0);
@@ -3748,6 +3814,7 @@ function renderXpExp(){
 }
 function xpMonth(v){xpState.month=v;renderExpenses();}
 function xpItemFilter(v){xpState.item=v;renderExpenses();}
+function xpPaidView(v){xpState.paidView=v;renderExpenses();}
 function xpSelFiltered(){
   const base=xpKind('exp').filter(e=>e.item!=='Labour');
   let list=xpState.month?base.filter(e=>e.date.startsWith(xpState.month)):base;
