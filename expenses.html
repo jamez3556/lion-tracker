@@ -299,13 +299,18 @@ function renderLabour(){
   const list=kind('exp').filter(e=>e.item==='Labour').sort((a,b)=>a.date<b.date?1:-1);
   const unpaid=list.filter(e=>!e.paid);
   const unpaidT=unpaid.reduce((s,e)=>s+e.amount,0);
+  const shown=list.filter(e=>expPaidView?e.paid:!e.paid);
   document.getElementById('pane_labour').innerHTML=`
     <div class="bigrow">
       <div class="stat warn"><div class="n">${rf(unpaidT)}</div><div class="l">Labour pending (${unpaid.length} days)</div></div>
     </div>
+    <div class="tabs" style="margin:2px 0 10px">
+      <button class="${expPaidView?'':'on'}" onclick="expView(false)">⏳ Pending (${unpaid.length})</button>
+      <button class="${expPaidView?'on':''}" style="${expPaidView?'background:#16a34a;border-color:#16a34a':''}" onclick="expView(true)">✔ Paid</button>
+    </div>
     <button class="primary" style="margin-bottom:12px" onclick="openLabour()">＋ Add Labour</button>
-    ${list.length===0?'<div class="card" style="text-align:center;color:var(--muted)">No labour recorded yet</div>':''}
-    ${list.map(e=>`<div class="item">
+    ${shown.length===0?`<div class="card" style="text-align:center;color:var(--muted)">${expPaidView?'Nothing paid here yet.':'No labour pending 🎉'}</div>`:''}
+    ${shown.map(e=>`<div class="item">
       <span class="nm">${fmtD(e.date)}${e.addedBy?`<br><span class="muted" style="font-size:10.5px">${esc(e.addedBy)}</span>`:''}</span>
       <span class="amt">${rf(e.amount)}</span>
       ${e.paid?'<span class="paid">PAID</span>':(isAdm()?`<button class="del" onclick="delExp('${e.id}')">🗑</button>`:'')}
@@ -328,12 +333,29 @@ function renderVan(){
       <button class="primary" style="flex:1" onclick="openVan()">＋ Add Van Charge</button>
       <button class="ghost" style="flex:0 0 auto" onclick="openVendor()">＋ Van Account</button>
     </div>
+    <div class="tabs" style="margin:2px 0 10px">
+      <button class="${expPaidView?'':'on'}" onclick="expView(false)">⏳ Pending (${unpaid.length})</button>
+      <button class="${expPaidView?'on':''}" style="${expPaidView?'background:#16a34a;border-color:#16a34a':''}" onclick="expView(true)">✔ Paid</button>
+    </div>
     ${vendors.length===0?'<div class="card" style="text-align:center;color:var(--muted)">No van accounts yet — press ＋ Van Account to add one</div>':''}
-    ${vendors.map(vd=>{
+    ${expPaidView?(vans.some(v=>v.paid)?vendors.map(vd=>{
+      const pd=vans.filter(v=>v.vendor===vd.account&&v.paid).sort((a,b)=>a.date<b.date?1:-1);
+      if(!pd.length)return '';
+      const pdT=pd.reduce((s,v)=>s+v.amount,0);
+      return `<div class="card">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <b>${esc(vd.name||'Van account')}</b>
+          <span class="muted">${esc(vd.account)}</span>
+          <span style="margin-left:auto;font-weight:800;color:#16a34a">${rf(pdT)} paid</span>
+        </div>
+        ${pd.map(v=>`<div style="display:flex;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid #f1f5f9">
+          <span>${fmtD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><span>${rf(v.amount)}</span><span class="paid">PAID</span>
+        </div>`).join('')}
+      </div>`;}).join(''):'<div class="card" style="text-align:center;color:var(--muted)">Nothing paid here yet.</div>')
+    :vendors.map(vd=>{
       const list=vans.filter(v=>v.vendor===vd.account);
       const up=list.filter(v=>!v.paid).sort((a,b)=>a.date<b.date?-1:1);
       const upT=up.reduce((s,v)=>s+v.amount,0);
-      const paidRecent=list.filter(v=>v.paid).sort((a,b)=>a.date<b.date?1:-1).slice(0,3);
       return `<div class="card">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
           <b>${esc(vd.name||'Van account')}</b>
@@ -342,9 +364,6 @@ function renderVan(){
         </div>
         ${up.map(v=>`<div style="display:flex;gap:10px;font-size:13.5px;padding:5px 0;border-bottom:1px solid #f1f5f9">
           <span>${fmtD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><b>${rf(v.amount)}</b>
-        </div>`).join('')}
-        ${paidRecent.map(v=>`<div style="display:flex;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px solid #f1f5f9;opacity:.6">
-          <span>${fmtD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><span>${rf(v.amount)}</span><span class="paid">PAID</span>
         </div>`).join('')}
       </div>`;}).join('')}`;
 }
@@ -392,7 +411,7 @@ window.saveVan=ev=>{
    side at a time: ⏳ Pending (default, the money needing attention) or ✔ Paid (the archive). */
 let expPaidView=false;
 // the script is a module — inline onclick resolves against window, so the toggle must live there
-window.expView=v=>{expPaidView=v;renderExp();};
+window.expView=v=>{expPaidView=v;render();}; // shared toggle — Daily / Van / Labour all split the same way
 function renderExp(){
   const exps=kind('exp').filter(e=>e.item!=='Labour'); // labour has its own tab
   const unpaid=exps.filter(e=>!e.paid);
