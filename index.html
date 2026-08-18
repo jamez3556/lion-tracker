@@ -8141,10 +8141,14 @@ function syncMPContainers(){
   });
   if(drop.size){containers=containers.filter(c=>!drop.has(c.id));saveContainers();}
 })();
-// migration: merge hand-added + auto-created copies of the SAME shipment (identical BL, both
-// still active). Keep the entry-linked/richest one, carry over anything it's missing, drop the
-// rest. True LCL shares are different BLs in one box — never touched by this.
-(()=>{
+// merge hand-added + auto-created copies of the SAME shipment (identical BL, both still
+// active). Keep the entry-linked/richest one, carry over anything it's missing, drop the rest.
+// True LCL shares are different BLs in one box — never touched by this.
+// Runs from rerender AFTER cloud sync is up: a parse-time merge can't stick, because deletes
+// only reach Firestore via the sync shadow diff — the reconcile snapshot would simply re-add
+// the cloud copy on the next load.
+function mergeContainerDupes(){
+  if(typeof window.__cloudPush!=='function'||!entries.length)return; // wait for real sync + entry list
   const byBl={};
   containers.forEach(c=>{
     if(isDone(c))return;
@@ -8166,7 +8170,7 @@ function syncMPContainers(){
     });
   });
   if(drop.size){containers=containers.filter(c=>!drop.has(c.id));saveContainers();}
-})();
+}
 // Company-wide serial = the order shipments were entered. Renumber ALL entries chronologically
 // (shipment date, then time, then previous NO to keep same-moment order stable, then id) so
 // NO 1 = the first shipment ever and today's newest always has the highest number — regardless of
@@ -8461,7 +8465,7 @@ fitTables();setTimeout(fitTables,300);
 window.__app={
   get:{entries:()=>entries,customers:()=>customers,creds:()=>creds,containers:()=>containers,payments:()=>payments,team:()=>team,expenses:()=>expensesData,salary:()=>salaryData,dosnaps:()=>dosnaps},
   set:{entries:v=>{entries=v},customers:v=>{customers=v},creds:v=>{creds=v},containers:v=>{containers=v},payments:v=>{payments=v},team:v=>{team=v},expenses:v=>{expensesData=v},salary:v=>{salaryData=v},dosnaps:v=>{dosnaps=v}},
-  rerender(){syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();applyAdminUI();renderExpenses();renderFinance();renderDoQueue();updateCounts();}
+  rerender(){mergeContainerDupes();syncPayments();buildEntryFilters();renderEntries();renderMP();renderConts();renderPayments();renderCusts();renderCreds();applyAdminUI();renderExpenses();renderFinance();renderDoQueue();updateCounts();}
 };
 </script>
 
