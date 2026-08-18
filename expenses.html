@@ -388,21 +388,33 @@ window.saveVan=ev=>{
   toast('Added '+note+' · '+rf(amount));
   return false;
 };
+/* Paid lines buried the handful still owed under weeks of green PAID rows — the list shows one
+   side at a time: ⏳ Pending (default, the money needing attention) or ✔ Paid (the archive). */
+let expPaidView=false;
+// the script is a module — inline onclick resolves against window, so the toggle must live there
+window.expView=v=>{expPaidView=v;renderExp();};
 function renderExp(){
   const exps=kind('exp').filter(e=>e.item!=='Labour'); // labour has its own tab
   const unpaid=exps.filter(e=>!e.paid);
   const unpaidTotal=unpaid.reduce((s,e)=>s+e.amount,0);
   const m=today().slice(0,7);
   const mPaid=exps.filter(e=>e.paid&&e.date.startsWith(m)).reduce((s,e)=>s+e.amount,0);
+  const shown=exps.filter(e=>expPaidView?e.paid:!e.paid);
   const byDate={};
-  exps.forEach(e=>{(byDate[e.date]=byDate[e.date]||[]).push(e)});
+  shown.forEach(e=>{(byDate[e.date]=byDate[e.date]||[]).push(e)});
   const days=Object.keys(byDate).sort().reverse().slice(0,45);
   document.getElementById('pane_exp').innerHTML=`
     <div class="bigrow">
       <div class="stat warn"><div class="n">${rf(unpaidTotal)}</div><div class="l">Unpaid (${unpaid.length})</div></div>
       <div class="stat"><div class="n">${rf(mPaid)}</div><div class="l">Paid this month</div></div>
     </div>
-    ${days.length===0?'<div class="card" style="text-align:center;color:var(--muted)">No expenses yet — tap ＋ Add Expense</div>':''}
+    <div class="tabs" style="margin:2px 0 10px">
+      <button class="${expPaidView?'':'on'}" onclick="expView(false)">⏳ Pending (${unpaid.length})</button>
+      <button class="${expPaidView?'on':''}" style="${expPaidView?'background:#16a34a;border-color:#16a34a':''}" onclick="expView(true)">✔ Paid</button>
+    </div>
+    ${days.length===0?(expPaidView
+      ?'<div class="card" style="text-align:center;color:var(--muted)">Nothing paid here yet.</div>'
+      :'<div class="card" style="text-align:center;color:var(--muted)">🎉 Nothing pending — new expenses appear here.</div>'):''}
     ${days.map(d=>{
       const items=byDate[d];
       return `<div class="dayhead"><span>${fmtD(d)}</span><span>${rf(items.reduce((s,e)=>s+e.amount,0))}</span></div>`+
