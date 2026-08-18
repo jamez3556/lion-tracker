@@ -4249,10 +4249,15 @@ function renderXpLabour(){
     <div class="card c-purple"><div class="n">${rf(allPaid)}</div><div class="l">Paid — all time</div></div>`;
   const sel=list.filter(e=>xpState.sel.includes(e.id));
   const selT=sel.reduce((s,e)=>s+e.amount,0);
+  const shown=list.filter(e=>xpState.paidView?e.paid:!e.paid);
   document.getElementById('xp_panel_labour').innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="${!xpState.paidView?'primary':'ghost'}" onclick="xpPaidView(false)">⏳ Pending (${unpaid.length})</button>
+      <button class="${xpState.paidView?'primary':'ghost'}" onclick="xpPaidView(true)">✔ Paid</button>
+    </div>
     <div class="toolbar" style="margin-top:0">
       <button class="primary" onclick="openXpLabourAdd()">＋ Add Labour</button>
-      ${unpaid.length?`<button class="ghost" onclick="xpLabourSelAll()">Select all pending</button>`:''}
+      ${!xpState.paidView&&unpaid.length?`<button class="ghost" onclick="xpLabourSelAll()">Select all pending</button>`:''}
       <button class="ghost" onclick="xpLabourExcel()">⬇ Excel</button>
     </div>
     ${sel.length?`<div style="display:flex;align-items:center;gap:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:12px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap">
@@ -4260,8 +4265,10 @@ function renderXpLabour(){
       <button class="primary" onclick="xpMarkPaid()">✓ Mark PAID + receipt</button>
       <button class="ghost" onclick="xpState.sel=[];renderExpenses()">Clear</button>
     </div>`:''}
-    ${list.length===0?'<div class="empty" style="display:block"><div class="big">🏗️</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No labour recorded yet</div><div style="margin-top:4px">Jakir adds it daily from his page (Labour preset), or add here.</div></div>':''}
-    ${list.map(e=>`
+    ${shown.length===0?(xpState.paidView
+      ?'<div class="empty" style="display:block"><div class="big">✔</div><div style="font-weight:700;font-size:16px;color:var(--ink)">Nothing paid here yet</div><div style="margin-top:4px">Paid labour lands on this side.</div></div>'
+      :'<div class="empty" style="display:block"><div class="big">🏗️</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No labour pending</div><div style="margin-top:4px">Jakir adds it daily from his page (Labour preset), or add here.</div></div>'):''}
+    ${shown.map(e=>`
       <div style="display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:5px">
         ${e.paid?'<span style="width:18px;text-align:center">✔</span>':`<input type="checkbox" style="width:18px;height:18px;margin:0" ${xpState.sel.includes(e.id)?'checked':''} onchange="xpToggleSel('${e.id}')">`}
         <span style="flex:1;font-size:13.5px">${xpD(e.date)}</span>
@@ -4302,6 +4309,10 @@ function renderXpVan(){
     <div class="card c-info"><div class="n">${rf(mPaid)}</div><div class="l">Paid — ${xpMonthLabel(thisMonth)}</div></div>
     <div class="card c-purple"><div class="n">${vendors.length}</div><div class="l">Van accounts</div></div>`;
   document.getElementById('xp_panel_van').innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="${!xpState.paidView?'primary':'ghost'}" onclick="xpPaidView(false)">⏳ Pending (${unpaid.length})</button>
+      <button class="${xpState.paidView?'primary':'ghost'}" onclick="xpPaidView(true)">✔ Paid</button>
+    </div>
     <div class="toolbar" style="margin-top:0">
       <button class="primary" onclick="openXpVanForm()">＋ Add Van Charge</button>
       <button class="ghost" onclick="xpAddVendor()">＋ Van Account</button>
@@ -4309,13 +4320,30 @@ function renderXpVan(){
       ${vans.some(v=>String(v.id).startsWith('vn-'))?'':'<button class="ghost" onclick="xpImportVans()">⤵ Import Viber van list (27-07)</button>'}
     </div>
     ${vendors.length===0?'<div class="empty" style="display:block"><div class="big">🚐</div><div style="font-weight:700;font-size:16px;color:var(--ink)">No van accounts yet</div><div style="margin-top:4px">Add a van account, or import the Viber list.</div></div>':''}
-    ${vendors.map(vd=>{
+    ${xpState.paidView?(vans.some(v=>v.paid)?vendors.map(vd=>{
+      const pd=vans.filter(v=>v.vendor===vd.account&&v.paid).sort((a,b)=>(a.paidAt||a.date)<(b.paidAt||b.date)?1:-1);
+      if(!pd.length)return '';
+      const pdT=pd.reduce((s,v)=>s+v.amount,0);
+      return `<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <b>${esc(vd.name||'Van account')}</b>
+          <span style="color:var(--muted);font-size:12.5px">${esc(vd.account)}</span>
+          <span style="margin-left:auto;font-weight:800;color:#16a34a">${rf(pdT)} paid (${pd.length})</span>
+        </div>
+        ${pd.map(v=>`
+          <div style="display:flex;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px solid #f1f5f9;align-items:center">
+            <span style="width:17px;text-align:center">✔</span>
+            <span>${xpD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><span>${rf(v.amount)}</span>
+            <button style="font-size:10px;font-weight:800;color:#16a34a;border:1px solid #16a34a;border-radius:999px;padding:1px 7px;background:none;cursor:pointer" title="Click to UNDO this payment" onclick="xpVanUnpay('${v.id}')">PAID${v.paidAt?' '+xpD(v.paidAt.slice(0,10)):''}</button>
+            ${v.slip?`<a href="${esc(v.slip.url)}" target="_blank" rel="noopener" title="${esc(v.slip.name)}">🧾</a>`:''}
+          </div>`).join('')}
+      </div>`;}).join(''):'<div class="empty" style="display:block"><div class="big">✔</div><div style="font-weight:700;font-size:16px;color:var(--ink)">Nothing paid here yet</div><div style="margin-top:4px">Paid van charges land on this side, grouped by account.</div></div>')
+    :vendors.map(vd=>{
       const list=vans.filter(v=>v.vendor===vd.account);
       const up=list.filter(v=>!v.paid).sort((a,b)=>a.date<b.date?-1:1);
       const upT=up.reduce((s,v)=>s+v.amount,0);
       const selHere=up.filter(v=>xpState.vsel.includes(v.id));
       const selT=selHere.reduce((s,v)=>s+v.amount,0);
-      const paidRecent=list.filter(v=>v.paid).sort((a,b)=>(a.paidAt||'')<(b.paidAt||'')?1:-1).slice(0,5);
       return `<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <b>${esc(vd.name||'Van account')}</b>
@@ -4333,13 +4361,6 @@ function renderXpVan(){
             <span>${xpD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><b>${rf(v.amount)}</b>
             <button class="ghost" style="padding:2px 7px;font-size:11px" onclick="openXpVanForm('${v.id}')" title="Edit">✎</button>
             <button class="ghost" style="padding:2px 7px;font-size:11px" onclick="xpDelVan('${v.id}')">🗑</button>
-          </div>`).join('')}
-        ${paidRecent.map(v=>`
-          <div style="display:flex;gap:10px;font-size:12.5px;padding:4px 0;border-bottom:1px solid #f1f5f9;align-items:center;opacity:.75">
-            <span style="width:17px;text-align:center">✔</span>
-            <span>${xpD(v.date)}</span><span style="flex:1">${esc(v.note||'van laari')}</span><span>${rf(v.amount)}</span>
-            <button style="font-size:10px;font-weight:800;color:#16a34a;border:1px solid #16a34a;border-radius:999px;padding:1px 7px;background:none;cursor:pointer" title="Click to UNDO this payment" onclick="xpVanUnpay('${v.id}')">PAID${v.paidAt?' '+xpD(v.paidAt.slice(0,10)):''}</button>
-            ${v.slip?`<a href="${esc(v.slip.url)}" target="_blank" rel="noopener" title="${esc(v.slip.name)}">🧾</a>`:''}
           </div>`).join('')}
       </div>`;}).join('')}`;
 }
