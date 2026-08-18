@@ -8154,7 +8154,9 @@ function syncMPContainers(){
   const drop=new Set();
   Object.values(byBl).forEach(list=>{
     if(list.length<2)return;
-    const score=c=>(c.entryId?16:0)+(c.discharge?8:0)+(c.portInfo&&Object.keys(c.portInfo).length?4:0)+(c.doDate?2:0)+(c.clearance?1:0);
+    // a link to a DELETED entry scores nothing — else the orphan could win the merge and the
+    // MP sync would immediately re-create the live entry's record (dup loop)
+    const score=c=>((c.entryId&&entries.some(e=>e.id===c.entryId))?16:0)+(c.discharge?8:0)+(c.portInfo&&Object.keys(c.portInfo).length?4:0)+(c.doDate?2:0)+(c.clearance?1:0);
     list.sort((a,b)=>score(b)-score(a));
     const keep=list[0];
     list.slice(1).forEach(dup=>{
