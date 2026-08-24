@@ -5391,6 +5391,28 @@ function collectInvoiceLines(e){
 function invSummaryText(lines){
   return lines.map(l=>'  • '+l.item+'   '+l.qty+' x '+l.rate+' = '+fmtNum(l.amount)+(l.taxable?'':'   (no GST)')).join('\n');
 }
+/* WHOSE name goes on the invoice. The customer record in the Customers tab is the register — one
+   row per C number, the name the office agreed on. The name typed on a shipment is just what a
+   staff member wrote that morning ("PRINT LINE" one day, "PRINTLINE" the next; 17 C numbers carry
+   two or more spellings), and billing under that meant the invoice went out under whichever
+   spelling happened to be on the form. So: the customer's QB Name if one is pinned, else the
+   customer record's name, and the shipment's typed name only when there is no customer record at
+   all. Nothing is invented here — it can only ever be a name someone saved. */
+function billingName(e){
+  const c=lookupCustomer(e.cno);
+  return (c&&(c.qbName||c.name))||e.customer||'';
+}
+/* QuickBooks answered with a DIFFERENT spelling of the same company (it matched on the normalised
+   name — "SAARA TRADING PVT LTD" here, "Saara Trading Private Limited" there). Pin that exact
+   spelling onto the customer record so every future invoice matches on the first try, and so the
+   Customers tab shows the name the accounts actually live under. */
+function pinQbName(cno,qbName){
+  if(!cno||!qbName)return;
+  const c=lookupCustomer(cno);
+  if(!c||c.qbName===qbName)return;
+  c.qbName=qbName;c.u=Date.now();saveCustomers();renderCusts();
+  toast('QuickBooks name saved for '+c.cno+': '+qbName);
+}
 /* Create the invoice in QuickBooks DIRECTLY — no Zapier, no per-task charge.
    preview=true writes nothing: it comes back with the customer, the tax codes and the totals
    QuickBooks would use, so the first one can be checked before it exists. */
@@ -5400,7 +5422,7 @@ async function qbInvoice(preview){
   const inv=collectInvoiceLines(e);
   if(!inv.lines.length){toast('No lines to invoice');return;}
   const cust=lookupCustomer(e.cno);
-  const name=(cust&&cust.qbName)||e.customer||'';
+  const name=billingName(e);
   /* The invoice number must be supplied. This company uses CUSTOM transaction numbers in
      QuickBooks, which means a blank DocNumber is NOT auto-filled — QuickBooks creates the invoice
      with no number at all (that is where the un-numbered invoices in the sync came from), and an
@@ -5447,7 +5469,24 @@ async function qbInvoice(preview){
         advance:Number(document.getElementById('inv_advance').value)||0,
         key:'inv_'+e.id})});
     const j=await r.json().catch(()=>({}));
+    /* QuickBooks has no customer under this name. Rather than a dead end, the service sends back
+       the names it DID find — so the office can say which one it is, once, and it is remembered on
+       the customer record (QB Name). The next invoice for this customer matches on the first try. */
+    if(r.status===404&&j.suggestions&&j.suggestions.length){
+      const pick=prompt('QuickBooks has no customer called "'+name+'".\n\n'
+        +'Which one is it? Type the number, or Cancel to leave it:\n\n'
+        +j.suggestions.map((s,i)=>(i+1)+') '+s.name).join('\n')
+        +'\n\nThe answer is saved on '+(e.cno||'this customer')+' as its QuickBooks name — you will not be asked again.');
+      const idx=Number(pick)-1;
+      if(j.suggestions[idx]){
+        pinQbName(e.cno,j.suggestions[idx].name);
+        toast('Saved — press the button again to create the invoice');
+      }
+      return;
+    }
     if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
+    // matched a different spelling of the same company — pin the QuickBooks one so it is exact next time
+    if(j.customerFuzzy&&j.customer)pinQbName(e.cno,j.customer);
     if(preview){
       alert('PREVIEW — nothing was created.\n\nCustomer matched: '+j.customer
         +'\nTax code for our charges: '+((j.taxCodes.taxable||{}).name||j.taxCodes.taxable.value)
@@ -5614,7 +5653,7 @@ async function sendInvoice(){
   zapierPost({
     event:'invoice_ready',
     entryId:e.id,                                  // → Zapier writes the QuickBooks-assigned number back to this entry via Firestore
-    customerName:(custRec&&custRec.qbName)||e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
+    customerName:billingName(e),cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
     // supporting documents (DO / MACL bills / AWB) — the Zap's Attach File step pulls these URLs
     attachUrls:atts.map(a=>a.url).join('\n'),
     att1:atts[0]?atts[0].url:'',att2:atts[1]?atts[1].url:'',att3:atts[2]?atts[2].url:'',att4:atts[3]?atts[3].url:'',
