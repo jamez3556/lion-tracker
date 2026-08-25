@@ -5218,10 +5218,23 @@ function expectedLines(e){
     else L.push({name:prof.clearLabel||'Clearance KG',qty:wt,rate:rate('Clearance KG'),tax:8});
     if(!prof.noDhoni)L.push({name:'Dhoni Charges',qty:wt,rate:rate('Dhoni Charges'),tax:8});
   }
-  // DO Fee: actual MACL amount from the Payment tab wins; otherwise auto-estimate from the KG (AP only)
-  L.push({name:'Delivery Order Fee',qty:1,rate:(pay&&pay.macl!=null?pay.macl:(e.type==='AP'?maclEstimate(wt):'')),tax:0,est:!(pay&&pay.macl!=null)});
+  /* DO Fee: the ACTUAL MACL amount (Payment tab / STELCO desk 💵 / read off the DO snap) always
+     wins. The weight formula only fills in for a normally-billed job. On a pass-through-only job
+     it must NOT: that invoice is meant to carry the airport's real charges and nothing else, so a
+     formula figure there is an invented number on a real invoice (a 17 kg STELCO job came out with
+     a 106.54 DO fee nobody had been charged). No actual yet ⇒ the line stays empty. */
+  L.push({name:'Delivery Order Fee',qty:1,
+    rate:(pay&&pay.macl!=null?pay.macl:((svc&&e.type==='AP')?maclEstimate(wt):'')),
+    tax:0,est:!(pay&&pay.macl!=null)});
   L.push({name:'Customs Duty',qty:1,rate:(pay&&pay.duty!=null?pay.duty:''),tax:0,est:!(pay&&pay.duty!=null)});
   return L;
+}
+/* Is this shipment billed as pass-throughs ONLY? (customer's minKg rule met — e.g. STELCO at or
+   below 50 kg.) Same test as `svc` in expectedLines, kept here so the builder can ask it too. */
+function apPassThroughOnly(e){
+  const prof=((lookupCustomer(e.cno)||{}).apProfile)||{};
+  const wt=e.grsWt!=null?e.grsWt:'';
+  return !!(prof.minKg&&wt!==''&&Number(wt)<=Number(prof.minKg));
 }
 // Paid status straight from QuickBooks (qbBalance/qbTotal come with every invoice fetch) plus any
 // payments recorded through the tracker's 💰 button.
@@ -5307,6 +5320,19 @@ function openInvoiceForm(entryId){
     // keep the pass-through rows editable even when they were 0 (zero lines aren't stored)
     const passThru=e.type==='MP'?['MPL Charge','Customs Duty','Lorry Charges']:['Delivery Order Fee','Customs Duty'];
     passThru.forEach(n=>{if(!e.qbLines.some(l=>l.item===n))box.appendChild(invLineRow({name:n,qty:1,rate:'',tax:0}));});
+  }else if(apPassThroughOnly(e)){
+    /* Pass-throughs only: lay out just the charges that actually exist. The empty DO Fee and
+       Customs Duty rows are skipped at send anyway, so all they ever did here was make a two-line
+       invoice look like a four-line one. ＋ Custom (non-tax) puts one back when it is needed;
+       recording the MACL total (desk 💵 or Payment tab) brings the DO Fee back by itself. */
+    const real=expectedLines(e).filter(l=>Number(l.rate)>0);
+    // the desk / DO snap appends the demurrage (and its own MACL total) straight after this runs —
+    // so when one of those is waiting, don't leave a placeholder row for it to sit next to
+    const dp=dosnaps.find(d=>d.entryId===e.id);
+    const incoming=Number(e.demur)>0||Number(dp&&dp.demur)>0||Number(dp&&dp.macl)>0||((dp&&dp.extras||[]).length>0);
+    // nothing recorded yet — keep ONE row to type the airport charge into rather than an empty form
+    (real.length||incoming?real:[{name:'Delivery Order Fee',qty:1,rate:'',tax:0}])
+      .forEach(l=>box.appendChild(invLineRow(l)));
   }else{
     expectedLines(e).forEach(l=>box.appendChild(invLineRow(l)));
   }
