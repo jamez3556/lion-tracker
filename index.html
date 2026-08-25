@@ -141,8 +141,6 @@
   .st-Delivered{background:var(--infobg);color:var(--info)}
   /* Customs came back with a query: the job is STOPPED until it is answered, so it shouts */
   .st-Clarification{background:#fee2e2;color:#b91c1c}
-  tbody tr.row-clar td.name{color:#b91c1c;font-weight:800}
-  tbody tr.row-clar td.name::after{content:' ⚠ CLARIFICATION';font-size:10.5px;font-weight:800;color:#b91c1c;white-space:nowrap}
   .st-Paid{background:#16a34a;color:#fff}
   .st-PendingDO{background:var(--warnbg);color:var(--warn)}
   .st-DONotApproved{background:var(--dangerbg);color:var(--danger)}
@@ -1725,7 +1723,7 @@ function renderEntries(){
   const rows=filteredEntries();
   const slice=rows.slice((eState.page-1)*PAGE_SIZE,eState.page*PAGE_SIZE);
   document.getElementById('e_empty').style.display=rows.length===0?'block':'none';
-  document.getElementById('e_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}${apToday(r)?' ap-today':''}${r.status==='Clarification'?' row-clar':''}">
+  document.getElementById('e_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}${apToday(r)?' ap-today':''}">
     <td class="num" data-l="No" ${isBillOnly(r)?'title="Billing only — no documentation"':''}>${isBillOnly(r)?'💳':(r.no??'—')}</td>
     ${r.cno?`<td class="cno" data-l="C No" style="cursor:pointer" onclick="window.open('?cust=${encodeURIComponent(r.cno)}','_blank')"
       title="Open ${esc(r.cno)} in its own tab — only this customer's shipments show there">${esc(r.cno)}</td>`
@@ -2908,7 +2906,7 @@ function renderMP(){
   const mte=document.getElementById('mpt_eeman');if(mte)mte.style.display=isAdmin()?'':'none';
   if(mpTab==='eeman'&&isAdmin())renderEemanAcct();
   document.getElementById('mp_empty').style.display=rows.length===0?'block':'none';
-  document.getElementById('mp_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}${r.status==='Clarification'?' row-clar':''}">
+  document.getElementById('mp_tbody').innerHTML=slice.map(r=>`<tr class="t-${esc(r.type)}">
     <td class="num" data-l="No">${r.no??'—'}</td>
     <td class="cno" data-l="C No">${esc(r.cno)}</td>
     <td data-l="Date">${fmtDate(r.date)}${r.time?`<div class="sub">${esc(r.time)}</div>`:''}</td>
