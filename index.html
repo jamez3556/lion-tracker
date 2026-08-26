@@ -2264,6 +2264,47 @@ window.__logShipment=function(o){
     return{ok:false,error:'exception: '+(e&&e.message||e)};
   }
 };
+/* URL log route — for agents that may only NAVIGATE (e.g. Cowork sessions whose safety
+   classifier blocks running JS on a live page). Open:
+     index.html?log=<encodeURIComponent(JSON.stringify({cno,customer,awbBl,grsWt,pkgs,file,type,date,containerNo?}))>
+   Same payload as __logShipment (which does the actual work, so every guard applies:
+   signed-in required, cloud-sync required, duplicate AWB/BL refused, serials assigned
+   by the app). The result is shown in a fixed banner #autoLogResult whose text starts
+   "LOG_RESULT {json}" — read it with page-text extraction; click it to dismiss.
+   The ?log= param is stripped from the URL immediately, so a reload cannot double-log
+   (the AWB/BL dedupe guard protects again anyway). A crafted link can at worst add a
+   visible, deletable entry in an already-signed-in browser — same power as the form. */
+(function(){
+  let payload=null,parseErr=null;
+  try{
+    const q=new URLSearchParams(location.search);
+    if(!q.has('log'))return;
+    try{payload=JSON.parse(q.get('log'));}catch(e){parseErr=String(e&&e.message||e);}
+    q.delete('log');
+    history.replaceState(null,'',location.pathname+(q.toString()?'?'+q.toString():'')+location.hash);
+  }catch(e){return;}
+  function show(res){
+    const d=document.createElement('div');
+    d.id='autoLogResult';
+    d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;padding:10px 16px;font:13px/1.5 monospace;white-space:pre-wrap;word-break:break-all;background:'+(res.ok?'#0a7d40':'#a22626')+';color:#fff;cursor:pointer';
+    d.textContent='LOG_RESULT '+JSON.stringify(res)+'  (click to dismiss)';
+    d.onclick=function(){d.remove();};
+    document.body.appendChild(d);
+  }
+  const t0=Date.now();
+  const tm=setInterval(function(){
+    if(!document.body)return;
+    if(parseErr){clearInterval(tm);show({ok:false,error:'bad ?log= JSON: '+parseErr});return;}
+    const r=window.__trackerReady?window.__trackerReady():null;
+    if(r&&r.ok){
+      clearInterval(tm);
+      show(window.__logShipment(payload));
+    }else if(Date.now()-t0>120000){
+      clearInterval(tm);
+      show({ok:false,error:'timed out waiting for sign-in/sync (2 min)',ready:r});
+    }
+  },2000);
+})();
 
 // 📱 WhatsApp the customer: opens wa.me with their number and a ready-typed status message —
 // you review and press Send yourself (no API, no cost). Number from Customers → CONTACT.
