@@ -1199,7 +1199,7 @@
     <div class="actions">
       <button type="button" class="ghost" onclick="closeModal('overlay-invoice')">Cancel</button>
       <button type="button" class="ghost" id="inv_payBtn" onclick="openPayRec(document.getElementById('inv_entryId').value)" title="Record a payment received against this invoice in QuickBooks">💰 Payment Received</button>
-      <button type="button" class="ghost" id="inv_fetchBtn" onclick="fetchInvoice()" title="Refresh from QuickBooks: the invoice's real lines + paid balance (uses 2 Zapier tasks)">⬇ Check in QuickBooks</button>
+      <button type="button" class="ghost" id="inv_fetchBtn" onclick="fetchInvoice()" title="Refresh from QuickBooks: the invoice's real lines + paid balance (read directly — no Zapier tasks)">⬇ Check in QuickBooks</button>
       <button type="button" class="ghost" id="inv_updateBtn" onclick="updateInvoice()" title="Correct THIS invoice in QuickBooks (same number) — use after a mistake, only if unpaid">✏️ Update Invoice</button>
       <button type="button" class="ghost" id="inv_resendBtn" onclick="resendInvoice()" title="Email the existing invoice again — does NOT create a new one">📧 Resend Email</button>
       <button type="button" class="ghost" onclick="qbInvoice(true)" title="See exactly what would be created in QuickBooks — writes nothing">🔍 Preview</button>
@@ -3097,9 +3097,11 @@ const ZAPIER_RESEND_URL='https://hooks.zapier.com/hooks/catch/15397558/44qbgjp/'
 // Third Catch Hook — AMEND an existing invoice (Find Invoice by number → Update Invoice with new lines).
 // Separate again so neither the create nor the resend Zap needs changing. Blank = not configured.
 const ZAPIER_UPDATE_URL='https://hooks.zapier.com/hooks/catch/15397558/44q4sdo/';
-// Audit fetch: pulls a manually-billed invoice's REAL lines from QuickBooks (by number) so the
-// builder can show them and flag differences from the customer's expected charges.
-const ZAPIER_FETCH_URL='https://hooks.zapier.com/hooks/catch/15397558/44l2h33/';
+// Audit fetch (RETIRED 2026-08-27): reading an invoice's real lines went through a 3-step Zap that
+// cost 2 tasks a time — and it fired by itself every time the builder opened on a billed shipment,
+// which was the whole of the month's Zapier usage. Both paths read from our own service now
+// (qbPullLines / fetchInvoice → QB_API/invoice {fetch:true}), so the Zap can be switched off.
+const ZAPIER_FETCH_URL='';
 // Payment received: records a customer payment against the invoice in QuickBooks (Receive Payment).
 const ZAPIER_PAYMENT_URL='https://hooks.zapier.com/hooks/catch/15397558/44lhph5/';
 // Create-invoice hook for shipments that HAVE documents attached: Create Invoice → Attach File(s) →
@@ -5403,16 +5405,15 @@ function openInvoiceForm(entryId){
   document.getElementById('inv_updateBtn').style.display=invoiced;
   document.getElementById('inv_fetchBtn').style.display=invoiced;
   document.getElementById('inv_payBtn').style.display=invoiced;
-  // Billed (possibly manually in QuickBooks) but the real lines aren't known yet: auto-pull ONCE so
-  // the builder shows the ACTUAL invoice. After that, opening costs nothing — the ⬇ Check in
-  // QuickBooks button is the manual refresh for lines + paid balance (2 Zapier tasks per press).
+  /* Billed (possibly straight into QuickBooks) but the real lines aren't known here yet: pull them
+     so the builder shows the ACTUAL invoice rather than a regenerated draft.
+
+     This fired the Zapier fetch Zap on every open — 2 tasks of a 100-task plan each time, with
+     nobody pressing anything, which is where the month's usage actually went. It reads from our own
+     service now, so it is free and can stay automatic. */
   const needLines=!(e.qbLines&&e.qbLines.length);
-  const fetching=!!((e.billNo||'').trim()&&ZAPIER_FETCH_URL&&needLines);
-  if(fetching){
-    try{fetch(ZAPIER_FETCH_URL,{method:'POST',body:JSON.stringify({
-      event:'invoice_fetch',entryId:e.id,billNo:e.billNo.trim()
-    })}).catch(()=>{});}catch(err){}
-  }
+  const fetching=!!((e.billNo||'').trim()&&needLines);
+  if(fetching)qbPullLines(e);
   const loading=(fetching&&needLines)?`<div style="color:#0369a1;font-weight:700;margin-top:4px">⏳ Loading invoice ${esc(e.billNo)} from QuickBooks — the lines below are a draft until it appears (~15 s)…</div>`:'';
   const warn=e.qbInvoiced?`<div style="color:#b45309;font-weight:700;margin-top:4px">⚠ Already sent to QuickBooks${e.qbInvoicedAt?' on '+fmtDate(e.qbInvoicedAt):''} — sending again makes a duplicate invoice.</div>`:'';
   const sea=e.type==='MP';
@@ -6025,18 +6026,62 @@ window.sendPaymentReceived=async function(ev){
 };
 // Audit: ask the fetch Zap for this invoice's REAL lines from QuickBooks (Find Invoice by number
 // → Firestore qbinv doc with kind:'lines'); __applyQbLines stores them and refreshes the builder.
-function fetchInvoice(){
+/* Read one invoice from QuickBooks through our own service and store what it says.
+   Quiet by design: this runs by itself when the builder opens on a billed shipment, so a failure is
+   logged, not thrown in the user's face — the draft lines are still perfectly usable. */
+async function qbPullLines(e){
+  const bn=(e.billNo||'').trim();if(!bn)return;
+  try{
+    const tok=await (window.__idToken?window.__idToken():'');
+    if(!tok)return;                     // signed out — the draft still shows, just unaudited
+    const r=await fetch(QB_API+'/invoice',{method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
+      body:JSON.stringify({fetch:true,docNumber:bn})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok){console.warn('invoice '+bn+' not read:',j.error||r.status);return;}
+    applyQbInvoice(e,j,true);
+  }catch(err){console.warn('invoice read failed',err);}
+}
+/* ⬇ Check in QuickBooks — the invoice's REAL lines and balance, read live.
+
+   This used to go through Zapier: a 3-step Zap that cost 2 tasks of a 100-task plan on every press,
+   answered ~15 seconds later through a Firestore write-back. It was the whole of the month's Zapier
+   usage. Our own service already holds the QuickBooks credentials, so it reads the invoice directly
+   — no per-task charge, no round trip, and the answer is applied the moment it arrives. */
+async function fetchInvoice(){
   if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
   const bn=document.getElementById('inv_billNo').value.trim()||e.billNo;
   if(!bn){toast('No invoice number — nothing to check');return;}
-  if(!ZAPIER_FETCH_URL){toast('Check not set up yet — the fetch webhook URL is missing');return;}
+  toast('⬇ Reading invoice '+bn+' from QuickBooks…');
   try{
-    fetch(ZAPIER_FETCH_URL,{method:'POST',body:JSON.stringify({
-      event:'invoice_fetch',entryId:e.id,billNo:bn
-    })}).catch(err=>console.warn('Fetch failed',err));
-  }catch(err){console.warn('Fetch error',err);}
-  toast('⬇ Checking QuickBooks — invoice '+bn+"'s real lines will appear here in ~15 s");
+    const tok=await (window.__idToken?window.__idToken():'');
+    if(!tok)throw new Error('You are signed out — reload and sign in again');
+    const r=await fetch(QB_API+'/invoice',{method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
+      body:JSON.stringify({fetch:true,docNumber:bn})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
+    applyQbInvoice(e,j);
+  }catch(err){
+    console.warn('invoice read failed',err);
+    alert('Could not read invoice '+bn+'.\n\n'+(err.message||err));
+  }
+}
+/* Store what QuickBooks actually holds and show it. Same fields the Zapier write-back used to set,
+   so the builder's audit (expected vs real) is unchanged. */
+function applyQbInvoice(e,j,quiet){
+  const lines=(j.lines||[]).filter(l=>l&&l.item);
+  if(!lines.length){if(!quiet)toast('Invoice '+(j.invoiceNo||'')+' has no item lines in QuickBooks');return;}
+  e.qbLines=lines.map(l=>({item:l.item,desc:l.desc||'',qty:Number(l.qty)||0,rate:Number(l.rate)||0,tax:Number(l.tax)||0}));
+  e.qbFetchedAt=isoLocal(new Date());
+  if(j.balance!=null)e.qbBalance=Number(j.balance);
+  if(j.total!=null)e.qbTotal=Number(j.total);
+  saveEntries();renderEntries();renderMP();renderPayments();
+  const ov=document.getElementById('overlay-invoice');
+  if(ov.classList.contains('show')&&document.getElementById('inv_entryId').value===e.id)
+    openInvoiceForm(e.id);
+  if(!quiet)toast('⬇ Invoice '+(j.invoiceNo||e.billNo||'')+' read from QuickBooks — audit shown in the builder');
 }
 // Called by the cloud module when the fetch Zap drops a qbinv doc with kind:'lines' — the invoice's
 // REAL line items as comma-separated strings. Stores them on the entry (qbLines) so the builder shows
@@ -7712,14 +7757,6 @@ async function dueReceive(btn){
   btn.disabled=false;btn.textContent='💰 Receive';
   await qbRefresh(null);            // pull the real balances back before redrawing
   renderCustDues();renderCusts();renderPayments();
-}
-// one-invoice refresh; the fetch Zap writes the balance back through the qbinv collection
-function fetchOneBalance(id){
-  const e=entries.find(x=>x.id===id);if(!e||!(e.billNo||'').trim())return;
-  if(!ZAPIER_FETCH_URL){toast('Fetch webhook not set up');return;}
-  try{fetch(ZAPIER_FETCH_URL,{method:'POST',body:JSON.stringify({event:'invoice_fetch',entryId:e.id,billNo:e.billNo.trim()})}).catch(()=>{});}catch(err){}
-  toast('⬇ Asked QuickBooks for '+e.billNo+' — the exact balance lands in a few seconds');
-  setTimeout(()=>{try{renderCustDues();renderCusts();}catch(err){}},15000);
 }
 // documents picked while ADDING a customer wait here and upload right after Save creates the record
 let custPendingFiles=[];
