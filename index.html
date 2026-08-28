@@ -1441,6 +1441,25 @@ function fmtDate(s){
   return new Date(s+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'});
 }
 function fmtNum(n){return (n===null||n===undefined||n==='')?'—':Number(n).toLocaleString('en-US')}
+/* Which build this is. Bumped by the publish tool, and stamped on every error report so a
+   fault can be tied to the version that introduced it. */
+const APP_BUILD='2026-08-29 00:49';
+/* Report faults instead of swallowing them. At most 5 a session and never the same one twice,
+   so a loop cannot run up a Firestore bill; silent, because the staff can do nothing about it
+   and a scary popup mid-shipment is worse than the bug. */
+(function(){
+  const seen=new Set();let sent=0;
+  const report=(msg,where)=>{
+    if(sent>=5)return;const k=String(msg).slice(0,120);if(seen.has(k))return;
+    seen.add(k);sent++;
+    try{window.__logErr&&window.__logErr({msg,where,ver:APP_BUILD});}catch(e){}
+  };
+  window.addEventListener('error',e=>report(
+    (e.message||'error')+(e.error&&e.error.stack?' | '+String(e.error.stack).split('\n')[1]:''),
+    (e.filename||'')+':'+(e.lineno||'')));
+  window.addEventListener('unhandledrejection',e=>report(
+    'unhandled promise: '+((e.reason&&(e.reason.message||e.reason))||'?'),'promise'));
+})();
 function isoLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 // A container needs its DO extended when the liner's DO approval date doesn't reach the last free date
 function addDays(iso,n){const d=new Date(iso+'T00:00:00');d.setDate(d.getDate()+n);return isoLocal(d);}
@@ -8996,6 +9015,19 @@ async function startSync(){
        The service verifies this token against this same Firebase project and only lets the admin
        address through — so nothing secret has to live in this file, which is public on Pages. */
     window.__idToken=async()=>{try{return auth.currentUser?await auth.currentUser.getIdToken():'';}catch(e){return '';}};
+    /* Black box: what broke, where, on which version. Kept in settings/ (already allowed by the
+       rules) as one document of fingerprint → { message, count, who, when }. The fingerprint
+       collapses the same fault reported by five devices into one line instead of five hundred. */
+    window.__logErr=async(o)=>{
+      try{
+        const fp=String(o.msg||'').replace(/[0-9]+/g,'#').slice(0,120).replace(/[^\w #.:-]/g,'_')||'unknown';
+        await fx.setDoc(fx.doc(db,'settings','errlog'),{[fp]:{
+          msg:String(o.msg||'').slice(0,400),where:String(o.where||'').slice(0,200),
+          ver:String(o.ver||''),who:(window.__userEmail||'?'),
+          at:new Date().toISOString(),n:fx.increment?fx.increment(1):1
+        }},{merge:true});
+      }catch(e){/* reporting a fault must never cause one */}
+    };
     // AI document-reader key lives in Firestore settings/ai (team-shared, never in the public HTML)
     window.__aiKey={
       get:async()=>{const s=await fx.getDoc(fx.doc(db,'settings','ai'));return s.exists()?(s.data().key||''):'';},
