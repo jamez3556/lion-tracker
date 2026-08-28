@@ -5559,6 +5559,25 @@ async function qbInvoice(preview){
       return;
     }
     if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
+    /* Nothing was created: this shipment was invoiced before, and the service handed back that
+       invoice rather than raising a second one. It used to be applied in silence, which reads
+       exactly like a fresh invoice — say it plainly instead. */
+    if(j.duplicate)alert('No new invoice was created.
+
+This shipment was already invoiced as '
+      +(j.invoiceNo||'—')+' ('+fmtNum(j.total||0)+', '+(j.date||'')+') and that invoice is still in '
+      +'QuickBooks.
+
+Its number is on the shipment. To email it again use 📧 Resend Email.');
+    /* The number this shipment used to carry was DELETED in QuickBooks, so a real invoice has just
+       been raised in its place. Worth saying out loud — the old number may be on paperwork. */
+    if(j.replacedDeleted)alert('Invoice '+j.replacedDeleted+' no longer exists in QuickBooks — it was '
+      +'deleted there.
+
+A new invoice has been created: '+(j.invoiceNo||'—')
+      +'.
+
+If '+j.replacedDeleted+' went out to the customer, tell them the number has changed.');
     // matched a different spelling of the same company — pin the QuickBooks one so it is exact next time
     if(j.customerFuzzy&&j.customer)pinQbName(e.cno,j.customer);
     if(preview){
