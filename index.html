@@ -3090,10 +3090,10 @@ const PAY_START='2026-07-22';
 // on. Empty string = disabled (the call is a harmless no-op). A failed webhook
 // is caught and logged — it never blocks a shipment from saving.
 const ZAPIER_HOOK_URL='https://hooks.zapier.com/hooks/catch/15397558/44ki5mz/';
-// Second Catch Hook, for the RESEND-only Zap (Find Invoice by number → Send Invoice). Kept separate
-// from the main hook so the working invoice Zap needs no filter/path changes: only resend events
-// arrive here. Blank = resend not configured yet (the button says so instead of failing silently).
-const ZAPIER_RESEND_URL='https://hooks.zapier.com/hooks/catch/15397558/44qbgjp/';
+// Was the RESEND-only Zap (Find Invoice by number → Send Invoice). Fire-and-forget, so an invoice
+// with no email address on it looked exactly like a sent one — which is how a resend could silently
+// do nothing. Resend reads QuickBooks' own answer now; the constant stays only as this note.
+const ZAPIER_RESEND_URL='';   // RETIRED 2026-08-28 — resend now goes straight to QB_API/invoice {resend:true}
 // Third Catch Hook — AMEND an existing invoice (Find Invoice by number → Update Invoice with new lines).
 // Separate again so neither the create nor the resend Zap needs changing. Blank = not configured.
 const ZAPIER_UPDATE_URL='https://hooks.zapier.com/hooks/catch/15397558/44q4sdo/';
@@ -5804,29 +5804,39 @@ function updateInvoice(){
   closeModal('overlay-invoice');
   toast('✏️ Amendment sent — invoice '+bn+' will be corrected in QuickBooks');
 }
-// Re-email an invoice that ALREADY exists in QuickBooks — no new invoice is created. Goes to its own
-// Zap (ZAPIER_RESEND_URL: Find Invoice by number → Send Invoice), so the main invoice Zap is untouched.
+// Re-email an invoice that ALREADY exists in QuickBooks — no new invoice is created, nothing edited.
 // Use it to send the invoice again, or to a different address (type it in EMAIL INVOICE TO first).
-function resendInvoice(){
+// With the box left blank QuickBooks uses the address on the invoice, then the one on the customer.
+async function resendInvoice(){
   if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
   const bn=document.getElementById('inv_billNo').value.trim();
   if(!bn){toast('No invoice number yet — send it to QuickBooks first');document.getElementById('inv_billNo').focus();return;}
   const em=qbEmails(document.getElementById('inv_email').value.trim()).emails;
-  if(!ZAPIER_RESEND_URL){toast('Resend not set up yet — the resend webhook URL is missing');return;}
   if(!confirm(
     'RESEND INVOICE '+bn+'\n\n'+
     (e.customer||'—')+'\n'+
-    'To:  '+(em||'the address saved on the invoice')+'\n'+
-    'Cc:  jaamiz25@gmail.com\n\n'+
+    'To:  '+(em||'the address saved on the invoice in QuickBooks')+'\n\n'+
     'This emails the EXISTING invoice again.\nIt does NOT create a new invoice.\n\nProceed?'
   ))return;
+  /* Straight to our own service. The old path posted to a Zapier hook and never looked back, so an
+     invoice with no email address on it looked identical to a sent one — which is exactly what
+     happened. QuickBooks' answer now reaches the user. */
+  toast('📧 Emailing invoice '+bn+'…');
   try{
-    fetch(ZAPIER_RESEND_URL,{method:'POST',body:JSON.stringify({
-      event:'invoice_resend',billNo:bn,customerEmail:em,
-      entryId:e.id,customerName:e.customer||'',cNumber:e.cno||''
-    })}).catch(err=>console.warn('Resend failed',err));
-  }catch(err){console.warn('Resend error',err);}
+    const tok=await (window.__idToken?window.__idToken():'');
+    if(!tok)throw new Error('You are signed out — reload and sign in again');
+    const r=await fetch(QB_API+'/invoice',{method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
+      body:JSON.stringify({resend:true,docNumber:bn,email:em})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
+    toast('📧 Invoice '+bn+' emailed to '+j.emailed);
+  }catch(err){
+    console.warn('resend failed',err);
+    alert('Invoice '+bn+' was NOT emailed.\n\n'+(err.message||err));
+    return;                                  // nothing was sent — do not claim a BILL NO was saved
+  }
   // A number typed here is also saved as the shipment's BILL NO — same as typing it in the Form Log
   // (status → Delivered, Payment shows Bill Done, MP list drops it). Resend used to email the invoice
   // and leave the tracker blank, so an invoice billed by hand in QuickBooks never got recorded.
@@ -5839,7 +5849,7 @@ function resendInvoice(){
     saveEntries();renderEntries();renderMP();renderPayments();updateCounts();
     saved=true;
   }
-  toast('📧 Resend requested — invoice '+bn+' will be emailed again'+(saved?' · BILL NO saved':''));
+  if(saved)toast('BILL NO '+bn+' saved on the shipment');
 }
 // Shipment documents (all staff): files live in Firebase Storage (entries/<id>/…), the metadata list
 // syncs on the entry itself so every device sees the same attachments. Deleting an entry leaves the
