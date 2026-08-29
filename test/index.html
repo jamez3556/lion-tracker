@@ -1204,7 +1204,9 @@
       <button type="button" class="ghost" id="inv_resendBtn" onclick="resendInvoice()" title="Email the existing invoice again — does NOT create a new one">📧 Resend Email</button>
       <button type="button" class="ghost" onclick="qbInvoice(true)" title="See exactly what would be created in QuickBooks — writes nothing">🔍 Preview</button>
       <button type="button" class="primary" onclick="qbInvoice(false)" title="Create this invoice in QuickBooks directly — no Zapier task">🧾 Create in QuickBooks</button>
-      <button type="button" class="ghost" onclick="sendInvoice()" title="The old route: Zapier creates it, attaches documents and emails the customer">Send via Zapier →</button>
+      <!-- REMOVED 2026-08-29 — "Send via Zapier" set the shipment’s already-invoiced flag and then
+           asked a Zap to do the work. With the Zaps off it marked shipment 1388 as invoiced under a
+           number QuickBooks never had. The orange Create in QuickBooks button is the only create path. -->
     </div>
   </div>
 </div>
@@ -1443,7 +1445,7 @@ function fmtDate(s){
 function fmtNum(n){return (n===null||n===undefined||n==='')?'—':Number(n).toLocaleString('en-US')}
 /* Which build this is. Bumped by the publish tool, and stamped on every error report so a
    fault can be tied to the version that introduced it. */
-const APP_BUILD='2026-08-29 00:48';
+const APP_BUILD='2026-08-30 01:41';
 /* Report faults instead of swallowing them. At most 5 a session and never the same one twice,
    so a loop cannot run up a Firestore bill; silent, because the staff can do nothing about it
    and a scary popup mid-shipment is worse than the bug. */
@@ -3115,7 +3117,7 @@ const ZAPIER_HOOK_URL='https://hooks.zapier.com/hooks/catch/15397558/44ki5mz/';
 const ZAPIER_RESEND_URL='';   // RETIRED 2026-08-28 — resend now goes straight to QB_API/invoice {resend:true}
 // Third Catch Hook — AMEND an existing invoice (Find Invoice by number → Update Invoice with new lines).
 // Separate again so neither the create nor the resend Zap needs changing. Blank = not configured.
-const ZAPIER_UPDATE_URL='https://hooks.zapier.com/hooks/catch/15397558/44q4sdo/';
+const ZAPIER_UPDATE_URL='';   // RETIRED 2026-08-29 — amendments go straight to QB_API/invoice {update:true}
 // Audit fetch (RETIRED 2026-08-27): reading an invoice's real lines went through a 3-step Zap that
 // cost 2 tasks a time — and it fired by itself every time the builder opened on a billed shipment,
 // which was the whole of the month's Zapier usage. Both paths read from our own service now
@@ -5794,45 +5796,55 @@ async function sendInvoice(){
 // of creating another one. Use after a mistake (wrong KG, wrong duty): fix the lines here, then Update.
 // The Zap replaces the invoice's lines with these, so what you see in the builder becomes the invoice.
 // Only safe while the customer hasn't paid — a paid/period-closed invoice should get a credit note.
-function updateInvoice(){
+async function updateInvoice(){
   if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
   const bn=document.getElementById('inv_billNo').value.trim();
   if(!bn){toast('No invoice number — nothing to amend');document.getElementById('inv_billNo').focus();return;}
-  if(!ZAPIER_UPDATE_URL){toast('Update not set up yet — the update webhook URL is missing');return;}
   const inv=collectInvoiceLines(e);
   if(!inv.lines.length){toast('Add at least one line with a quantity and rate');return;}
-  const advance=Number(document.getElementById('inv_advance').value)||0;
-  if(!confirm(
-    'AMEND INVOICE '+bn+' IN QUICKBOOKS?\n\n'+
-    (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
-    'The invoice keeps its number — its lines are REPLACED with:\n'+
-    '------------------------------------------\n'+
-    invSummaryText(inv.lines)+'\n'+
-    '------------------------------------------\n'+
-    'Subtotal   '+fmtNum(inv.subtotal)+'\n'+
-    'GST 8%     '+fmtNum(inv.gst)+'\n'+
-    'TOTAL      '+fmtNum(inv.total)+'\n\n'+
-    '⚠ Only amend an invoice the customer has NOT paid yet.\nIf it is already paid, issue a credit note in QuickBooks instead.\n\n'+
+  const em=qbEmails(document.getElementById('inv_email').value.trim()).emails;
+  const again=confirm(
+    'AMEND INVOICE '+bn+' IN QUICKBOOKS?' + '\n\n' +
+    (e.customer||'—')+'   ('+(e.cno||'—')+')' + '\n' +
+    'The invoice keeps its number — its lines are REPLACED with:' + '\n' +
+    '------------------------------------------' + '\n' +
+    invSummaryText(inv.lines) + '\n' +
+    '------------------------------------------' + '\n' +
+    'Subtotal   '+fmtNum(inv.subtotal) + '\n' +
+    'GST 8%     '+fmtNum(inv.gst) + '\n' +
+    'TOTAL      '+fmtNum(inv.total) + '\n\n' +
+    'An invoice with money already received against it cannot be amended — QuickBooks needs a credit note instead.' + '\n\n' +
     'Amend it?'
-  ))return;
+  );
+  if(!again)return;
+  // ask once whether the customer should get the corrected copy — they are holding the old one
+  const send=confirm('Email the CORRECTED invoice to '+(em||'the address on the invoice')+' as well?' + '\n\n' +
+    'OK = amend and email      Cancel = amend only');
+  toast('✏️ Amending invoice '+bn+' in QuickBooks…');
   try{
-    fetch(ZAPIER_UPDATE_URL,{method:'POST',body:JSON.stringify({
-      event:'invoice_update',billNo:bn,entryId:e.id,
-      customerName:e.customer||'',cNumber:e.cno||'',awbBl:e.awbBl||'',rNumber:e.rNo||'',
-      shipmentType:e.type||'',customerEmail:qbEmails(document.getElementById('inv_email').value.trim()).emails,
-      memo:document.getElementById('inv_memo').value.trim(),
-      lines:inv.lines,
-      taxableSubtotal:inv.taxable,nonTaxSubtotal:inv.nontax,
-      subtotal:inv.subtotal,gst:inv.gst,total:inv.total,
-      advance:advance,balance:invMoney(inv.total-advance),no:e.no
-    })}).catch(err=>console.warn('Update failed',err));
-  }catch(err){console.warn('Update error',err);}
-  // the amended lines are now what's on the QuickBooks invoice — remember them for the next reopen
-  e.qbLines=inv.lines.map(l=>({item:l.item,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
-  saveEntries();
-  closeModal('overlay-invoice');
-  toast('✏️ Amendment sent — invoice '+bn+' will be corrected in QuickBooks');
+    const tok=await (window.__idToken?window.__idToken():'');
+    if(!tok)throw new Error('You are signed out — reload and sign in again');
+    const r=await fetch(QB_API+'/invoice',{method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
+      body:JSON.stringify({update:true,docNumber:bn,email:em,send:!!send,
+        memo:document.getElementById('inv_memo').value.trim(),
+        lines:inv.lines.map(l=>({item:l.item,itemId:l.itemId,desc:l.description,qty:l.qty,rate:l.rate,taxable:!!l.taxable}))})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
+    /* Only NOW are these the invoice's real lines. Writing them before the answer came back is
+       what made the app show a corrected invoice that QuickBooks had never heard of. */
+    e.qbLines=inv.lines.map(l=>({item:l.item,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.taxable?8:0}));
+    e.qbTotal=j.total;e.qbBalance=j.balance;e.qbFetchedAt=isoLocal(new Date());
+    saveEntries();renderEntries();renderMP();renderPayments();
+    closeModal('overlay-invoice');
+    alert('Invoice '+j.invoiceNo+' amended in QuickBooks.' + '\n\n' +
+      'Was:  '+fmtNum(j.was) + '\n' + 'Now:  '+fmtNum(j.total) +
+      (j.emailed?'\n\nEmailed to '+j.emailed:(j.emailError?'\n\nNOT emailed: '+j.emailError:'\n\nNot emailed (you chose amend only).')));
+  }catch(err){
+    console.warn('amendment failed',err);
+    alert('Invoice '+bn+' was NOT changed.' + '\n\n' + (err.message||err));
+  }
 }
 // Re-email an invoice that ALREADY exists in QuickBooks — no new invoice is created, nothing edited.
 // Use it to send the invoice again, or to a different address (type it in EMAIL INVOICE TO first).
