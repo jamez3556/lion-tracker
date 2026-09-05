@@ -8766,11 +8766,26 @@ window.cloudSignIn=async()=>{
 };
 window.cloudSignOut=async()=>{await fx.signOut(auth);location.reload();};
 
+// A payment row's money is NEVER lost to last-write-wins. Two copies of the same row exist at
+// once (Jaamiz's open tab and Jarvis's headless session, or two devices); when the copy that has
+// NOT yet received a DUTY figure gets saved for any other reason — a mirrored field, a reload's
+// reconcile, or a blank row syncPayments made before the cloud doc arrived — it carries the newer
+// `u` and its blank duty overwrote the real one (05.09.26: rows 1423, 1425, 1429, 1431 in one day).
+// Rule: a null money field never beats a number. Whichever copy wins by `u` inherits every money
+// field the loser had and it lacks; if that changed the winner it is pushed again, so every device
+// converges on "figure present". To clear a figure on purpose, type 0 — a blank is "not entered".
+const MONEY_FIELDS=['duty','macl','mpl','thc','quay','other','advance'];
+function mergeMoney(col,winner,loser){
+  if(col!=='payments'||!winner||!loser)return false;
+  let changed=false;
+  MONEY_FIELDS.forEach(f=>{if(winner[f]==null&&loser[f]!=null){winner[f]=loser[f];changed=true;}});
+  return changed;
+}
 async function mergeSnap(col,s){
   const app=window.__app;
   const local=app.get[col]();
   const byId=new Map(local.map(r=>[r.id,r]));
-  let changed=false;
+  let changed=false,repush=false;
   s.docChanges().forEach(ch=>{
     const id=ch.doc.id;
     if(ch.type==='removed'){
@@ -8783,7 +8798,12 @@ async function mergeSnap(col,s){
       if(pushed[col]&&!pushed[col].has(id)){pushed[col].add(id);savePushed(col);}
       const loc=byId.get(id);
       if(!loc){byId.set(id,d);changed=true;}
-      else if((d.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(d)){byId.set(id,d);changed=true;}
+      else if((d.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(d)){
+        const w={...d};                                   // cloud wins…
+        if(mergeMoney(col,w,loc)){w.u=Date.now();repush=true;} // …but keeps the money we had
+        byId.set(id,w);changed=true;
+      }
+      else if(mergeMoney(col,loc,d)){loc.u=Date.now();changed=true;repush=true;} // we win, adopt the cloud's money
     }
   });
   if(changed){
@@ -8792,6 +8812,7 @@ async function mergeSnap(col,s){
     localStorage.setItem(KEYMAP[col],JSON.stringify(arr));
     app.rerender();
   }
+  if(repush&&window.__cloudPush)window.__cloudPush(col); // put the restored figure back in the cloud
 }
 
 async function pushCol(col){
@@ -8888,7 +8909,10 @@ async function startSync(){
         shadow[col].set(d.id,cmpStr(dd));
         const loc=byId.get(d.id);
         if(!loc){byId.set(d.id,dd);changed=true;}                                              // created by a teammate while we were away
-        else if((dd.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(dd)){byId.set(d.id,dd);changed=true;} // cloud is newer → take it
+        else if((dd.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(dd)){                                // cloud is newer → take it…
+          const w={...dd};if(mergeMoney(col,w,loc))w.u=Date.now();                             // …keeping any money it lacks
+          byId.set(d.id,w);changed=true;}
+        else if(mergeMoney(col,loc,dd)){loc.u=Date.now();changed=true;}                        // we are newer but the cloud has money we lack
       });
       for(const [id] of [...byId]){ // gone from the cloud but CONFIRMED synced once → teammate deleted it
         if(!cloudIds.has(id)&&pushed[col].has(id)){byId.delete(id);pushed[col].delete(id);changed=true;}
