@@ -1194,7 +1194,7 @@
     </div>
     <div class="grid2">
       <div class="field"><label>MEMO / REFERENCE</label><input id="inv_memo" placeholder="LION Ref L26/…"></div>
-      <div class="field"><label>EMAIL INVOICE TO (blank = only to you)</label><input id="inv_email" type="email" placeholder="customer@… — Cc always jaamiz25@gmail.com"></div>
+      <div class="field"><label>EMAIL INVOICE TO — always copied to jaamiz25@gmail.com</label><input id="inv_email" type="email" placeholder="customer@…, second@… (blank = only to you)"></div>
     </div>
     <div class="actions">
       <button type="button" class="ghost" onclick="closeModal('overlay-invoice')">Cancel</button>
@@ -1445,7 +1445,7 @@ function fmtDate(s){
 function fmtNum(n){return (n===null||n===undefined||n==='')?'—':Number(n).toLocaleString('en-US')}
 /* Which build this is. Bumped by the publish tool, and stamped on every error report so a
    fault can be tied to the version that introduced it. */
-const APP_BUILD='2026-08-30 01:44';
+const APP_BUILD='2026-09-06 21:03';
 /* Report faults instead of swallowing them. At most 5 a session and never the same one twice,
    so a loop cannot run up a Firestore bill; silent, because the staff can do nothing about it
    and a scary popup mid-shipment is worse than the bug. */
@@ -5165,16 +5165,21 @@ function invCombinedFor(e){
   const sig=invLooseDocs(e).map(a=>a.path).sort().join('|');
   return (e.attachments||[]).find(a=>a.combined&&Array.isArray(a.of)&&a.of.slice().sort().join('|')===sig)||null;
 }
-const QB_EMAIL_MAX=100;
+/* Every invoice is copied to the office. The service puts it in the invoice's Cc field, where it
+   cannot be crowded out by the customer's own addresses; this constant is only so the builder can
+   say so on screen — changing it here changes nothing that is sent. */
+const OFFICE_CC='jaamiz25@gmail.com';
+/* Addresses are no longer dropped here. QuickBooks caps ONE field at 100 characters, and an invoice
+   has three (To, Cc, Bcc); the service packs the list across them, so a customer with four contacts
+   — STELCO — no longer loses the last one silently. */
 function qbEmails(raw){
-  const parts=String(raw||'').split(/[,;]+/).map(s=>s.trim()).filter(Boolean);
-  const kept=[];let len=0;
-  for(const p of parts){
-    const add=(kept.length?1:0)+p.length;
-    if(len+add>QB_EMAIL_MAX)continue;      // skip this one, a later shorter address may still fit
-    kept.push(p);len+=add;
-  }
-  return {emails:kept.join(','),dropped:parts.filter(p=>!kept.includes(p))};
+  const seen=new Set(),kept=[];
+  String(raw||'').split(/[,;]+/).map(x=>x.trim()).filter(Boolean).forEach(a=>{
+    const k=a.toLowerCase();
+    if(k===OFFICE_CC.toLowerCase()||seen.has(k))return;   // the office rides in Cc, never as a recipient
+    seen.add(k);kept.push(a);
+  });
+  return {emails:kept.join(','),dropped:[]};
 }
 function invMoney(n){return Math.round((Number(n)||0)*100)/100;}
 function invFmt(n){return Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
@@ -5420,6 +5425,9 @@ function openInvoiceForm(entryId){
   // MPL & Custom Logins REGISTERED EMAIL by C-No — editable per invoice
   const cred=creds.find(c=>(c.cno||'').toUpperCase()===(e.cno||'').toUpperCase());
   document.getElementById('inv_email').value=(cust&&cust.billEmail)||(cred&&cred.email)||'';
+  /* Nothing on file here? QuickBooks may well have an address for this customer — the office kept
+     them there for years before this app existed. Ask, and offer to keep it. */
+  if(!document.getElementById('inv_email').value)qbAskEmail(e,cust);
   // Resend / Update only make sense once the invoice exists in QuickBooks
   const invoiced=(e.qbInvoiced||e.billNo)?'':'none';
   document.getElementById('inv_resendBtn').style.display=invoiced;
@@ -5539,7 +5547,7 @@ async function qbInvoice(preview){
             +'\nBALANCE DUE: '+fmtNum(invMoney(inv.total-advNow)):'')
     +'\nInvoice No: '+bn
     +'\n\nDocuments attached: '+(atts.length?atts.map(a=>a.name||'document').join(', '):'none')
-    +'\nEmail to: '+to))return;
+    +'\nEmail to: '+to+'\nCopy to: '+OFFICE_CC))return;
   toast(preview?'Checking with QuickBooks…':'Creating the invoice…');
   try{
     const tok=await (window.__idToken?window.__idToken():'');
@@ -5656,6 +5664,8 @@ async function qbInvoice(preview){
       +'\nDocuments attached: '+((j.attached&&j.attached.length)?j.attached.join(', '):'none')
       +(j.attachErrors&&j.attachErrors.length?'\n⚠ Not attached: '+j.attachErrors.join(' · '):'')
       +'\nEmailed to: '+(j.emailed||'not sent')
+      +(j.cc?'\nCopy to: '+j.cc:'')
+      +(j.emailDropped&&j.emailDropped.length?'\n⚠ No room for: '+j.emailDropped.join(', '):'')
       +(j.emailError?'\n⚠ Email failed: '+j.emailError:''));
   }catch(err){
     console.warn('QuickBooks invoice failed',err);
@@ -5716,7 +5726,7 @@ async function sendInvoice(){
     'SEND THIS INVOICE TO QUICKBOOKS?\n\n'+
     (e.customer||'—')+'   ('+(e.cno||'—')+')\n'+
     'Invoice '+(bn||'(QuickBooks will assign the next number)')+'    '+(e.type==='MP'?'BL ':'AWB ')+(e.awbBl||'—')+'    R No '+(e.rNo||'—')+'\n'+
-    'Email to: '+mail.emails+'\n'+
+    'Email to: '+mail.emails+'    (copy to '+OFFICE_CC+')\n'+
     (mail.dropped.length?('⚠ Left off (QuickBooks allows only 100 characters of email): '+mail.dropped.join(', ')+'\n'):'')+
     (loose.length
       ?('Attached: '+loose.map(a=>a.name).join(', ')+'\n'
@@ -5819,7 +5829,8 @@ async function updateInvoice(){
   );
   if(!again)return;
   // ask once whether the customer should get the corrected copy — they are holding the old one
-  const send=confirm('Email the CORRECTED invoice to '+(em||'the address on the invoice')+' as well?' + '\n\n' +
+  const send=confirm('Email the CORRECTED invoice to '+(em||'the address on the invoice')+
+    ' (copy to '+OFFICE_CC+') as well?' + '\n\n' +
     'OK = amend and email      Cancel = amend only');
   toast('✏️ Amending invoice '+bn+' in QuickBooks…');
   try{
@@ -5849,6 +5860,31 @@ async function updateInvoice(){
 // Re-email an invoice that ALREADY exists in QuickBooks — no new invoice is created, nothing edited.
 // Use it to send the invoice again, or to a different address (type it in EMAIL INVOICE TO first).
 // With the box left blank QuickBooks uses the address on the invoice, then the one on the customer.
+/* Ask QuickBooks which address it holds for this customer — their own email, or the addresses on
+   their last invoice — and fill the builder with it. Read-only and quiet: a customer QuickBooks
+   has no email for is not an error, it just leaves the field empty as before. */
+async function qbAskEmail(e,cust){
+  const name=(cust&&cust.qbName)||(cust&&cust.name)||e.customer||'';
+  if(!name)return;
+  try{
+    const tok=await (window.__idToken?window.__idToken():'');
+    if(!tok)return;
+    const r=await fetch(QB_API+'/invoice',{method:'POST',
+      headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
+      body:JSON.stringify({mail:true,customer:name})});
+    const j=await r.json().catch(()=>({}));
+    if(!j.ok)return;
+    const box=document.getElementById('inv_email');
+    if(!box||box.value.trim())return;                 // someone typed one while we were asking
+    /* The invoice addresses are the better answer — they are who the invoice actually went to.
+       The office's own Cc is stripped: it is added again on the way out. */
+    const found=qbEmails([j.to,j.cc,j.bcc].filter(Boolean).join(',')).emails||qbEmails(j.customerEmail||'').emails;
+    if(!found)return;
+    box.value=found;
+    box.title='From QuickBooks'+(j.invoiceNo?' (invoice '+j.invoiceNo+')':'');
+    toast('📧 QuickBooks has '+found+' for this customer');
+  }catch(err){/* the builder works without it */}
+}
 async function resendInvoice(){
   if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
@@ -5873,7 +5909,7 @@ async function resendInvoice(){
       body:JSON.stringify({resend:true,docNumber:bn,email:em})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
-    toast('📧 Invoice '+bn+' emailed to '+j.emailed);
+    toast('📧 Invoice '+bn+' emailed to '+j.emailed+(j.cc?' (copy to '+j.cc+')':''));
   }catch(err){
     console.warn('resend failed',err);
     alert('Invoice '+bn+' was NOT emailed.\n\n'+(err.message||err));
@@ -8766,26 +8802,11 @@ window.cloudSignIn=async()=>{
 };
 window.cloudSignOut=async()=>{await fx.signOut(auth);location.reload();};
 
-// A payment row's money is NEVER lost to last-write-wins. Two copies of the same row exist at
-// once (Jaamiz's open tab and Jarvis's headless session, or two devices); when the copy that has
-// NOT yet received a DUTY figure gets saved for any other reason — a mirrored field, a reload's
-// reconcile, or a blank row syncPayments made before the cloud doc arrived — it carries the newer
-// `u` and its blank duty overwrote the real one (05.09.26: rows 1423, 1425, 1429, 1431 in one day).
-// Rule: a null money field never beats a number. Whichever copy wins by `u` inherits every money
-// field the loser had and it lacks; if that changed the winner it is pushed again, so every device
-// converges on "figure present". To clear a figure on purpose, type 0 — a blank is "not entered".
-const MONEY_FIELDS=['duty','macl','mpl','thc','quay','other','advance'];
-function mergeMoney(col,winner,loser){
-  if(col!=='payments'||!winner||!loser)return false;
-  let changed=false;
-  MONEY_FIELDS.forEach(f=>{if(winner[f]==null&&loser[f]!=null){winner[f]=loser[f];changed=true;}});
-  return changed;
-}
 async function mergeSnap(col,s){
   const app=window.__app;
   const local=app.get[col]();
   const byId=new Map(local.map(r=>[r.id,r]));
-  let changed=false,repush=false;
+  let changed=false;
   s.docChanges().forEach(ch=>{
     const id=ch.doc.id;
     if(ch.type==='removed'){
@@ -8798,12 +8819,7 @@ async function mergeSnap(col,s){
       if(pushed[col]&&!pushed[col].has(id)){pushed[col].add(id);savePushed(col);}
       const loc=byId.get(id);
       if(!loc){byId.set(id,d);changed=true;}
-      else if((d.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(d)){
-        const w={...d};                                   // cloud wins…
-        if(mergeMoney(col,w,loc)){w.u=Date.now();repush=true;} // …but keeps the money we had
-        byId.set(id,w);changed=true;
-      }
-      else if(mergeMoney(col,loc,d)){loc.u=Date.now();changed=true;repush=true;} // we win, adopt the cloud's money
+      else if((d.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(d)){byId.set(id,d);changed=true;}
     }
   });
   if(changed){
@@ -8812,7 +8828,6 @@ async function mergeSnap(col,s){
     localStorage.setItem(KEYMAP[col],JSON.stringify(arr));
     app.rerender();
   }
-  if(repush&&window.__cloudPush)window.__cloudPush(col); // put the restored figure back in the cloud
 }
 
 async function pushCol(col){
@@ -8909,10 +8924,7 @@ async function startSync(){
         shadow[col].set(d.id,cmpStr(dd));
         const loc=byId.get(d.id);
         if(!loc){byId.set(d.id,dd);changed=true;}                                              // created by a teammate while we were away
-        else if((dd.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(dd)){                                // cloud is newer → take it…
-          const w={...dd};if(mergeMoney(col,w,loc))w.u=Date.now();                             // …keeping any money it lacks
-          byId.set(d.id,w);changed=true;}
-        else if(mergeMoney(col,loc,dd)){loc.u=Date.now();changed=true;}                        // we are newer but the cloud has money we lack
+        else if((dd.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(dd)){byId.set(d.id,dd);changed=true;} // cloud is newer → take it
       });
       for(const [id] of [...byId]){ // gone from the cloud but CONFIRMED synced once → teammate deleted it
         if(!cloudIds.has(id)&&pushed[col].has(id)){byId.delete(id);pushed[col].delete(id);changed=true;}
