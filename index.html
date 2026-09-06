@@ -1445,7 +1445,7 @@ function fmtDate(s){
 function fmtNum(n){return (n===null||n===undefined||n==='')?'—':Number(n).toLocaleString('en-US')}
 /* Which build this is. Bumped by the publish tool, and stamped on every error report so a
    fault can be tied to the version that introduced it. */
-const APP_BUILD='2026-09-06 21:03';
+const APP_BUILD='2026-09-06 21:20';
 /* Report faults instead of swallowing them. At most 5 a session and never the same one twice,
    so a loop cannot run up a Firestore bill; silent, because the staff can do nothing about it
    and a scary popup mid-shipment is worse than the bug. */
@@ -5425,9 +5425,8 @@ function openInvoiceForm(entryId){
   // MPL & Custom Logins REGISTERED EMAIL by C-No — editable per invoice
   const cred=creds.find(c=>(c.cno||'').toUpperCase()===(e.cno||'').toUpperCase());
   document.getElementById('inv_email').value=(cust&&cust.billEmail)||(cred&&cred.email)||'';
-  /* Nothing on file here? QuickBooks may well have an address for this customer — the office kept
-     them there for years before this app existed. Ask, and offer to keep it. */
-  if(!document.getElementById('inv_email').value)qbAskEmail(e,cust);
+  /* Left blank ON PURPOSE when nothing is saved: the invoice then goes to jaamiz25@gmail.com only.
+     QuickBooks' own customer email is a contact address, not a billing one, and is never used. */
   // Resend / Update only make sense once the invoice exists in QuickBooks
   const invoiced=(e.qbInvoiced||e.billNo)?'':'none';
   document.getElementById('inv_resendBtn').style.display=invoiced;
@@ -5860,31 +5859,6 @@ async function updateInvoice(){
 // Re-email an invoice that ALREADY exists in QuickBooks — no new invoice is created, nothing edited.
 // Use it to send the invoice again, or to a different address (type it in EMAIL INVOICE TO first).
 // With the box left blank QuickBooks uses the address on the invoice, then the one on the customer.
-/* Ask QuickBooks which address it holds for this customer — their own email, or the addresses on
-   their last invoice — and fill the builder with it. Read-only and quiet: a customer QuickBooks
-   has no email for is not an error, it just leaves the field empty as before. */
-async function qbAskEmail(e,cust){
-  const name=(cust&&cust.qbName)||(cust&&cust.name)||e.customer||'';
-  if(!name)return;
-  try{
-    const tok=await (window.__idToken?window.__idToken():'');
-    if(!tok)return;
-    const r=await fetch(QB_API+'/invoice',{method:'POST',
-      headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
-      body:JSON.stringify({mail:true,customer:name})});
-    const j=await r.json().catch(()=>({}));
-    if(!j.ok)return;
-    const box=document.getElementById('inv_email');
-    if(!box||box.value.trim())return;                 // someone typed one while we were asking
-    /* The invoice addresses are the better answer — they are who the invoice actually went to.
-       The office's own Cc is stripped: it is added again on the way out. */
-    const found=qbEmails([j.to,j.cc,j.bcc].filter(Boolean).join(',')).emails||qbEmails(j.customerEmail||'').emails;
-    if(!found)return;
-    box.value=found;
-    box.title='From QuickBooks'+(j.invoiceNo?' (invoice '+j.invoiceNo+')':'');
-    toast('📧 QuickBooks has '+found+' for this customer');
-  }catch(err){/* the builder works without it */}
-}
 async function resendInvoice(){
   if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===document.getElementById('inv_entryId').value);if(!e)return;
