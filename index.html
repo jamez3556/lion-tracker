@@ -1047,7 +1047,7 @@
         💳 Billing only — cleared without documentation (no serial/FILE, tracked in the Billing tab)
       </label>
       <div class="grid3">
-        <div class="field"><label>BILL NO</label><input id="e_billNo" placeholder="L26/…"></div>
+        <div class="field"><label>BILL NO</label><input id="e_billNo" placeholder="L26/…"><div id="e_billNoHint" class="hint" style="color:#c0392b"></div></div>
         <div class="field"><label>GRS WT (kg)</label><input id="e_grsWt" type="number" step="any" min="0"></div>
         <div class="field"><label>PKGS</label><input id="e_pkgs" type="number" min="0"></div>
       </div>
@@ -1445,7 +1445,7 @@ function fmtDate(s){
 function fmtNum(n){return (n===null||n===undefined||n==='')?'—':Number(n).toLocaleString('en-US')}
 /* Which build this is. Bumped by the publish tool, and stamped on every error report so a
    fault can be tied to the version that introduced it. */
-const APP_BUILD='2026-09-06 21:20';
+const APP_BUILD='2026-09-09 21:24';
 /* Report faults instead of swallowing them. At most 5 a session and never the same one twice,
    so a loop cannot run up a Firestore bill; silent, because the staff can do nothing about it
    and a scary popup mid-shipment is worse than the bug. */
@@ -2139,6 +2139,22 @@ function saveEntry(e){
           // documented Form Log shipment: a duplicate is always a mistake — hard block stays
           toast(msg);e_awbBl.focus();return false;
         }
+      }
+    }
+  }
+  // Duplicate BILL NO guard. An invoice number belongs to exactly ONE shipment: two entries sharing
+  // one means either the same job was billed twice or a number was copied down wrong, and both end
+  // with a customer holding somebody else's invoice. Only a newly typed / changed number is checked.
+  const bnHint=document.getElementById('e_billNoHint');if(bnHint)bnHint.textContent='';
+  if(rec.billNo){
+    const bk=rec.billNo.replace(/\s+/g,'').toUpperCase();
+    const pbk=((prevEntry&&prevEntry.billNo)||'').replace(/\s+/g,'').toUpperCase();
+    if(bk!==pbk){
+      const bdup=entries.find(x=>x.id!==rec.id&&(x.billNo||'').replace(/\s+/g,'').toUpperCase()===bk);
+      if(bdup){
+        const msg='⚠ Invoice '+rec.billNo+' is already on NO '+(bdup.no??'—')+' ('+(bdup.customer||'—')+', '+fmtDate(bdup.date)+')';
+        if(bnHint)bnHint.textContent=msg;
+        toast(msg+' — one invoice number, one shipment');e_billNo.focus();return false;
       }
     }
   }
