@@ -136,6 +136,9 @@
   tbody tr.ap-today td,tbody tr.ap-today .cno,tbody tr.ap-today .name{color:#f1f5f9}
   tbody tr.ap-today .sub{color:#cbd5e1}
   .status-pill{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:999px;border:none;cursor:pointer;white-space:nowrap}
+  select.status-pill{-webkit-appearance:none;appearance:none;padding-right:20px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='currentColor' stroke-width='1.6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 7px center}
+  select.status-pill:disabled{cursor:default;background-image:none;padding-right:10px;opacity:1}
+  select.status-pill option{background:#fff;color:#111;font-weight:600}
   .st-Pending{background:var(--warnbg);color:var(--warn)}
   .st-Cleared{background:var(--okbg);color:var(--ok)}
   .st-Delivered{background:var(--infobg);color:var(--info)}
@@ -1108,6 +1111,8 @@
         <div class="field"><label>REMARK</label><input id="c_remark"></div>
       </div>
       <div class="actions">
+        <button type="button" class="ghost" id="c_delBtn" style="display:none;color:#dc2626;border-color:#dc2626;margin-right:auto"
+          onclick="delContFromForm()">🗑️ Delete container</button>
         <button type="button" class="ghost" onclick="closeModal('overlay-cont')">Cancel</button>
         <button type="submit" class="primary">Save</button>
       </div>
@@ -1367,6 +1372,8 @@ service cloud.firestore {
       </div>
       <div id="u_docs" style="margin-top:12px"></div>
       <div class="actions">
+        <button type="button" class="ghost" id="u_delBtn" style="display:none;color:#dc2626;border-color:#dc2626;margin-right:auto"
+          onclick="delCustFromForm()">🗑️ Delete customer</button>
         <button type="button" class="ghost" onclick="closeModal('overlay-cust')">Cancel</button>
         <button type="submit" class="primary">Save</button>
       </div>
@@ -1394,6 +1401,8 @@ service cloud.firestore {
       </div>
       <div class="field"><label>REGISTERED EMAIL</label><input id="p_email" type="text"></div>
       <div class="actions">
+        <button type="button" class="ghost" id="p_delBtn" style="display:none;color:#dc2626;border-color:#dc2626;margin-right:auto"
+          onclick="delCredFromForm()">🗑️ Delete login</button>
         <button type="button" class="ghost" onclick="closeModal('overlay-cred')">Cancel</button>
         <button type="submit" class="primary">Save</button>
       </div>
@@ -1445,7 +1454,7 @@ function fmtDate(s){
 function fmtNum(n){return (n===null||n===undefined||n==='')?'—':Number(n).toLocaleString('en-US')}
 /* Which build this is. Bumped by the publish tool, and stamped on every error report so a
    fault can be tied to the version that introduced it. */
-const APP_BUILD='2026-09-09 21:24';
+const APP_BUILD='2026-09-14 23:57';
 /* Report faults instead of swallowing them. At most 5 a session and never the same one twice,
    so a loop cannot run up a Firestore bill; silent, because the staff can do nothing about it
    and a scary popup mid-shipment is worse than the bug. */
@@ -1758,19 +1767,38 @@ function renderEntries(){
     <td class="num" data-l="Grs Wt">${entryCell(r,'grsWt',true)}</td>
     <td class="num" data-l="Pkgs">${entryCell(r,'pkgs',true)}</td>
     <td data-l="AWB / BL">${entryCell(r,'awbBl')}</td>
-    <td data-l="Status"><button class="status-pill st-${statusShown(r)}" onclick="cycleEntryStatus('${r.id}')"
-      title="${entryPaidUp(r)?'Paid in full — from QuickBooks':''}">${statusShown(r)}</button></td>
+    <td data-l="Status">${entryStatusSelect(r)}</td>
     <td class="actcol"><div class="rowact">
       ${((r.type==='AP'||r.type==='MP')&&isAdmin())?`<button class="iconbtn" onclick="openInvoiceForm('${r.id}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to re-send':'Create QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>`:''}
       ${isAdmin()?`<button class="iconbtn" onclick="window.open('?bill=${encodeURIComponent(r.id)}','_blank')" title="Open THIS shipment in its own tab — only ${esc(r.customer)}'s work shows there, and the invoice opens by itself">↗</button>`:''}
       <button class="iconbtn" onclick="openAttach('${r.id}')" title="Documents (AWB, receipts, photos…)">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
       ${isAdmin()&&waEnabled(r)?`<button class="iconbtn" onclick="waCustomer('${r.id}')" title="WhatsApp the customer a status update"><svg viewBox="0 0 32 32" width="15" height="15" fill="#25D366"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.1.6 4.2 1.7 6L4 29l8.2-1.6c1.2.6 2.5.9 3.8.9 6.6 0 12-5.4 12-12S22.6 3 16 3zm0 21.8c-1.2 0-2.4-.3-3.5-.8l-.5-.3-4.9 1 1-4.7-.3-.5c-1-1.6-1.6-3.5-1.6-5.5 0-5.5 4.4-9.9 9.8-9.9s9.8 4.4 9.8 9.9-4.4 9.8-9.8 9.8zm5.4-7.3c-.3-.2-1.8-.9-2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.1-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6l.5-.5c.2-.2.2-.3.3-.5.1-.2 0-.4 0-.6l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4 0-.1-.2-.2-.5-.3z"/></svg></button>`:''}
       <button class="iconbtn" onclick="openEntryForm('${r.id}')" title="Edit">✏️</button>
-      <button class="iconbtn del" onclick="delEntry('${r.id}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
   pagerHTML(document.getElementById('e_pager'),eState,rows.length,'entries');
   const waOv=document.getElementById('overlay-wa');
   if(waOv&&waOv.classList.contains('show'))renderWaQueue(); // queue open during a sync → keep it live
+}
+/* Status is chosen, never tapped through. Billed (Delivered) and paid are locked — the invoice
+   decides those — so the select is disabled and just shows the state. */
+function entryStatusSelect(r){
+  const shown=statusShown(r);
+  const locked=!!r.billNo||entryPaidUp(r);
+  const opts=['Pending','Clarification','Cleared'];
+  if(locked)return `<select class="status-pill st-${shown}" disabled title="${entryPaidUp(r)?'Paid in full — from QuickBooks':'Delivered is set by the invoice (BILL NO) — remove it to change the status'}"><option>${shown}</option></select>`;
+  return `<select class="status-pill st-${shown}" onchange="setEntryStatus('${r.id}',this.value)" onclick="event.stopPropagation()">`
+    +opts.map(o=>`<option value="${o}"${o===r.status?' selected':''}>${o}</option>`).join('')+'</select>';
+}
+function setEntryStatus(id,st){
+  const r=entries.find(x=>x.id===id);if(!r)return;
+  if(r.billNo){toast('Delivered is set by the invoice (BILL NO) — remove it to change the status');renderEntries();renderMP();return;}
+  if(!['Pending','Clarification','Cleared'].includes(st)||st===r.status)return;
+  const linked=containers.find(c=>c.entryId===r.id);
+  const before={status:r.status,billNo:r.billNo};
+  r.status=st;
+  saveEntries();renderEntries();renderMP();
+  if(linked)syncContFromEntry(r,before,linked);
+  toast('Status: '+st);
 }
 function cycleEntryStatus(id){
   const r=entries.find(x=>x.id===id);if(!r)return;
@@ -2600,7 +2628,6 @@ function renderConts(){
       <td class="actcol"><div class="rowact">
         <button class="iconbtn" onclick="showCreds('${jatt(r.cno)}')" title="Port login for this customer">🔑</button>
         <button class="iconbtn" onclick="openContForm('${r.id}')" title="Edit">✏️</button>
-        <button class="iconbtn del" onclick="delCont('${r.id}')" title="Delete">🗑️</button>
       </div></td>
       <td class="num" data-l="No">${pageStart+idx+1}</td>
       <td class="cno" data-l="C No">${esc(r.cno)||'—'}</td>
@@ -2620,7 +2647,7 @@ function renderConts(){
       <td data-l="Discharge">${fmtDate(r.discharge)}</td>
       <td data-l="Last Date">${badge}</td>
       <td class="num" data-l="Ctns Left">${ctnsLeftCell(r)}</td>
-      <td data-l="Status"><button class="status-pill ${stCls}" onclick="cycleContStatus('${r.id}')">${r.status}</button></td>
+      <td data-l="Status">${contStatusSelect(r,stCls)}</td>
       <td data-l="Log No">${r.logNo!=null&&r.logNo!==''?('Log '+esc(r.logNo)):(esc(r.remark)||'—')}</td></tr>`;
   }).join('');
   pagerHTML(document.getElementById('c_pager'),cState,rows.length,'conts');
@@ -2799,6 +2826,31 @@ function renderCtnDetails(){
 }
 document.getElementById('c_containerNo').addEventListener('input',renderCtnDetails);
 document.getElementById('c_ctnCount').addEventListener('input',renderCtnDetails);
+function contStatusSelect(r,stCls){
+  if(r.status==='Delivered')return `<select class="status-pill ${stCls}" disabled title="Delivered is set by the invoice (BILL NO) — remove it to change the status"><option>Delivered</option></select>`;
+  const o=['Pending DO','DO Not Approved','DO Approved','Cleared'];
+  return `<select class="status-pill ${stCls}" onchange="setContStatus('${r.id}',this.value)" onclick="event.stopPropagation()">`
+    +o.map(x=>`<option value="${x}"${x===r.status?' selected':''}>${x}</option>`).join('')+'</select>';
+}
+function setContStatus(id,st){
+  const r=containers.find(x=>x.id===id);if(!r)return;
+  if(r.status==='Delivered'){toast('Delivered is set by the invoice (BILL NO) — remove it to change the status');renderConts();return;}
+  const o=['Pending DO','DO Not Approved','DO Approved','Cleared'];
+  if(!o.includes(st)||st===r.status)return;
+  const prevSt=r.status;
+  r.status=st;
+  r._manual=true; // user set this by hand → auto-rules won't override it
+  delete r._billCleared; // hand-picked status drops invoice provenance (never auto-reopened)
+  if(r.status==='Cleared'){
+    if(!r.clearance)r.clearance=isoLocal(new Date());
+    toast('Cleared ✓ — removed from the active list');
+  }else if(prevSt==='Cleared'){
+    r.clearance=''; // left Cleared → un-note so DO/due warnings work again
+  }
+  saveContainers();
+  applyContToEntry(r); // keep the Form Log entry's status in sync with this container
+  renderConts();
+}
 function cycleContStatus(id){
   const r=containers.find(x=>x.id===id);if(!r)return;
   // Delivered is set only by the invoice — a delivered container is locked (remove the BILL NO to change)
@@ -2823,7 +2875,7 @@ function openContForm(id){
   const f=document.querySelector('#overlay-cont form');
   document.getElementById('c_custHint').textContent='';
   if(id){
-    const r=containers.find(x=>x.id===id);t.textContent='Edit Container';
+    const r=containers.find(x=>x.id===id);t.textContent='Edit Container';document.getElementById('c_delBtn').style.display='';
     c_id.value=r.id;c_no.value=r.no??'';c_cno.value=r.cno||'';c_rNo.value=r.rNo||'';
     c_name.value=r.name||'';c_blNo.value=r.blNo||'';c_containerNo.value=r.containerNo||'';
     c_discharge.value=r.discharge||'';c_lastDate.value=r.lastDate||'';c_doDate.value=r.doDate||'';
@@ -2833,7 +2885,7 @@ function openContForm(id){
     c_ctnCount.value=contNoList(r).length||'';
     __edPI=JSON.parse(JSON.stringify(r.portInfo||{}));__edDirty={};
   }else{
-    t.textContent='Add Container';f.reset();c_id.value='';
+    t.textContent='Add Container';document.getElementById('c_delBtn').style.display='none';f.reset();c_id.value='';
     c_lastDate.dataset.manual='';
     c_no.value=containers.reduce((m,r)=>Math.max(m,Number(r.no)||0),0)+1;
     c_status.value='Pending DO';
@@ -2905,6 +2957,12 @@ function saveCont(e){
   applyContToEntry(rec); // keep the Form Log entry's status in sync with this container
   renderConts();updateCounts();closeModal('overlay-cont');
   return false;
+}
+// 🗑 inside the Edit window — delCont's own confirm still runs, and closing only follows a real delete
+function delContFromForm(){
+  const id=c_id.value;if(!id)return;
+  const before=containers.length;delCont(id);
+  if(containers.length<before)closeModal('overlay-cont');
 }
 function delCont(id){
   const r=containers.find(x=>x.id===id);
@@ -2997,8 +3055,7 @@ function renderMP(){
     <td class="num" data-l="Pkgs">${entryCell(r,'pkgs',true)}</td>
     <td data-l="AWB / BL">${entryCell(r,'awbBl')}</td>
     <td data-l="Supplier"><input class="mpremark" style="min-width:120px" value="${esc(r.supplier)}" placeholder="Shipper on the BL…" onchange="setSupplier('${jatt(r.id)}',this.value)"></td>
-    <td data-l="Status"><button class="status-pill st-${statusShown(r)}" onclick="cycleEntryStatus('${r.id}')"
-      title="${entryPaidUp(r)?'Paid in full — from QuickBooks':''}">${statusShown(r)}</button></td>
+    <td data-l="Status">${entryStatusSelect(r)}</td>
     ${isAdmin()?`<td class="num" data-l="💸 EEMAN">${(r.outCost&&r.outCost.amt!=null)
       ?`<span style="cursor:pointer;border-bottom:1px dashed #94a3b8" onclick="stOut('${jatt(r.id)}')" title="EEMAN's charge${r.outCost.inv?' · his inv '+esc(r.outCost.inv):''} — click to change">${fmtNum(r.outCost.amt)}</span>`
       :(r.status==='Cleared'||r.status==='Delivered'||r.billNo)
@@ -3010,7 +3067,6 @@ function renderMP(){
       <button class="iconbtn" onclick="openAttach('${jatt(r.id)}')" title="Documents (BL, DO, MPL bills, receipts…) — these go out with the invoice">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
       ${isAdmin()?`<button class="iconbtn" onclick="openInvoiceForm('${jatt(r.id)}')" title="${r.qbInvoiced?'Already sent to QuickBooks — click to open':'Create the sea QuickBooks invoice'}">${r.qbInvoiced?'✅':'🧾'}</button>
       <button class="iconbtn" onclick="window.open('?bill=${encodeURIComponent(r.id)}','_blank')" title="Open THIS shipment in its own tab to finish the billing without the rest of the list">↗</button>`:''}
-      <button class="iconbtn del" onclick="delEntry('${jatt(r.id)}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
   pagerHTML(document.getElementById('mp_pager'),mpState,rows.length,'mp');
 }
@@ -7699,7 +7755,6 @@ function renderCusts(){
         <button class="iconbtn" onclick="openAttachCust('${r.id}')" title="Customer documents (ID, licences, forms…) — shared with the Logins tab">📎${r.attachments&&r.attachments.length?r.attachments.length:''}</button>
         ${isAdmin()?`<button class="iconbtn" style="${r.portalKey?'color:#15803d;font-weight:700':''}" onclick="portalShare('${r.id}')" title="${r.portalKey?'Status link is live — click to copy it again':'Give this customer a private link to track their own shipments'}">🔗</button>`:''}
         <button class="iconbtn" onclick="openCustForm('${r.id}')" title="Edit">✏️</button>
-        <button class="iconbtn del" onclick="delCust('${r.id}')" title="Delete">🗑️</button>
       </div></td></tr>`;
   }).join('');
   pagerHTML(document.getElementById('u_pager'),uState,rows.length,'custs');
@@ -8001,7 +8056,7 @@ function openCustForm(id){
   custPendingFiles=[];
   const t=document.getElementById('u_modalTitle');
   if(id){
-    const r=customers.find(x=>x.id===id);t.textContent='Edit Customer';
+    const r=customers.find(x=>x.id===id);t.textContent='Edit Customer';document.getElementById('u_delBtn').style.display='';
     u_id.value=r.id;u_cno.value=r.cno;u_name.value=r.name;u_contact.value=r.contact||'';
     var ar=r.apRates||{},pf=r.apProfile||{};
     u_rate_ff.value=ar['Form Filling']??'';u_rate_pc.value=ar['Processing Charges']??'';
@@ -8031,7 +8086,7 @@ function openCustForm(id){
     document.getElementById('u_docs').innerHTML=
       `<button type="button" class="ghost" onclick="closeModal('overlay-cust');openAttachCust('${r.id}')">📎 Documents${r.attachments&&r.attachments.length?' ('+r.attachments.length+')':''}</button>
        <span style="font-size:12px;color:#94a3b8;margin-left:8px">ID, licences, forms — shared with the Logins tab</span>`;
-  }else{t.textContent='Add Customer';u_id.value='';u_cno.value='';u_name.value='';u_contact.value='';
+  }else{t.textContent='Add Customer';document.getElementById('u_delBtn').style.display='none';u_id.value='';u_cno.value='';u_name.value='';u_contact.value='';
     u_rate_ff.value='';u_rate_pc.value='';u_rate_cl.value='';u_rate_dh.value='';
     u_clear_mode.value='KG';u_ff_qty.value='';u_no_dhoni.checked=false;u_no_proc.checked=false;
     u_no_ff.checked=false;u_min_kg.value='';u_clear_label.value='';
@@ -8096,6 +8151,11 @@ function saveCust(e){
   saveCustomers();renderCusts();updateCounts();closeModal('overlay-cust');
   return false;
 }
+function delCustFromForm(){
+  const id=u_id.value;if(!id)return;
+  const before=customers.length;delCust(id);
+  if(customers.length<before)closeModal('overlay-cust');
+}
 function delCust(id){
   const r=customers.find(x=>x.id===id);
   if(!confirm(`Delete customer "${r.cno} — ${r.name}" from the list?`))return;
@@ -8150,19 +8210,18 @@ function renderCreds(){
     <td class="actcol"><div class="rowact">
       <button class="iconbtn" onclick="openAttachCred('${r.id}')" title="Customer documents (ID, licences, forms…) — shared with the Customers tab">📎${credAttCount(r)||''}</button>
       <button class="iconbtn" onclick="openCredForm('${r.id}')" title="Edit">✏️</button>
-      <button class="iconbtn del" onclick="delCred('${r.id}')" title="Delete">🗑️</button>
     </div></td></tr>`).join('');
   pagerHTML(document.getElementById('p_pager'),pState,rows.length,'creds');
 }
 function openCredForm(id){
   const t=document.getElementById('p_modalTitle');
   if(id){
-    const r=creds.find(x=>x.id===id);t.textContent='Edit Login';
+    const r=creds.find(x=>x.id===id);t.textContent='Edit Login';document.getElementById('p_delBtn').style.display='';
     p_id.value=r.id;p_cno.value=r.cno||'';p_name.value=r.name||'';p_contact.value=r.contact||'';
     p_mplUser.value=r.mplUser||'';p_mplPass.value=r.mplPass||'';
     p_customPass.value=r.customPass||'';p_asycudaPass.value=r.asycudaPass||'';p_email.value=r.email||'';
   }else{
-    t.textContent='Add Login';
+    t.textContent='Add Login';document.getElementById('p_delBtn').style.display='none';
     ['p_id','p_cno','p_name','p_contact','p_mplUser','p_mplPass','p_customPass','p_asycudaPass','p_email'].forEach(i=>document.getElementById(i).value='');
   }
   showModal('overlay-cred');setTimeout(()=>p_cno.focus(),50);
@@ -8182,6 +8241,11 @@ function saveCred(e){
   saveCreds();ensureCustomer(rec.cno,rec.name);
   renderCreds();updateCounts();closeModal('overlay-cred');
   return false;
+}
+function delCredFromForm(){
+  const id=p_id.value;if(!id)return;
+  const before=creds.length;delCred(id);
+  if(creds.length<before)closeModal('overlay-cred');
 }
 function delCred(id){
   const r=creds.find(x=>x.id===id);
