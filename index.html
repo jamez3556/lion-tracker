@@ -477,6 +477,7 @@
           <th data-k="ctnsLeft" class="num">CTNS LEFT <span class="arrow">▲▼</span></th>
           <th data-k="status">STATUS <span class="arrow">▲▼</span></th>
           <th data-k="logNo">LOG NO <span class="arrow">▲▼</span></th>
+          <th data-k="remark">REMARK <span class="arrow">▲▼</span></th>
         </tr></thead>
         <tbody id="c_tbody"></tbody>
       </table>
@@ -1454,7 +1455,7 @@ function fmtDate(s){
 function fmtNum(n){return (n===null||n===undefined||n==='')?'—':Number(n).toLocaleString('en-US')}
 /* Which build this is. Bumped by the publish tool, and stamped on every error report so a
    fault can be tied to the version that introduced it. */
-const APP_BUILD='2026-09-14 23:57';
+const APP_BUILD='2026-09-15 00:02';
 /* Report faults instead of swallowing them. At most 5 a session and never the same one twice,
    so a loop cannot run up a Firestore bill; silent, because the staff can do nothing about it
    and a scary popup mid-shipment is worse than the bug. */
@@ -2549,7 +2550,7 @@ function filteredConts(){
   const sf=document.getElementById('c_statusFilter').value;
   const df=document.getElementById('c_dueFilter').value;
   let rows=containers.filter(r=>{
-    if(q&&![r.cno,r.name,r.blNo,r.containerNo,r.rNo].join(' ').toLowerCase().includes(q))return false;
+    if(q&&![r.cno,r.name,r.blNo,r.containerNo,r.rNo,r.remark].join(' ').toLowerCase().includes(q))return false;
     if(!sf&&isDone(r))return false; // done (Cleared / Delivered) containers leave the active list
     if(sf&&r.status!==sf)return false;
     if(df){
@@ -2648,7 +2649,8 @@ function renderConts(){
       <td data-l="Last Date">${badge}</td>
       <td class="num" data-l="Ctns Left">${ctnsLeftCell(r)}</td>
       <td data-l="Status">${contStatusSelect(r,stCls)}</td>
-      <td data-l="Log No">${r.logNo!=null&&r.logNo!==''?('Log '+esc(r.logNo)):(esc(r.remark)||'—')}</td></tr>`;
+      <td data-l="Log No">${r.logNo!=null&&r.logNo!==''?('Log '+esc(r.logNo)):'—'}</td>
+      <td data-l="Remark"><input class="mpremark" value="${esc(r.remark||'')}" placeholder="Add remark…" onchange="setContRemark('${r.id}',this.value)" onclick="event.stopPropagation()"></td></tr>`;
   }).join('');
   pagerHTML(document.getElementById('c_pager'),cState,rows.length,'conts');
   renderAlerts();
@@ -2959,6 +2961,14 @@ function saveCont(e){
   return false;
 }
 // 🗑 inside the Edit window — delCont's own confirm still runs, and closing only follows a real delete
+// REMARK typed straight into the Container Status table. The same field the edit window's REMARK
+// box writes, so the two never disagree.
+function setContRemark(id,val){
+  const r=containers.find(x=>x.id===id);if(!r)return;
+  const v=String(val||'').trim();
+  if((r.remark||'')===v)return;
+  r.remark=v;saveContainers();
+}
 function delContFromForm(){
   const id=c_id.value;if(!id)return;
   const before=containers.length;delCont(id);
@@ -2971,8 +2981,8 @@ function delCont(id){
 }
 function exportConts(){
   xlsExport('lion-containers',
-    ['NO','C NUMBER','NAME','LOG NO','R NUMBER','BL NO','CONTAINER NO','SIZE(S)','CTNS LEFT','DO APPROVAL DATE','DISCHARGE DATE','LAST DATE','CLEARANCE DATE','STATUS'],
-    filteredConts().map(r=>[r.no,r.cno,r.name,r.logNo,r.rNo,r.blNo,r.containerNo,contNoList(r).map(cn=>ctnInfo(r,cn).size).filter(Boolean).join(' / '),r.ctnsLeft,r.doDate,r.discharge,r.lastDate,r.clearance,r.status]));
+    ['NO','C NUMBER','NAME','LOG NO','R NUMBER','BL NO','CONTAINER NO','SIZE(S)','CTNS LEFT','DO APPROVAL DATE','DISCHARGE DATE','LAST DATE','CLEARANCE DATE','STATUS','REMARK'],
+    filteredConts().map(r=>[r.no,r.cno,r.name,r.logNo,r.rNo,r.blNo,r.containerNo,contNoList(r).map(cn=>ctnInfo(r,cn).size).filter(Boolean).join(' / '),r.ctnsLeft,r.doDate,r.discharge,r.lastDate,r.clearance,r.status,r.remark||'']));
 }
 // Audit report: how many containers cleared per month and per year (report only — not shown on screen)
 function exportContAudit(){
