@@ -451,8 +451,9 @@
       <option value="">All statuses</option><option>Pending DO</option><option>DO Not Approved</option><option>DO Approved</option><option>Cleared</option><option>Delivered</option>
     </select>
     <select class="filter" id="c_dueFilter">
-      <option value="">All deadlines</option><option value="doextend">⚠ Needs DO extension</option><option value="noted">✓ Clearance noted (all)</option><option value="notedtoday">📌 Noted for today</option><option value="notedtomorrow">📌 Noted for tomorrow</option><option value="overdue">Overdue</option><option value="soon">Due ≤ 3 days</option><option value="week">Due ≤ 7 days</option>
+      <option value="">All deadlines</option><option value="doextend">⚠ Needs DO extension</option><option value="noted">✓ Clearance noted (all)</option><option value="notedtoday">📌 Noted for today</option><option value="notedtomorrow">📌 Noted for tomorrow</option><option value="noteddate">📅 Noted for a date…</option><option value="overdue">Overdue</option><option value="soon">Due ≤ 3 days</option><option value="week">Due ≤ 7 days</option>
     </select>
+    <input type="date" class="filter" id="c_dueDate" style="display:none" title="Show containers whose clearance is noted for this date">
     <button class="primary" onclick="openContForm()">＋ Add Container</button>
     <button class="ghost" onclick="window.open('https://my.port.mv/login','_blank')">🌐 my.port.mv</button>
     <button class="ghost" onclick="exportConts()">⬇ Excel</button>
@@ -1455,7 +1456,7 @@ function fmtDate(s){
 function fmtNum(n){return (n===null||n===undefined||n==='')?'—':Number(n).toLocaleString('en-US')}
 /* Which build this is. Bumped by the publish tool, and stamped on every error report so a
    fault can be tied to the version that introduced it. */
-const APP_BUILD='2026-09-15 00:02';
+const APP_BUILD='2026-09-15 18:02';
 /* Report faults instead of swallowing them. At most 5 a session and never the same one twice,
    so a loop cannot run up a Firestore bill; silent, because the staff can do nothing about it
    and a scary popup mid-shipment is worse than the bug. */
@@ -2549,6 +2550,7 @@ function filteredConts(){
   const q=document.getElementById('c_search').value.trim().toLowerCase();
   const sf=document.getElementById('c_statusFilter').value;
   const df=document.getElementById('c_dueFilter').value;
+  document.getElementById('c_dueDate').style.display=df==='noteddate'?'':'none';
   let rows=containers.filter(r=>{
     if(q&&![r.cno,r.name,r.blNo,r.containerNo,r.rNo,r.remark].join(' ').toLowerCase().includes(q))return false;
     if(!sf&&isDone(r))return false; // done (Cleared / Delivered) containers leave the active list
@@ -2558,6 +2560,7 @@ function filteredConts(){
       if(df==='noted')return !isDone(r)&&!!r.clearance; // every container with a clearance date noted
       if(df==='notedtoday')return !isDone(r)&&r.clearance===isoLocal(new Date());
       if(df==='notedtomorrow')return !isDone(r)&&r.clearance===addDays(isoLocal(new Date()),1);
+      if(df==='noteddate'){const dd=document.getElementById('c_dueDate').value;return !dd||(!isDone(r)&&r.clearance===dd);}
       const d=daysLeft(effLast(r).next);
       if(d===null||isNoted(r))return false; // noted/done = under control → same rule as the stat cards
       if(df==='overdue'&&!(d<0))return false;
@@ -8589,12 +8592,19 @@ makeSortable('p_head',pState,renderCreds);
 makeSortable('pay_head',payState,renderPayments);
 makeSortable('mp_head',mpState,renderMP);
 [['e_search',renderEntries,eState],['e_statusFilter',renderEntries,eState],['e_invFilter',renderEntries,eState],['e_typeFilter',renderEntries,eState],['e_monthFilter',renderEntries,eState],
- ['c_search',renderConts,cState],['c_statusFilter',renderConts,cState],['c_dueFilter',renderConts,cState],
+ ['c_search',renderConts,cState],['c_statusFilter',renderConts,cState],['c_dueFilter',renderConts,cState],['c_dueDate',renderConts,cState],
  ['mp_search',renderMP,mpState],['mp_statusFilter',renderMP,mpState],['mp_monthFilter',renderMP,mpState],
  ['pay_search',renderPayments,payState],['pay_billFilter',renderPayments,payState],['pay_balFilter',renderPayments,payState],['pay_monthFilter',renderPayments,payState],
  ['u_search',renderCusts,uState],['p_search',renderCreds,pState]].forEach(([id,fn,st])=>{
   const el=document.getElementById(id);
   el.addEventListener(el.tagName==='INPUT'?'input':'change',()=>{st.page=1;fn();});
+});
+// the date box belongs to one option of the deadline filter: it appears with it, starting on today
+document.getElementById('c_dueFilter').addEventListener('change',function(){
+  const box=document.getElementById('c_dueDate');
+  const on=this.value==='noteddate';
+  box.style.display=on?'':'none';
+  if(on){if(!box.value)box.value=isoLocal(new Date());box.focus();renderConts();}
 });
 // only ADVANCE is a fixed box — the charge inputs are built per shipment in openPayForm, which
 // wires its own listeners (they don't exist yet at boot)
