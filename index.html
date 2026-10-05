@@ -5060,6 +5060,12 @@ function tmplLines(tpl,e,pay){
       o.rate=v!=null?v:(k==='macl'&&e.type!=='MP'&&e.grsWt!=null?maclEstimate(e.grsWt):'');
       o.est=true;
     }
+    // Liner Charge changes from shipment to shipment (Seaside) — the amount read off the liner's
+    // email is stored on the entry (e.linerCharge, in the invoice currency) and wins over the
+    // format's saved number. No amount recorded → the saved number stays.
+    if(/liner\s*charge/i.test(o.desc||o.name)&&e.linerCharge!=null&&e.linerCharge!==''){
+      o.rate=Number(e.linerCharge);
+    }
     // "Clearance 20' / 40' / LCL" lines: qty = how many containers of that size this shipment has.
     // Sizes the shipment doesn't have are dropped, so the invoice only lists what was actually cleared.
     const m=/(20'|40'HC|40'|LCL|20FCL|40FCL)$/i.exec(o.desc.replace(/\s+/g,''));
