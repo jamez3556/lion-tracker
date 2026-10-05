@@ -5030,8 +5030,12 @@ function contSizeCounts(e){
   if(lclN)out.LCL=lclCbm>0?lclCbm:lclN;   // CBM when known; container count as a last resort
   return any?out:null;
 }
+// Payment-tab amounts (MPL receipts, duty, MACL) are paid in MVR. A customer billed in USD
+// (Seaside) gets them converted at this rate — e.g. receipts 150 + 200 = 350 MVR → 350 / 15.42 = 22.70 USD.
+const MVR_PER_USD=15.42;
 function tmplLines(tpl,e,pay){
   const sizes=contSizeCounts(e);
+  const fx=custCurrency(lookupCustomer(e.cno))==='USD'?MVR_PER_USD:1;
   const out=[];
   tpl.forEach(l=>{
     const o={name:l.name,desc:l.desc||'',qty:l.qty,rate:l.rate,tax:l.tax};
@@ -5050,7 +5054,8 @@ function tmplLines(tpl,e,pay){
     if(typeof o.rate==='string'&&o.rate.charAt(0)==='{'){
       const k=o.rate.replace(/[{}]/g,'');
       // {mpl} on a sea shipment now means the whole port bill (THC + quay wall + other)
-      const v=k==='mpl'?payPortCharge(pay):(pay&&pay[k]!=null?pay[k]:null);
+      let v=k==='mpl'?payPortCharge(pay):(pay&&pay[k]!=null?pay[k]:null);
+      if(v!=null&&fx!==1)v=invMoney(Number(v)/fx);
       // air DO fee with no MACL typed yet: the weight-based estimate, same as the standard draft
       o.rate=v!=null?v:(k==='macl'&&e.type!=='MP'&&e.grsWt!=null?maclEstimate(e.grsWt):'');
       o.est=true;
