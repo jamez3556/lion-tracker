@@ -2098,7 +2098,9 @@ function openEntryForm(id,defaultType){
     document.getElementById('e_file').disabled=bo;
     entryPendingFiles=[];
     document.getElementById('e_docs').innerHTML=
-      `<button type="button" class="ghost" onclick="closeModal('overlay-entry');openAttach('${r.id}')">📎 Documents (${(r.attachments||[]).length}) — view / add</button>`;
+      `<button type="button" class="ghost" onclick="closeModal('overlay-entry');openAttach('${r.id}')">📎 Documents (${(r.attachments||[]).length}) — view / add</button>`
+      +((isAdmin()&&!r.billNo&&r.type==='MP'&&((r.cno||'').toUpperCase()===SEASIDE_CNO||/SEASIDE\s+FINOLHU/i.test(r.customer||'')))
+        ?` <button type="button" class="ghost" style="${r.ssCancel?'':'color:#dc2626;border-color:#dc2626'}" onclick="closeModal('overlay-entry');ssToggleCancel('${r.id}')">${r.ssCancel?'↩️ Remove “Have to cancel”':'⛔ Have to cancel (not our clearance — no bill)'}</button>`:'');
     document.getElementById('e_delBtn').style.display='';   // an existing entry can be deleted from here
     toggleContBox();
   }else{
@@ -7755,7 +7757,6 @@ function renderSeasideDesk(){
       <td data-l="Bill No">${esc(e.billNo)||'—'}</td>
       <td data-l="Status">${statusHtml}</td>
       <td class="actcol"><div class="rowact">
-        ${isAdmin()&&!e.billNo?`<button class="iconbtn" onclick="ssToggleCancel('${e.id}')" title="${cancelMark?'Remove the have-to-cancel mark':'Mark as have to cancel (not our clearance, no bill)'}">${cancelMark?'↩️':'⛔'}</button>`:''}
         ${isAdmin()&&!cancelMark?(e.billNo
           ?`<button class="iconbtn" onclick="openInvoiceForm('${e.id}')" title="Open the invoice">✅</button>`
           :`<button class="iconbtn" style="background:#FF4F00;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="stelcoBill('${e.id}')" title="Create the QuickBooks invoice">🧾 Bill</button>`):''}
