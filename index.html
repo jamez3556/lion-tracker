@@ -5032,6 +5032,17 @@ function custCurrency(cust){return (cust&&cust.currency)||'MVR';}
 /* Invoice quantities per size. FCL sizes (20'/40') = HOW MANY CONTAINERS (qty × rate).
    LCL = the CBM VALUE (sea billing is CBM × rate — e.g. 8.96 CBM × 500). */
 function contSizeCounts(e){
+  /* 06.10.26 (Jaamiz: "write bl cbm if lcl shipment"): sizes typed on the entry (📦, from the BL)
+     win over the port container record. An LCL container's port record carries the whole
+     consolidation's or a re-measured CBM - the bill must use the CBM printed on OUR BL. */
+  const s0=e.seaCont;
+  if(s0&&(s0["40'"]||s0["20'"]||s0.LCL)){
+    const o={};
+    if(s0["40'"])o["40'"]=Number(s0["40'"]);
+    if(s0["20'"])o["20'"]=Number(s0["20'"]);
+    if(s0.LCL)o.LCL=Number(s0.LCL);
+    return o;
+  }
   const c=containers.find(x=>x.entryId===e.id);
   if(!c||!c.portInfo){
     // billing-only sea shipments (STELCO desk quick-add) have no Container Status record —
@@ -7225,7 +7236,7 @@ function stSeaCont(id){ // 📦 — FCL container counts + LCL CBM (these ARE th
   };
   const f40=ask("How many 40' containers?",cur["40'"]);if(f40===undefined)return;
   const f20=ask("How many 20' containers?",cur["20'"]);if(f20===undefined)return;
-  const lcl=ask('LCL — how many CBM? (from the BL, e.g. 8.96 — bills CBM × rate)',cur.LCL);if(lcl===undefined)return;
+  const lcl=ask('LCL — how many CBM? (from the BL, e.g. 8.96 — bills CBM × rate; overrides the port figure)',cur.LCL);if(lcl===undefined)return;
   if(!f40&&!f20&&!lcl){delete e.seaCont;}
   else{e.seaCont={};if(f40)e.seaCont["40'"]=f40;if(f20)e.seaCont["20'"]=f20;if(lcl)e.seaCont.LCL=lcl;}
   saveEntries();renderStelcoDesk();
