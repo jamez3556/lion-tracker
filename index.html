@@ -1232,7 +1232,7 @@
     </div>
     <div class="grid2">
       <div class="field"><label>MEMO / REFERENCE</label><input id="inv_memo" placeholder="LION Ref L26/…"></div>
-      <div class="field"><label>EMAIL INVOICE TO — always copied to jaamiz25@gmail.com</label><input id="inv_email" type="email" placeholder="customer@…, second@… (blank = only to you)"></div>
+      <div class="field"><label>EMAIL INVOICE TO — always copied to jaamiz25@gmail.com</label><input id="inv_email" type="email" placeholder="customer@…, second@… (blank = only to you)"><div id="inv_emailExtra" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div></div>
     </div>
     <div class="actions">
       <button type="button" class="ghost" onclick="closeModal('overlay-invoice')">Cancel</button>
@@ -5517,6 +5517,17 @@ function invAttCount(){
   const b=document.getElementById('inv_attBtn');
   if(b)b.textContent='📎 Documents'+(n?' ('+n+')':'');
 }
+// optional extra addresses for a customer (cust.billEmailExtra) — NOT sent unless ticked for this invoice
+function invRenderEmailExtra(cust){
+  const box=document.getElementById('inv_emailExtra');if(!box)return;
+  const list=String((cust&&cust.billEmailExtra)||'').split(/[,;\s]+/).filter(x=>x.includes('@'));
+  box.innerHTML=list.map(a=>`<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;border:1px dashed #94a3b8;border-radius:999px;padding:3px 10px;cursor:pointer;font-weight:600;text-transform:none;letter-spacing:0"><input type="checkbox" style="width:auto;margin:0" onchange="invToggleEmail('${esc(a)}',this.checked)"> also send to ${esc(a)}</label>`).join('');
+}
+function invToggleEmail(a,on){
+  const el=document.getElementById('inv_email');
+  let l=el.value.split(/[,;]+/).map(x=>x.trim()).filter(Boolean).filter(x=>x.toLowerCase()!==a.toLowerCase());
+  if(on)l.push(a);el.value=l.join(', ');
+}
 function openInvoiceForm(entryId){
   if(!isAdmin()){toast('Billing is admin-only');return;}
   const e=entries.find(x=>x.id===entryId);if(!e)return;
@@ -5565,6 +5576,7 @@ function openInvoiceForm(entryId){
   // MPL & Custom Logins REGISTERED EMAIL by C-No — editable per invoice
   const cred=creds.find(c=>(c.cno||'').toUpperCase()===(e.cno||'').toUpperCase());
   document.getElementById('inv_email').value=(cust&&cust.billEmail)||(cred&&cred.email)||'';
+  invRenderEmailExtra(cust);
   /* Left blank ON PURPOSE when nothing is saved: the invoice then goes to jaamiz25@gmail.com only.
      QuickBooks' own customer email is a contact address, not a billing one, and is never used. */
   // Resend / Update only make sense once the invoice exists in QuickBooks
