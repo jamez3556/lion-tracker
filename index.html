@@ -658,7 +658,7 @@
         <table style="min-width:900px">
           <thead><tr>
             <th>DATE</th><th class="num">NO</th><th>R NO</th><th>BL</th><th>📦 CONTAINERS</th><th class="num">PKGS</th>
-            <th class="num">MPL (USD)</th><th class="num">LINER (USD)</th>
+            <th class="num">MPL (USD)</th><th class="num">LINER (USD)</th><th class="num">🚚 LORRY (USD)</th>
             <th>BILL NO</th><th>STATUS</th><th class="nosort actcol">ACTIONS</th>
           </tr></thead>
           <tbody id="b_ss_tbody"></tbody>
@@ -5104,6 +5104,7 @@ function tmplLines(tpl,e,pay){
       if(/^mpl charge$/i.test(o.name)&&e.mplUsd!=null){o.rate=Number(e.mplUsd);o.est=false;}
       if(/^delivery order fee$/i.test(o.name)&&e.linerCharge!=null){o.rate=Number(e.linerCharge);o.est=false;}
     }
+    if(e.type==='MP'&&/^lorry charges?$/i.test(o.name)&&e.lorryUsd!=null){o.rate=Number(e.lorryUsd);o.est=false;}
     // "Clearance 20' / 40' / LCL" lines: qty = how many containers of that size this shipment has.
     // Sizes the shipment doesn't have are dropped, so the invoice only lists what was actually cleared.
     const m=/(20'|40'HC|40'|LCL|20FCL|40FCL)$/i.exec(o.desc.replace(/\s+/g,''));
@@ -5117,6 +5118,9 @@ function tmplLines(tpl,e,pay){
     }
     out.push(o);
   });
+  // 🚚 lorry typed on the SEASIDE desk (06.10.26) — a pass-through line, added only when one was used
+  if(e.type==='MP'&&e.lorryUsd!=null&&Number(e.lorryUsd)>0&&!out.some(l=>/^lorry charges?$/i.test(l.name)))
+    out.push({name:'Lorry Charges',desc:'Lorry Charges',qty:1,rate:Number(e.lorryUsd),tax:0});
   return out;
 }
 // Remember the lines currently in the builder as this customer's format (per shipment type).
@@ -7674,7 +7678,9 @@ let ssMode=(()=>{try{return localStorage.getItem('lion_ss_mode')||'TODO';}catch(
 function ssSetMode(m){ssMode=m;try{localStorage.setItem('lion_ss_mode',m);}catch(e){}renderSeasideDesk();}
 function ssAmt(id,field){ // 💵 type the MPL / Liner amount (USD) once — the 🧾 Bill builder fills it in
   const e=entries.find(x=>x.id===id);if(!e)return;
-  const lbl=field==='mplUsd'?'MPL Charge (USD) — MPL receipts for this BL ÷ 15.42':'Liner / D-O charge (USD) — agent invoice total incl. GST';
+  const lbl=field==='mplUsd'?'MPL Charge (USD) — MPL receipts for this BL ÷ 15.42'
+           :field==='lorryUsd'?'Lorry charge (USD) — only if a lorry was used'
+           :'Liner / D-O charge (USD) — agent invoice total incl. GST';
   const v=prompt(lbl+' (blank = none):',e[field]!=null?e[field]:'');
   if(v===null)return;
   if(v.trim()===''){delete e[field];}
@@ -7735,6 +7741,7 @@ function renderSeasideDesk(){
       <td class="num" data-l="Pkgs">${e.pkgs??'—'}</td>
       <td class="num" data-l="MPL (USD)"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8;${e.mplUsd!=null?'font-weight:700':''}" onclick="ssAmt('${e.id}','mplUsd')" title="MPL Charge in USD (MPL receipts for this BL ÷ 15.42) — the bill reads it">${e.mplUsd!=null?fmtNum(e.mplUsd):'＋'}</span></td>
       <td class="num" data-l="Liner (USD)"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8;${e.linerCharge!=null?'font-weight:700':''}" onclick="ssAmt('${e.id}','linerCharge')" title="Liner / D-O charge in USD (agent's invoice total incl. GST) — the bill reads it">${e.linerCharge!=null?fmtNum(e.linerCharge):'＋'}</span></td>
+      <td class="num" data-l="Lorry (USD)"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8;${e.lorryUsd!=null?'font-weight:700':''}" onclick="ssAmt('${e.id}','lorryUsd')" title="Lorry charge in USD, only if a lorry was used — the bill adds a Lorry Charges line">${e.lorryUsd!=null?fmtNum(e.lorryUsd):'＋'}</span></td>
       <td data-l="Bill No">${esc(e.billNo)||'—'}</td>
       <td data-l="Status">${statusHtml}</td>
       <td class="actcol"><div class="rowact">
