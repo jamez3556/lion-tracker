@@ -658,6 +658,7 @@
         <table style="min-width:900px">
           <thead><tr>
             <th>DATE</th><th class="num">NO</th><th>R NO</th><th>BL</th><th>📦 CONTAINERS</th><th class="num">PKGS</th>
+            <th class="num">MPL (USD)</th><th class="num">LINER (USD)</th>
             <th>BILL NO</th><th>STATUS</th><th class="nosort actcol">ACTIONS</th>
           </tr></thead>
           <tbody id="b_ss_tbody"></tbody>
@@ -5096,6 +5097,13 @@ function tmplLines(tpl,e,pay){
       o.rate=v!=null?v:(k==='macl'&&e.type!=='MP'&&e.grsWt!=null?maclEstimate(e.grsWt):'');
       o.est=true;
     }
+    /* 06.10.26 (Jaamiz): amounts typed on the 🏝 SEASIDE desk, already in the invoice currency (USD) -
+       MPL Charge = this BL's MPL receipts ÷ 15.42, Liner Charge = the agent's D/O invoice. They win
+       over the Payment-tab placeholder and the saved flat 54. */
+    if(e.type==='MP'){
+      if(/^mpl charge$/i.test(o.name)&&e.mplUsd!=null){o.rate=Number(e.mplUsd);o.est=false;}
+      if(/^delivery order fee$/i.test(o.name)&&e.linerCharge!=null){o.rate=Number(e.linerCharge);o.est=false;}
+    }
     // "Clearance 20' / 40' / LCL" lines: qty = how many containers of that size this shipment has.
     // Sizes the shipment doesn't have are dropped, so the invoice only lists what was actually cleared.
     const m=/(20'|40'HC|40'|LCL|20FCL|40FCL)$/i.exec(o.desc.replace(/\s+/g,''));
@@ -7664,6 +7672,16 @@ function seasideRows(){return entries.filter(e=>e.type==='MP'&&((e.cno||'').toUp
 function seasidePending(){return seasideRows().filter(e=>!e.billNo);}
 let ssMode=(()=>{try{return localStorage.getItem('lion_ss_mode')||'TODO';}catch(e){return 'TODO';}})();
 function ssSetMode(m){ssMode=m;try{localStorage.setItem('lion_ss_mode',m);}catch(e){}renderSeasideDesk();}
+function ssAmt(id,field){ // 💵 type the MPL / Liner amount (USD) once — the 🧾 Bill builder fills it in
+  const e=entries.find(x=>x.id===id);if(!e)return;
+  const lbl=field==='mplUsd'?'MPL Charge (USD) — MPL receipts for this BL ÷ 15.42':'Liner / D-O charge (USD) — agent invoice total incl. GST';
+  const v=prompt(lbl+' (blank = none):',e[field]!=null?e[field]:'');
+  if(v===null)return;
+  if(v.trim()===''){delete e[field];}
+  else{const n=Number(v.replace(/[^\d.]/g,''));if(!isFinite(n)||n<0){toast('Enter a number');return;}e[field]=Math.round(n*100)/100;}
+  e.u=Date.now();saveEntries();renderSeasideDesk();
+  toast(e[field]!=null?('💵 Saved — the bill will use USD '+fmtNum(e[field])):'Cleared');
+}
 function renderSeasideDesk(){
   const tb=document.getElementById('b_ss_tbody');if(!tb)return;
   const every=seasideRows();
@@ -7715,6 +7733,8 @@ function renderSeasideDesk(){
       <td data-l="BL">${esc(e.awbBl)||'—'}</td>
       <td data-l="Containers"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8;${cLbl?'font-weight:700':''}" onclick="stSeaCont('${e.id}')" title="Container sizes — these decide the invoice quantities">📦 ${cLbl||'set sizes'}</span></td>
       <td class="num" data-l="Pkgs">${e.pkgs??'—'}</td>
+      <td class="num" data-l="MPL (USD)"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8;${e.mplUsd!=null?'font-weight:700':''}" onclick="ssAmt('${e.id}','mplUsd')" title="MPL Charge in USD (MPL receipts for this BL ÷ 15.42) — the bill reads it">${e.mplUsd!=null?fmtNum(e.mplUsd):'＋'}</span></td>
+      <td class="num" data-l="Liner (USD)"><span style="cursor:pointer;border-bottom:1px dashed #94a3b8;${e.linerCharge!=null?'font-weight:700':''}" onclick="ssAmt('${e.id}','linerCharge')" title="Liner / D-O charge in USD (agent's invoice total incl. GST) — the bill reads it">${e.linerCharge!=null?fmtNum(e.linerCharge):'＋'}</span></td>
       <td data-l="Bill No">${esc(e.billNo)||'—'}</td>
       <td data-l="Status">${statusHtml}</td>
       <td class="actcol"><div class="rowact">
