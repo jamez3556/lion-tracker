@@ -503,7 +503,12 @@ window.delSnap=async id=>{
   if(r.status!=='pending'){toast('Already billed — cannot delete');return;}
   if(r.byEmail!==myEmail&&myEmail!==ADMIN){toast('Only '+(r.by||'the sender')+' or admin can delete this');return;}
   if(!confirm('Delete the snap for AWB '+r.awb+'?'))return;
-  try{await fsM.deleteDoc(fsM.doc(db,'dosnaps',id));toast('Deleted');}
+  try{
+    await fsM.deleteDoc(fsM.doc(db,'dosnaps',id));
+    // tombstone: the main tracker only listens to recent changes, so it learns of deletes from here
+    fsM.setDoc(fsM.doc(db,'settings','tombs'),{['dosnaps|'+id]:Date.now()},{merge:true}).catch(()=>{});
+    toast('Deleted');
+  }
   catch(e){toast('Could not delete — check connection');}
 };
 

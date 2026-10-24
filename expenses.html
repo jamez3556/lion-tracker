@@ -248,7 +248,11 @@ async function put(rec){
 async function del(id){
   data=data.filter(r=>r.id!==id);
   render();
-  try{await fsM.deleteDoc(fsM.doc(db,'expenses',id));}catch(e){toast('Could not delete — check connection');}
+  try{
+    await fsM.deleteDoc(fsM.doc(db,'expenses',id));
+    // tombstone: the main tracker only listens to recent changes, so it learns of deletes from here
+    fsM.setDoc(fsM.doc(db,'settings','tombs'),{['expenses|'+id]:Date.now()},{merge:true}).catch(()=>{});
+  }catch(e){toast('Could not delete — check connection');}
 }
 function listen(){
   fsM.onSnapshot(fsM.collection(db,'expenses'),s=>{

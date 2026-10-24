@@ -9010,6 +9010,52 @@ function loadPushed(col,cloudIds,localArr){
 const shadow={},debounces={};
 let db=null,auth=null,fx=null; // fx = firestore module fns
 
+/* ---- READ-COST CONTROL (Oct 2026) ----
+   Firestore bills a fresh listener on a WHOLE collection as one read per document whenever the
+   device's last listen is more than 30 minutes old — even with the local cache full. With ~3,900
+   records that was ~3,900 reads every time anyone opened the app (≈85M reads in 30 days).
+   Now each device keeps a per-collection watermark (newest `u` it has seen from the server) and
+   listens only to `u > watermark − margin`, so an open costs roughly the records changed since
+   that device last synced. The margin absorbs clock differences between devices (u is stamped
+   with the saving device's own clock).
+   A delta listener never learns about deletions, so every delete also writes a tombstone into
+   settings/tombs (one small doc, key "col|id" → time). Once a week each device still does one
+   full server read per collection — the safety net that heals anything a tombstone missed. */
+const DELTA_MARGIN=6*3600e3;      // 6 h of overlap per open
+const FULL_EVERY=7*864e5;         // full reconcile once a week per device
+const wmKey=col=>'lion_wm_v1_'+col, fullKey=col=>'lion_full_v1_'+col;
+const getWm=col=>Number(localStorage.getItem(wmKey(col))||0)||0;
+function bumpWm(col,u){
+  u=Math.min(Number(u)||0,Date.now());           // a device with a clock in the future can't push the mark ahead
+  if(u>getWm(col))try{localStorage.setItem(wmKey(col),String(u));}catch(e){}
+}
+const tombs=new Map();            // "col|id" → deletion time
+const isTomb=(col,id,u)=>{const t=tombs.get(col+'|'+id);return t!==undefined&&t>=(Number(u)||0);};
+function applyTombs(){            // drop locally anything a teammate deleted
+  const app=window.__app;if(!app)return;
+  let any=false;
+  COLS.forEach(col=>{
+    if(!shadow[col])return;      // collection not synced on this device
+    const arr=app.get[col]();
+    const keep=arr.filter(r=>!isTomb(col,r.id,r.u));
+    if(keep.length!==arr.length){
+      arr.forEach(r=>{if(isTomb(col,r.id,r.u)){shadow[col].delete(r.id);if(pushed[col])pushed[col].delete(r.id);}});
+      app.set[col](keep);
+      try{localStorage.setItem(KEYMAP[col],JSON.stringify(keep));}catch(e){}
+      if(pushed[col])savePushed(col);
+      any=true;
+    }
+  });
+  if(any)try{app.rerender();}catch(e){}
+}
+async function writeTombs(col,ids){
+  if(!ids.length)return;
+  const now=Date.now(),o={};
+  ids.forEach(id=>{o[col+'|'+id]=now;tombs.set(col+'|'+id,now);});
+  try{await fx.setDoc(fx.doc(db,'settings','tombs'),o,{merge:true});}
+  catch(e){console.warn('tombstone write failed (weekly full sync will still catch the delete)',(e&&e.code)||e);}
+}
+
 function chip(t,bg){const c=document.getElementById('syncchip');c.textContent=t;
   c.style.background=bg||'';c.style.color=bg?'#fff':'';c.style.borderColor=bg||'';}
 function showSection(id){['cloud-setup','cloud-login','cloud-account'].forEach(s=>
@@ -9045,8 +9091,11 @@ async function mergeSnap(col,s){
   const local=app.get[col]();
   const byId=new Map(local.map(r=>[r.id,r]));
   let changed=false;
+  // the server confirmed this result set → advance the watermark (delta results are small)
+  if(!(s.metadata&&s.metadata.fromCache))s.docs.forEach(d=>bumpWm(col,(d.data()||{}).u));
   s.docChanges().forEach(ch=>{
     const id=ch.doc.id;
+    if(ch.type!=='removed'&&isTomb(col,id,(ch.doc.data()||{}).u))return; // stale cached copy of a deleted record
     if(ch.type==='removed'){
       if(byId.has(id)){byId.delete(id);changed=true;}
       shadow[col].delete(id);
@@ -9098,6 +9147,7 @@ async function pushCol(col){
     sets.forEach(r=>{sh.set(r.id,cmpStr(r));if(pushed[col])pushed[col].add(r.id);});
     dels.forEach(id=>{sh.delete(id);if(pushed[col])pushed[col].delete(id);});
     if(pushed[col])savePushed(col);
+    if(dels.length)writeTombs(col,dels); // tell delta-listening devices about the delete
     chip('☁ Synced','#16a34a');
   }catch(e){
     chip('☁ Will sync when online','#d97706');
@@ -9117,13 +9167,22 @@ async function startSync(){
   async function initCol(col){
     shadow[col]=shadow[col]||new Map();
     const ref=fx.collection(db,col);
-    // Read the startup snapshot from the LOCAL CACHE, not the server — on a reload the cache already
-    // holds every record, so this costs 0 server reads. The onSnapshot listener below still delivers
-    // any changes made elsewhere since (deltas only). Fall back to a server read when the cache is
-    // empty (first-ever load, cache miss, or persistence unavailable) so the reconcile stays correct.
-    let snap;
-    try{snap=await fx.getDocsFromCache(ref);if(snap.empty)snap=await fx.getDocs(ref);}
-    catch(e){snap=await fx.getDocs(ref);}
+    // FULL mode (server read of every doc): first run on this device / version, or once a week.
+    // Otherwise CACHE mode: the startup snapshot comes from the local cache (0 reads) and the delta
+    // listener below fetches only what changed since this device's watermark.
+    const needFull=!joined||!getWm(col)||(Date.now()-Number(localStorage.getItem(fullKey(col))||0))>FULL_EVERY;
+    let snap,full=needFull;
+    if(!full){
+      try{snap=await fx.getDocsFromCache(ref);if(snap.empty)full=true;}
+      catch(e){full=true;}
+    }
+    if(full){
+      try{snap=await fx.getDocsFromServer(ref);}catch(e){snap=await fx.getDocs(ref);}
+      full=!(snap.metadata&&snap.metadata.fromCache);   // only a true server answer may prove a delete
+    }
+    // a cached copy of a record a teammate deleted must not come back
+    const docs=snap.docs.filter(d=>!isTomb(col,d.id,(d.data()||{}).u));
+    snap={empty:!docs.length,docs};
     const localArr=app.get[col]();
     if(!joined){
       if(snap.empty&&localArr.length){
@@ -9164,8 +9223,11 @@ async function startSync(){
         if(!loc){byId.set(d.id,dd);changed=true;}                                              // created by a teammate while we were away
         else if((dd.u||0)>(loc.u||0)&&cmpStr(loc)!==cmpStr(dd)){byId.set(d.id,dd);changed=true;} // cloud is newer → take it
       });
-      for(const [id] of [...byId]){ // gone from the cloud but CONFIRMED synced once → teammate deleted it
-        if(!cloudIds.has(id)&&pushed[col].has(id)){byId.delete(id);pushed[col].delete(id);changed=true;}
+      for(const [id,r] of [...byId]){
+        // gone from a FULL server read but CONFIRMED synced once → teammate deleted it.
+        // (A cache read can't prove this — the cache may simply never have held the record.)
+        if(full&&!cloudIds.has(id)&&pushed[col].has(id)){byId.delete(id);pushed[col].delete(id);changed=true;}
+        else if(isTomb(col,id,r.u)){byId.delete(id);pushed[col].delete(id);changed=true;} // tombstoned
       }
       if(changed){
         const arr=[...byId.values()];
@@ -9174,8 +9236,33 @@ async function startSync(){
         savePushed(col);
       }
     }
-    fx.onSnapshot(ref,s=>mergeSnap(col,s),()=>{});
+    if(full){
+      let mx=0;docs.forEach(d=>{const u=Number((d.data()||{}).u)||0;if(u>mx)mx=u;});
+      bumpWm(col,mx||1);
+      try{localStorage.setItem(fullKey(col),String(Date.now()));}catch(e){}
+    }
+    // live: only records saved after (watermark − margin). Records without a `u` never match, which
+    // is fine — they are already on this device from a full read.
+    const since=Math.max(0,getWm(col)-DELTA_MARGIN);
+    fx.onSnapshot(fx.query(ref,fx.where('u','>',since)),s=>mergeSnap(col,s),e=>{
+      // e.g. a missing index: fall back to the old whole-collection listener rather than going deaf
+      console.warn('delta sync failed for "'+col+'" — using full listener',(e&&e.code)||e);
+      fx.onSnapshot(ref,s=>mergeSnap(col,s),()=>{});
+    });
   }
+  // Tombstones first, so neither the cache read nor the first delta event can resurrect a deleted
+  // record. One small doc: 1 read now, 1 per later delete.
+  try{
+    await new Promise(res=>{
+      let first=true;
+      fx.onSnapshot(fx.doc(db,'settings','tombs'),s=>{
+        const d=s.exists()?s.data():{};
+        Object.keys(d).forEach(k=>tombs.set(k,Number(d[k])||0));
+        if(first){first=false;res();}else applyTombs();
+      },e=>{console.warn('tombstones unavailable',(e&&e.code)||e);if(first){first=false;res();}});
+      setTimeout(()=>{if(first){first=false;res();}},8000); // never block sync on it
+    });
+  }catch(e){}
   const failed=[];
   // 'salary' syncs ONLY on the admin's login — pairs with a Firestore rule that limits that
   // collection to the admin email, so staff devices never hit permission-denied. 'expenses' is
