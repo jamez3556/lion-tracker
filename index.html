@@ -2064,6 +2064,7 @@ document.getElementById('e_file').addEventListener('change',updateFileHint);
    no master NO, no FILE/staff serial. They're tracked in the Billing tab (STELCO desk / DO queue)
    purely as "billed on time with proper documents". STELCO (by C number) is billing-only ALWAYS. */
 function isBillOnly(e){return !!(e&&(e.billOnly||(e.cno||'').toUpperCase()===stelcoCno()));}
+const dupKey=v=>String(v||'').replace(/[^A-Z0-9]/gi,'').toUpperCase(); // BL / R NO compare key: punctuation & spaces ignored
 function toggleBillOnly(){
   const on=document.getElementById('e_billOnly').checked;
   const noEl=document.getElementById('e_no'),sel=document.getElementById('e_file');
@@ -2184,24 +2185,30 @@ function saveEntry(e){
     if(prevEntry[k]!==undefined)rec[k]=prevEntry[k];
   });
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
-  // invoice (AWB unchanged) is never blocked, even if a pre-existing duplicate exists elsewhere. When a
-  // new/changed AWB matches another entry, warn and let the user confirm (intentional repeats are allowed).
+  // invoice (AWB unchanged) is never blocked, even if a pre-existing duplicate exists elsewhere. A
+  // repeated AWB/BL is ALWAYS refused (STELCO desk included — a twin there got billed twice), and the
+  // match ignores spaces/dashes/slashes so "HOR-0720351" can't slip past "HOR0720351".
   const awbHint=document.getElementById('e_awbHint');awbHint.textContent='';
   if(rec.awbBl){
-    const key=rec.awbBl.replace(/\s+/g,'').toUpperCase();
-    const prevKey=((prevEntry&&prevEntry.awbBl)||'').replace(/\s+/g,'').toUpperCase();
-    if(key!==prevKey){
-      const dup=entries.find(x=>x.id!==rec.id&&(x.awbBl||'').replace(/\s+/g,'').toUpperCase()===key);
+    const key=dupKey(rec.awbBl);
+    const prevKey=dupKey(prevEntry&&prevEntry.awbBl);
+    if(key&&key!==prevKey){
+      const dup=entries.find(x=>x.id!==rec.id&&dupKey(x.awbBl)===key);
       if(dup){
-        const msg='⚠ AWB / BL "'+rec.awbBl+'" already entered — NO '+(dup.no??'—')+', R NO '+(dup.rNo||'—')+' ('+(dup.customer||'—')+', '+fmtDate(dup.date)+')'+(dup.billNo?' · already billed '+dup.billNo:'');
-        awbHint.textContent=msg;
-        if(isBillOnly(rec)){
-          // STELCO / billing-only (not in the Form Log): warn, let a human decide — same as DO snaps
-          if(!confirm(msg+'\n\nSaving makes a SECOND entry with the same AWB / BL.\n\nSave it anyway?')){e_awbBl.focus();return false;}
-        }else{
-          // documented Form Log shipment: a duplicate is always a mistake — hard block stays
-          toast(msg);e_awbBl.focus();return false;
-        }
+        const msg='⚠ AWB / BL "'+rec.awbBl+'" already entered — NO '+(dup.no??'—')+', R NO '+(dup.rNo||'—')+' ('+(dup.customer||'—')+', '+fmtDate(dup.date)+')'+(dup.billNo?' · already billed '+dup.billNo:'')+' — NOT saved';
+        awbHint.textContent=msg;toast(msg);e_awbBl.focus();return false;
+      }
+    }
+  }
+  // Duplicate R NO guard. One customs R number is one shipment for one customer — the same R NO saved
+  // again (often with the BL mistyped, e.g. CMBS26000044 / CMBS2600044) is the same job entered twice.
+  if(rec.rNo){
+    const rk=dupKey(rec.rNo), prk=dupKey(prevEntry&&prevEntry.rNo);
+    if(rk&&rk!==prk){
+      const rdup=entries.find(x=>x.id!==rec.id&&dupKey(x.rNo)===rk&&dupKey(x.cno)===dupKey(rec.cno));
+      if(rdup){
+        const msg='⚠ R NO '+rec.rNo+' already entered — '+(rdup.awbBl||'—')+' ('+(rdup.customer||'—')+', '+fmtDate(rdup.date)+')'+(rdup.billNo?' · already billed '+rdup.billNo:'')+' — NOT saved';
+        awbHint.textContent=msg;toast(msg);e_rNo.focus();return false;
       }
     }
   }
@@ -7777,8 +7784,52 @@ function renderSeasideDesk(){
       </div></td>
     </tr>`;}).join('');
 }
+/* Exact-twin cleanup for billing-only (STELCO) shipments. Two rows with the SAME customer, type, date,
+   R NO and AWB/BL are one job saved twice: keep the one carrying the most work (invoice, sizes, EEMAN
+   charge, documents), fold anything only the spare has into it, and delete the spare. A billed /
+   QuickBooks-sent row is never the one deleted. The keeper pick is deterministic so every device
+   removes the same spare. Rows that differ in anything (e.g. a mistyped BL) stay for a human. */
+function stDedupe(){
+  const score=e=>(e.billNo?1000:0)+(e.qbInvoiced?500:0)+(e.status==='Cleared'?20:0)
+    +(e.contSizes||e.seaCont?10:0)+(e.outCost&&e.outCost.amt!=null?10:0)+(e.demur!=null?5:0)
+    +((e.attachments||[]).length)+(e.containerNo?2:0)+(e.mpRemark?1:0);
+  const groups={};
+  entries.forEach(e=>{
+    if(!isBillOnly(e))return;
+    const a=dupKey(e.awbBl), r=dupKey(e.rNo);
+    if(!a&&!r)return;
+    (groups[[dupKey(e.cno),e.type||'',e.date||'',r,a].join('|')]||=[]).push(e);
+  });
+  const gone=new Set();
+  Object.values(groups).forEach(g=>{
+    if(g.length<2)return;
+    g.sort((x,y)=>score(y)-score(x)||String(x.id).localeCompare(String(y.id)));
+    const keep=g[0];
+    g.slice(1).forEach(sp=>{
+      if(sp.billNo||sp.qbInvoiced)return; // never delete an invoiced row
+      ['contSizes','seaCont','outCost','demur','containerNo','mpRemark','supplier'].forEach(k=>{
+        if((keep[k]==null||keep[k]==='')&&sp[k]!=null&&sp[k]!=='')keep[k]=sp[k];
+      });
+      if((sp.attachments||[]).length){
+        const have=new Set((keep.attachments||[]).map(a=>a.url||a.name));
+        keep.attachments=(keep.attachments||[]).concat(sp.attachments.filter(a=>!have.has(a.url||a.name)));
+      }
+      if(sp.status==='Cleared'&&!keep.billNo&&keep.status!=='Cleared')keep.status='Cleared';
+      // the keeper inherits the spare's Container Status record if it has none of its own
+      if(!containers.some(c=>c.entryId===keep.id)){const sc=containers.find(c=>c.entryId===sp.id);if(sc)sc.entryId=keep.id;}
+      gone.add(sp.id);
+    });
+  });
+  if(!gone.size)return 0;
+  entries=entries.filter(e=>!gone.has(e.id));saveEntries();
+  const pN=payments.length;payments=payments.filter(p=>!gone.has(p.entryId)&&![...gone].some(id=>p.id==='pm_'+id));
+  if(payments.length!==pN)savePayments();
+  containers=containers.filter(c=>!gone.has(c.entryId));saveContainers();
+  return gone.size;
+}
 function renderStelcoDesk(){
   const tb=document.getElementById('b_st_tbody');if(!tb)return;
+  try{const n=stDedupe();if(n){toast('🧹 Removed '+n+' duplicate shipment'+(n>1?'s':'')+' (entered twice)');try{renderEntries();renderMP();updateCounts();}catch(_){}}}catch(err){console.warn('dedupe failed',err);}
   try{renderSeasideDesk();}catch(_){}
   const every=stelcoRows();
   const all=every.filter(e=>stMode==='SEA'?e.type==='MP':e.type!=='MP');
@@ -7841,6 +7892,8 @@ function renderStelcoDesk(){
      billed. */
   const awbCnt={};
   all.forEach(x=>{const k=String(x.awbBl||'').replace(/[^A-Z0-9]/gi,'').toUpperCase();if(k)awbCnt[k]=(awbCnt[k]||0)+1;});
+  // same R NO under two different BLs = one job, one BL mistyped (CMBS26000044 / CMBS2600044)
+  const rCnt={};all.forEach(x=>{const k=dupKey(x.rNo);if(k)rCnt[k]=(rCnt[k]||0)+1;});
   tb.innerHTML=rows.map(e=>{
     const dp=dosnaps.find(d=>d.entryId===e.id);
     const pay=payments.find(x=>x.id===payId(e)||x.entryId===e.id);
@@ -7849,12 +7902,13 @@ function renderStelcoDesk(){
     const wt=Number(e.grsWt)||0;
     const below=wt&&wt<=50;
     const dupTwin=awbCnt[String(e.awbBl||'').replace(/[^A-Z0-9]/gi,'').toUpperCase()]>1;
+    const rTwin=!dupTwin&&rCnt[dupKey(e.rNo)]>1;
     return `<tr class="t-${esc(e.type)}">
       <td data-l="Date">${fmtDate(e.date)}</td>
       <td class="num" data-l="No">${isBillOnly(e)?'💳':(e.no??'—')}</td>
       <td data-l="Type">${e.type?`<span class="typechip">${esc(e.type)}</span>`:'—'}</td>
       <td data-l="R No">${esc(e.rNo)||'—'}</td>
-      <td data-l="AWB / BL">${esc(e.awbBl)||'—'}${dupTwin?`<div style="color:#dc2626;font-size:10.5px;font-weight:800" title="Another entry carries this same AWB — bill only ONE, delete the spare with ✏️ → Delete">⚠ ENTERED TWICE</div>`:''}</td>
+      <td data-l="AWB / BL">${esc(e.awbBl)||'—'}${dupTwin?`<div style="color:#dc2626;font-size:10.5px;font-weight:800" title="Another entry carries this same AWB — bill only ONE, delete the spare with ✏️ → Delete">⚠ ENTERED TWICE</div>`:''}${rTwin?`<div style="color:#dc2626;font-size:10.5px;font-weight:800" title="Another entry has this same R NO with a different BL — one BL is mistyped. Keep the right one, delete the other with ✏️ → Delete">⚠ SAME R NO — CHECK BL</div>`:''}</td>
       ${e.type==='MP'?(()=>{
         const cLbl=seaContLabel(e);
         const out=(e.outCost&&e.outCost.amt!=null)?e.outCost.amt:null;
@@ -7880,8 +7934,22 @@ function renderStelcoDesk(){
         <button class="iconbtn" onclick="openAttach('${e.id}')" title="Documents">📎${e.attachments&&e.attachments.length?e.attachments.length:''}</button>
         ${isAdmin()&&waEnabled(e)?`<button class="iconbtn" onclick="waCustomer('${e.id}')" title="WhatsApp the customer a status update"><svg viewBox="0 0 32 32" width="15" height="15" fill="#25D366"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.1.6 4.2 1.7 6L4 29l8.2-1.6c1.2.6 2.5.9 3.8.9 6.6 0 12-5.4 12-12S22.6 3 16 3zm0 21.8c-1.2 0-2.4-.3-3.5-.8l-.5-.3-4.9 1 1-4.7-.3-.5c-1-1.6-1.6-3.5-1.6-5.5 0-5.5 4.4-9.9 9.8-9.9s9.8 4.4 9.8 9.9-4.4 9.8-9.8 9.8zm5.4-7.3c-.3-.2-1.8-.9-2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.1-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6l.5-.5c.2-.2.2-.3.3-.5.1-.2 0-.4 0-.6l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4 0-.1-.2-.2-.5-.3z"/></svg></button>`:''}
         <button class="iconbtn" onclick="openEntryForm('${e.id}')" title="Edit">✏️</button>
+        ${(dupTwin||rTwin)&&!e.billNo&&!e.qbInvoiced?`<button class="iconbtn" style="color:#dc2626" onclick="stDelDup('${e.id}')" title="Delete this duplicate row">🗑</button>`:''}
       </div></td>
     </tr>`;}).join('');
+}
+// 🗑 on a row flagged ENTERED TWICE / SAME R NO — delete the spare straight from the desk
+function stDelDup(id){
+  const r=entries.find(x=>x.id===id);if(!r)return;
+  if(r.billNo||r.qbInvoiced){toast('This row is billed — delete the other one');return;}
+  if(!confirm('Delete this duplicate?\n\n'+(r.awbBl||'—')+'  ·  R NO '+(r.rNo||'—')+'  ·  '+fmtDate(r.date)))return;
+  entries=entries.filter(x=>x.id!==id);saveEntries();
+  const pN=payments.length;payments=payments.filter(p=>p.entryId!==id&&p.id!=='pm_'+id);
+  if(payments.length!==pN){savePayments();try{renderPayments();}catch(_){}}
+  const cN=containers.length;containers=containers.filter(c=>c.entryId!==id);
+  if(containers.length!==cN)saveContainers();
+  try{renderEntries();renderMP();updateCounts();}catch(_){}
+  renderStelcoDesk();toast('Duplicate deleted');
 }
 
 /* ============ CUSTOMERS ============ */
