@@ -5235,9 +5235,14 @@ function nextBillNo(){
   return max?('L'+yy+'/'+(max+1)):'';
 }
 // keep the memo in step while the auto-suggested invoice number is edited (only if the memo is still auto)
+// The memo is the invoice's "Message on invoice" in QuickBooks (CustomerMemo) - printed on the
+// customer's copy. A FENAKA row (purple on the STELCO desk) starts with this line.
+const FENAKA_MEMO='FENAKA CORPORATION LIMITED shipment  |  ';
 function invBillNoChanged(){
   const m=document.getElementById('inv_memo');
-  if(m.value===''||/^LION Ref /.test(m.value))m.value='LION Ref '+document.getElementById('inv_billNo').value.trim();
+  const pre=m.value.startsWith(FENAKA_MEMO)?FENAKA_MEMO:'';
+  const rest=m.value.slice(pre.length);
+  if(rest===''||/^LION Ref /.test(rest))m.value=pre+'LION Ref '+document.getElementById('inv_billNo').value.trim();
 }
 // QuickBooks Online Product/Service ids (Sales → Products & Services). Most charges exist twice —
 // an "(Air)" item under Air Clearance and a "(Sea)" one under Sea Clearance — so revenue lands in the
@@ -5583,7 +5588,8 @@ function openInvoiceForm(entryId){
   // QuickBooks does NOT assign a number here — this company uses custom transaction numbers, so a
   // blank one creates an invoice with no number. Blank now means "use the tracker's next number".
   bnEl.placeholder=e.billNo?'L26/…':('blank = use '+(nextBillNo()||'L…'));
-  document.getElementById('inv_memo').value=e.billNo?('LION Ref '+e.billNo):(e.rNo?('LION R '+e.rNo):'');
+  document.getElementById('inv_memo').value=(e.fenaka?FENAKA_MEMO:'')  // 19.11.26: purple FENAKA rows say so on the invoice
+    +(e.billNo?('LION Ref '+e.billNo):(e.rNo?('LION R '+e.rNo):''));
   // customer email: the customer's own INVOICE EMAIL(S) (Customers tab) wins, else the
   // MPL & Custom Logins REGISTERED EMAIL by C-No — editable per invoice
   const cred=creds.find(c=>(c.cno||'').toUpperCase()===(e.cno||'').toUpperCase());
