@@ -5237,6 +5237,15 @@ function nextBillNo(){
 // keep the memo in step while the auto-suggested invoice number is edited (only if the memo is still auto)
 // The memo is the invoice's "Message on invoice" in QuickBooks (CustomerMemo) - printed on the
 // customer's copy. A FENAKA row (purple on the STELCO desk) starts with this line.
+// 19.11.26: QuickBooks' invoice layout does NOT print the memo ("Message on invoice"), so on a
+// FENAKA row (purple on the STELCO desk) the word goes on the FIRST line's description, which prints.
+function invLinesOut(e,lines){
+  return lines.map((l,i)=>{
+    let d=l.description||'';
+    if(e&&e.fenaka&&i===0&&!/FENAKA/i.test(d))d=(d?d+' - ':'')+'FENAKA CORPORATION LIMITED';
+    return {item:l.item,itemId:l.itemId,desc:d,qty:l.qty,rate:l.rate,taxable:!!l.taxable};
+  });
+}
 const FENAKA_MEMO='FENAKA CORPORATION LIMITED shipment', MEMO_SEP='  |  ';
 function invBillNoChanged(){
   const m=document.getElementById('inv_memo');
@@ -5736,7 +5745,7 @@ async function qbInvoice(preview){
         attachments:atts.map(a=>({url:a.url,name:a.name||'document',type:a.type||''})),
         // itemId is what QuickBooks matches on — the builder's short name ("Form Filling") is two
         // different QuickBooks items depending on air or sea, and only this map knows which
-        lines:inv.lines.map(l=>({item:l.item,itemId:l.itemId,desc:l.description,qty:l.qty,rate:l.rate,taxable:!!l.taxable})),
+        lines:invLinesOut(e,inv.lines),
         // money already collected: applied to the invoice as a payment, so the customer's copy
         // shows TOTAL, what they paid, and the BALANCE still due
         advance:Number(document.getElementById('inv_advance').value)||0,
@@ -6010,7 +6019,7 @@ async function updateInvoice(){
       headers:{'Content-Type':'application/json',Authorization:'Bearer '+tok},
       body:JSON.stringify({update:true,docNumber:bn,email:em,send:!!send,
         memo:document.getElementById('inv_memo').value.trim(),
-        lines:inv.lines.map(l=>({item:l.item,itemId:l.itemId,desc:l.description,qty:l.qty,rate:l.rate,taxable:!!l.taxable}))})});
+        lines:invLinesOut(e,inv.lines)})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.ok)throw new Error(j.error||('QuickBooks refused it ('+r.status+')'));
     /* Only NOW are these the invoice's real lines. Writing them before the answer came back is
