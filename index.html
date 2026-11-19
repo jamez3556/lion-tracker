@@ -126,6 +126,11 @@
   /* Form Log rows tinted by shipment type (override the zebra) */
   tbody tr.t-MP,tbody tr.t-MP:nth-child(odd),tbody tr.t-MP:nth-child(even){background:#dcfce7}
   tbody tr.t-MP:hover{background:#cdf6db}
+  /* FENAKA (STELCO's sister company — billed to STELCO) — purple so it never blends into STELCO's own rows */
+  tbody tr.t-fenaka,tbody tr.t-fenaka:nth-child(odd),tbody tr.t-fenaka:nth-child(even){background:#ede9fe}
+  tbody tr.t-fenaka:hover{background:#e2dafd}
+  tbody tr.t-fenaka td:first-child{box-shadow:inset 4px 0 0 #7c3aed}
+  .fenchip{display:inline-block;margin-top:3px;padding:1px 8px;border-radius:999px;background:#7c3aed;color:#fff;font-size:10.5px;font-weight:800;letter-spacing:.3px}
   tbody tr.t-SG,tbody tr.t-SG:nth-child(odd),tbody tr.t-SG:nth-child(even){background:#e0f2fe}
   tbody tr.t-SG:hover{background:#d3ebfc}
   tbody tr.t-HA,tbody tr.t-HA:nth-child(odd),tbody tr.t-HA:nth-child(even){background:#fef9c3}
@@ -2181,7 +2186,7 @@ function saveEntry(e){
   // qbInvoiced/qbInvoicedAt MUST survive an edit — losing them removes the "already sent to
   // QuickBooks" warning and the next press of 🧾 silently creates a DUPLICATE invoice.
   if(prevEntry&&!rec.contSizes&&prevEntry.contSizes)rec.contSizes=prevEntry.contSizes; // sizes survive an edit that didn't touch them
-  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec','qbInvoiced','qbInvoicedAt','qbSentMs','seaCont','outCost','demur','supplier'].forEach(k=>{
+  if(prevEntry)['attachments','qbLines','qbFetchedAt','qbBalance','qbTotal','qbPayRec','qbInvoiced','qbInvoicedAt','qbSentMs','seaCont','outCost','demur','supplier','fenaka'].forEach(k=>{
     if(prevEntry[k]!==undefined)rec[k]=prevEntry[k];
   });
   // Duplicate AWB/BL guard. Only checks a NEWLY typed / changed AWB/BL — so editing an entry to add its
@@ -7291,6 +7296,15 @@ function stOut(id){ // 💸 — what EEMAN (the outsourcer) bills LION for this 
   updateCounts();
   toast('💸 EEMAN '+fmtNum(n)+' recorded to the EEMAN account — internal only, never on the customer invoice');
 }
+/* F — tag a STELCO-desk shipment as FENAKA CORPORATION LIMITED (STELCO's sister company; documents
+   come on the Viber "Stelco Sea Clearance" group). Label + purple row only: the invoice still goes to
+   STELCO on STELCO's rates, so nothing about billing changes. Any signed-in user. */
+function stFenaka(id){
+  const e=entries.find(x=>x.id===id);if(!e)return;
+  if(e.fenaka)delete e.fenaka;else e.fenaka=true;
+  saveEntries();renderStelcoDesk();
+  toast(e.fenaka?'🟣 Marked FENAKA — billed to STELCO, same rates':'Back to a normal STELCO shipment');
+}
 // staff button: Pending ↔ Cleared on the STELCO desk (any signed-in user).
 // Cleared = "clearance done, ready to bill"; billing then locks it to Delivered (existing invoice rule).
 function stelcoToggleClear(id){
@@ -7807,7 +7821,7 @@ function stDedupe(){
     const keep=g[0];
     g.slice(1).forEach(sp=>{
       if(sp.billNo||sp.qbInvoiced)return; // never delete an invoiced row
-      ['contSizes','seaCont','outCost','demur','containerNo','mpRemark','supplier'].forEach(k=>{
+      ['contSizes','seaCont','outCost','demur','containerNo','mpRemark','supplier','fenaka'].forEach(k=>{
         if((keep[k]==null||keep[k]==='')&&sp[k]!=null&&sp[k]!=='')keep[k]=sp[k];
       });
       if((sp.attachments||[]).length){
@@ -7842,7 +7856,7 @@ function renderStelcoDesk(){
   const hit=e=>{
     if(!q)return true;
     const plain=[e.awbBl,e.rNo,e.billNo,e.customer,e.cno,e.containerNo,e.file,
-                 (e.outCost&&e.outCost.inv)||'',fmtDate(e.date),e.mpRemark].join(' ').toLowerCase();
+                 (e.outCost&&e.outCost.inv)||'',fmtDate(e.date),e.mpRemark,e.fenaka?'fenaka':''].join(' ').toLowerCase();
     return plain.includes(q)||(!!qn&&plain.replace(/[^a-z0-9]/g,'').includes(qn));
   };
   const seaAll=every.filter(e=>e.type==='MP'), airAll=every.filter(e=>e.type!=='MP');
@@ -7865,13 +7879,15 @@ function renderStelcoDesk(){
   // each one is an unknown cost sitting in the margin
   const outMissing=every.filter(e=>e.type==='MP'&&e.billNo&&!(e.outCost&&e.outCost.amt!=null)).length;
   const lbl=stMode==='SEA'?'Sea':'Air';
+  const fenN=all.filter(e=>e.fenaka).length;
   const st=document.getElementById('b_st_stats');
   if(st)st.innerHTML=`
     <div class="card c-warn"><div class="n">${clearedToBill}</div><div class="l">✔ Cleared — Make Bill</div></div>
     <div class="card c-danger"><div class="n">${pendClear}</div><div class="l">⏳ Pending Clearance</div></div>
     ${stMode==='SEA'&&outMissing?`<div class="card c-danger"><div class="n">${outMissing}</div><div class="l">💸 EEMAN Bill Missing</div></div>`:''}
     <div class="card c-info"><div class="n">${moN}</div><div class="l">This Month</div></div>
-    <div class="card c-purple"><div class="n">${all.length.toLocaleString()}</div><div class="l">${lbl} STELCO Shipments</div></div>`;
+    <div class="card c-purple"><div class="n">${all.length.toLocaleString()}</div><div class="l">${lbl} STELCO Shipments</div></div>
+    ${fenN?`<div class="card c-purple" style="cursor:pointer;background:#ede9fe" onclick="const s=document.getElementById('st_search');s.value='fenaka';renderStelcoDesk()" title="Show only FENAKA shipments"><div class="n">${fenN}</div><div class="l">🟣 FENAKA (billed to STELCO)</div></div>`:''}`;
   const rows=all.filter(hit).sort((a,b)=>(b.date||'').localeCompare(a.date||'')||((b.fileNo||b.no||0)-(a.fileNo||a.no||0)))
                     .slice(0,q?200:80);
   const emptyBox=document.getElementById('b_st_empty');
@@ -7903,12 +7919,12 @@ function renderStelcoDesk(){
     const below=wt&&wt<=50;
     const dupTwin=awbCnt[String(e.awbBl||'').replace(/[^A-Z0-9]/gi,'').toUpperCase()]>1;
     const rTwin=!dupTwin&&rCnt[dupKey(e.rNo)]>1;
-    return `<tr class="t-${esc(e.type)}">
+    return `<tr class="t-${esc(e.type)}${e.fenaka?' t-fenaka':''}">
       <td data-l="Date">${fmtDate(e.date)}</td>
       <td class="num" data-l="No">${isBillOnly(e)?'💳':(e.no??'—')}</td>
       <td data-l="Type">${e.type?`<span class="typechip">${esc(e.type)}</span>`:'—'}</td>
       <td data-l="R No">${esc(e.rNo)||'—'}</td>
-      <td data-l="AWB / BL">${esc(e.awbBl)||'—'}${dupTwin?`<div style="color:#dc2626;font-size:10.5px;font-weight:800" title="Another entry carries this same AWB — bill only ONE, delete the spare with ✏️ → Delete">⚠ ENTERED TWICE</div>`:''}${rTwin?`<div style="color:#dc2626;font-size:10.5px;font-weight:800" title="Another entry has this same R NO with a different BL — one BL is mistyped. Keep the right one, delete the other with ✏️ → Delete">⚠ SAME R NO — CHECK BL</div>`:''}</td>
+      <td data-l="AWB / BL">${esc(e.awbBl)||'—'}${e.fenaka?'<div><span class="fenchip" title="FENAKA CORPORATION LIMITED shipment — billed to STELCO, same rates">FENAKA</span></div>':''}${dupTwin?`<div style="color:#dc2626;font-size:10.5px;font-weight:800" title="Another entry carries this same AWB — bill only ONE, delete the spare with ✏️ → Delete">⚠ ENTERED TWICE</div>`:''}${rTwin?`<div style="color:#dc2626;font-size:10.5px;font-weight:800" title="Another entry has this same R NO with a different BL — one BL is mistyped. Keep the right one, delete the other with ✏️ → Delete">⚠ SAME R NO — CHECK BL</div>`:''}</td>
       ${e.type==='MP'?(()=>{
         const cLbl=seaContLabel(e);
         const out=(e.outCost&&e.outCost.amt!=null)?e.outCost.amt:null;
@@ -7932,6 +7948,7 @@ function renderStelcoDesk(){
           ?`<button class="iconbtn" onclick="openInvoiceForm('${e.id}')" title="Open the invoice">✅</button>`
           :`<button class="iconbtn" style="background:#FF4F00;color:#fff;border-radius:6px;padding:3px 10px;font-weight:700" onclick="stelcoBill('${e.id}')" title="Create the QuickBooks invoice">🧾 Bill</button>`):''}
         <button class="iconbtn" onclick="openAttach('${e.id}')" title="Documents">📎${e.attachments&&e.attachments.length?e.attachments.length:''}</button>
+        <button class="iconbtn" style="${e.fenaka?'background:#7c3aed;color:#fff;border-radius:6px;font-weight:800':'color:#7c3aed;font-weight:800'}" onclick="stFenaka('${e.id}')" title="${e.fenaka?'FENAKA shipment — click to make it a normal STELCO shipment':'Mark as a FENAKA shipment (highlights the row purple)'}">F</button>
         ${isAdmin()&&waEnabled(e)?`<button class="iconbtn" onclick="waCustomer('${e.id}')" title="WhatsApp the customer a status update"><svg viewBox="0 0 32 32" width="15" height="15" fill="#25D366"><path d="M16 3C9.4 3 4 8.4 4 15c0 2.1.6 4.2 1.7 6L4 29l8.2-1.6c1.2.6 2.5.9 3.8.9 6.6 0 12-5.4 12-12S22.6 3 16 3zm0 21.8c-1.2 0-2.4-.3-3.5-.8l-.5-.3-4.9 1 1-4.7-.3-.5c-1-1.6-1.6-3.5-1.6-5.5 0-5.5 4.4-9.9 9.8-9.9s9.8 4.4 9.8 9.9-4.4 9.8-9.8 9.8zm5.4-7.3c-.3-.2-1.8-.9-2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-.9 1.1-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.7-2.1-.2-.3 0-.5.1-.6l.5-.5c.2-.2.2-.3.3-.5.1-.2 0-.4 0-.6l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4 0-.1-.2-.2-.5-.3z"/></svg></button>`:''}
         <button class="iconbtn" onclick="openEntryForm('${e.id}')" title="Edit">✏️</button>
         ${(dupTwin||rTwin)&&!e.billNo&&!e.qbInvoiced?`<button class="iconbtn" style="color:#dc2626" onclick="stDelDup('${e.id}')" title="Delete this duplicate row">🗑</button>`:''}
