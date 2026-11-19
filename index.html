@@ -9018,14 +9018,17 @@ syncPayments(true); // ensure every entry has a payment row (backfills existing 
   if(c&&!c.qbName){c.qbName='State Electric Company Limited';saveCustomers();}
   localStorage.setItem('lion_profile_seed_v5','1');
 })();
-(()=>{ // seed v6 — add Ahmed.LujainAli (the QB customer-record email) to STELCO's invoice To list
-  if(localStorage.getItem('lion_profile_seed_v6'))return;
+(()=>{ // seed v6 retired 19.11.26 — it ADDED Ahmed.LujainAli to STELCO's invoice To list; Jaamiz:
+  // "remove lujain from this". v11 takes him off (once per device) and never puts him back.
+  if(localStorage.getItem('lion_profile_seed_v11'))return;
   const c=customers.find(x=>(x.name||'').toUpperCase().includes('STATE ELECTRIC'));
-  if(c&&!/LujainAli/i.test(c.billEmail||'')){
-    c.billEmail='clearance@stelco.com.mv,Azhadh.Rameez@stelco.com.mv,mohamed.afshah@stelco.com.mv,Ahmed.LujainAli@stelco.com.mv';
-    saveCustomers();toast('STELCO invoice emails updated (4 addresses)');
+  if(!c)return;               // customer list not loaded yet - try again next load
+  if(/LujainAli/i.test(c.billEmail||'')){
+    c.billEmail=(c.billEmail||'').split(',').map(s=>s.trim()).filter(s=>s&&!/LujainAli/i.test(s)).join(',');
+    saveCustomers();toast('STELCO invoice emails updated (Lujain removed)');
   }
   localStorage.setItem('lion_profile_seed_v6','1');
+  localStorage.setItem('lion_profile_seed_v11','1');
 })();
 // Backfill missing C numbers on saved logins (many sheet-imported logins had none): exact,
 // unambiguous name match against the Customers list. Runs each load; already-filled rows untouched.
